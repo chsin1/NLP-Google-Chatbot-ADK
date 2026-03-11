@@ -369,6 +369,72 @@ button {
   cursor: pointer;
 }
 
+.quick-actions button.payment-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 8px 14px;
+}
+
+.card-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  height: 24px;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.card-logo.visa {
+  background: #1a1f71;
+}
+
+.card-logo.mastercard {
+  background: #eb001b;
+}
+
+.card-logo.amex {
+  background: #2e77bb;
+}
+
+.card-logo.existing {
+  background: #5f6c7a;
+}
+
+.address-typeahead {
+  margin: -4px 12px 8px;
+  border: 1px solid #cfd7e2;
+  border-radius: 12px;
+  background: #fff;
+  max-height: 170px;
+  overflow-y: auto;
+}
+
+.address-typeahead button {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #eef2f7;
+  background: #fff;
+  text-align: left;
+  padding: 9px 12px;
+  cursor: pointer;
+  color: #1f2f46;
+}
+
+.address-typeahead button:last-child {
+  border-bottom: 0;
+}
+
+.address-typeahead button:hover {
+  background: #f3f7ff;
+}
+
 .quick-input {
   display: flex;
   gap: 8px;

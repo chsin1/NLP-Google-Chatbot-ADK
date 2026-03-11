@@ -1,3 +1,5 @@
+import { formatPhone, getExpectedLast4, inferAuthContact, maskEmail } from "./shared/client-utils.mjs";
+
 const FLOW_STEPS = {
   INIT_CONNECTING: "INIT_CONNECTING",
   AREA_CODE_ENTRY: "AREA_CODE_ENTRY",
@@ -27,6 +29,8 @@ const mockUsers = [
   {
     id: "u1001",
     name: "Alex Carter",
+    email: "alex.test@gmail.com",
+    phone: "4165511192",
     locale: "en-CA",
     authenticated: false,
     age: 34,
@@ -40,6 +44,8 @@ const mockUsers = [
   {
     id: "u1002",
     name: "Maya Singh",
+    email: "maya.singh@gmail.com",
+    phone: "6474432288",
     locale: "en-CA",
     authenticated: false,
     age: 21,
@@ -53,6 +59,8 @@ const mockUsers = [
   {
     id: "u1003",
     name: "Daniel Roy",
+    email: "daniel.roy@gmail.com",
+    phone: "9867783321",
     locale: "fr-CA",
     authenticated: false,
     age: 24,
@@ -155,6 +163,7 @@ const chatWindow = document.getElementById("chat-window");
 const quickActions = document.getElementById("quick-actions");
 const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
+const addressTypeahead = document.getElementById("address-typeahead");
 const availabilityCard = document.getElementById("availability-card");
 const newCustomerBtn = document.getElementById("new-customer-btn");
 const existingCustomerBtn = document.getElementById("existing-customer-btn");
@@ -181,6 +190,7 @@ const state = {
   historyStack: [],
   offerPageIndex: 0,
   timers: [],
+  addressTypeaheadTimer: null,
   pendingAuthMode: null,
   context: {
     areaCode: null,
@@ -207,6 +217,12 @@ const state = {
       email: null,
       phone: null,
       leadId: null
+    },
+    authMeta: {
+      mode: null,
+      phone: null,
+      email: null,
+      secureRef: null
     }
   }
 };
@@ -219,9 +235,40 @@ function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function generateSecureRef() {
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 20);
+}
+
+async function createIdentityHash(value) {
+  try {
+    if (!window.crypto?.subtle) return "nohash";
+    const encoded = new TextEncoder().encode(value);
+    const digest = await window.crypto.subtle.digest("SHA-256", encoded);
+    return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 12);
+  } catch {
+    return "nohash";
+  }
+}
+
+function clearAddressTypeahead() {
+  if (!addressTypeahead) return;
+  addressTypeahead.innerHTML = "";
+  addressTypeahead.classList.add("hidden");
+}
+
+function resetAddressTypeaheadTimer() {
+  if (state.addressTypeaheadTimer) {
+    clearTimeout(state.addressTypeaheadTimer);
+    state.addressTypeaheadTimer = null;
+  }
+}
+
 function clearTimers() {
   state.timers.forEach((timerId) => clearTimeout(timerId));
   state.timers = [];
+  resetAddressTypeaheadTimer();
 }
 
 function postMessage(role, text, { force = false } = {}) {
@@ -285,15 +332,33 @@ function showLoginSections() {
 }
 
 function setStatus() {
-  if (!state.context.authUser) {
+  if (!state.context.authUser && state.context.customerType !== "new") {
     sessionStatus.textContent = "Session: not authenticated";
     showLoginSections();
     return;
   }
-  sessionStatus.textContent =
-    `Session: authenticated as ${state.context.authUser.name} (${state.context.authUser.id})` +
-    (state.context.areaCode ? ` | area code ${state.context.areaCode}` : "");
-  hideLoginSections();
+  if (state.context.authUser) {
+    const phone = formatPhone(state.context.authMeta.phone || state.context.authUser.phone);
+    const ref = state.context.authMeta.secureRef || "pending";
+    sessionStatus.textContent =
+      `Session: Authenticated as ${state.context.authUser.name} - Phone: ${phone} | Secure Ref: ${ref}` +
+      (state.context.areaCode ? ` | Area Code: ${state.context.areaCode}` : "");
+    hideLoginSections();
+    return;
+  }
+
+  const onboarding = state.context.newOnboarding;
+  if (onboarding.fullName || onboarding.email || onboarding.phone) {
+    const ref = state.context.authMeta.secureRef || "pending";
+    sessionStatus.textContent =
+      `Session: New Client - Name: ${onboarding.fullName || "pending"} | Email: ${onboarding.email || "pending"} | Phone: ${formatPhone(onboarding.phone)} | Secure Ref: ${ref}` +
+      (state.context.areaCode ? ` | Area Code: ${state.context.areaCode}` : "");
+    hideLoginSections();
+    return;
+  }
+
+  sessionStatus.textContent = "Session: not authenticated";
+  showLoginSections();
 }
 
 function resetCheckoutPanel() {
@@ -334,6 +399,12 @@ function resetSessionState() {
       email: null,
       phone: null,
       leadId: null
+    },
+    authMeta: {
+      mode: null,
+      phone: null,
+      email: null,
+      secureRef: null
     }
   };
   mockUsers.forEach((u) => {
@@ -342,6 +413,7 @@ function resetSessionState() {
   authIdentifierInput.value = "";
   chatWindow.innerHTML = "";
   clearQuickActions();
+  clearAddressTypeahead();
   resetChatInputHint();
   hideAvailabilityCard();
   renderBasket();
@@ -390,6 +462,7 @@ function getPatchedContext(patch = {}) {
   if (patch.payment) next.payment = { ...next.payment, ...patch.payment };
   if (patch.shipping) next.shipping = { ...next.shipping, ...patch.shipping };
   if (patch.newOnboarding) next.newOnboarding = { ...next.newOnboarding, ...patch.newOnboarding };
+  if (patch.authMeta) next.authMeta = { ...next.authMeta, ...patch.authMeta };
 
   return next;
 }
@@ -538,11 +611,53 @@ function resolveUserFromIdentifier(raw) {
   return mockUsers.find((u) => u.id === userId) || null;
 }
 
-function getExpectedLast4(method, user) {
-  if (method === "visa") return "2781";
-  if (method === "mastercard") return "7891";
-  if (method === "existing") return user?.savedCardLast4 || "2781";
-  return "0000";
+async function finalizeExistingAuthentication(user, mode, rawIdentifier = "") {
+  const contact = inferAuthContact(user, rawIdentifier);
+  user.authenticated = true;
+
+  const hash = await createIdentityHash(`${user.id}|${contact.phone || ""}|${contact.email || ""}|${Date.now()}`);
+  const secureRef = `${generateSecureRef()}-${hash}`;
+  applyContextPatch({
+    authUser: user,
+    authMeta: {
+      mode,
+      phone: contact.phone,
+      email: contact.email,
+      secureRef
+    }
+  });
+
+  const contactLabel = contact.phone ? `Phone: ${formatPhone(contact.phone)}` : `Email: ${maskEmail(contact.email)}`;
+  postMessage(
+    "bot",
+    `Authentication successful. ${user.name} verified. ${contactLabel}. Secure session reference ${secureRef}.`
+  );
+  transitionTo(FLOW_STEPS.INTENT_DISCOVERY, {}, { pushHistory: true });
+  logClient("info", "auth_success", { mode, userId: user.id, secureRef });
+}
+
+function renderPaymentChoices(user, onPick) {
+  clearQuickActions();
+  const choices = [
+    { label: "Visa", value: "visa", logoClass: "visa", logoText: "Visa" },
+    { label: "MasterCard", value: "mastercard", logoClass: "mastercard", logoText: "MC" },
+    { label: "Amex", value: "amex", logoClass: "amex", logoText: "Amex" },
+    {
+      label: user?.savedCardLast4 ? `Use Existing Payment (•••• ${user.savedCardLast4})` : "Use Existing Payment",
+      value: "existing",
+      logoClass: "existing",
+      logoText: "Saved"
+    }
+  ];
+
+  choices.forEach((choice) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "payment-choice";
+    button.innerHTML = `<span class="card-logo ${choice.logoClass}">${choice.logoText}</span><span>${choice.label}</span>`;
+    button.addEventListener("click", () => onPick(choice.value, choice.label));
+    quickActions.appendChild(button);
+  });
 }
 
 function choosePaymentMethod(method) {
@@ -573,6 +688,14 @@ function choosePaymentMethod(method) {
 
   logClient("info", "payment_method_selected", { method, expectedLast4 });
   transitionTo(FLOW_STEPS.PAYMENT_CONFIRM_LAST4, {}, { pushHistory: true });
+}
+
+function describePaymentMethod(method, user) {
+  if (method === "existing") {
+    const savedType = (user?.savedCardType || "card").toUpperCase();
+    return `saved ${savedType}`;
+  }
+  return method.toUpperCase();
 }
 
 function runEligibilityCheck() {
@@ -614,6 +737,51 @@ async function lookupAddresses(query) {
   return response.json();
 }
 
+function renderAddressTypeaheadSuggestions(suggestions = []) {
+  if (!addressTypeahead) return;
+  addressTypeahead.innerHTML = "";
+  if (suggestions.length === 0) {
+    addressTypeahead.classList.add("hidden");
+    return;
+  }
+
+  suggestions.slice(0, 5).forEach((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    const label = `${item.line1}, ${item.city}, ${item.province} ${item.postalCode}`;
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      chatInput.value = label;
+      clearAddressTypeahead();
+      chatInput.focus();
+    });
+    addressTypeahead.appendChild(button);
+  });
+  addressTypeahead.classList.remove("hidden");
+}
+
+function queueAddressTypeahead(query) {
+  if (state.flowStep !== FLOW_STEPS.SHIPPING_MANUAL_ENTRY) {
+    clearAddressTypeahead();
+    return;
+  }
+
+  resetAddressTypeaheadTimer();
+  if (!query || query.length < 3) {
+    clearAddressTypeahead();
+    return;
+  }
+
+  state.addressTypeaheadTimer = setTimeout(async () => {
+    try {
+      const payload = await lookupAddresses(query);
+      renderAddressTypeaheadSuggestions(payload.suggestions || []);
+    } catch {
+      clearAddressTypeahead();
+    }
+  }, 220);
+}
+
 function confirmOrder() {
   const total = state.context.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
   const orderId = `ORD-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -642,6 +810,7 @@ function renderStep(step) {
   renderCarouselPage();
   setStatus();
   resetChatInputHint();
+  if (step !== FLOW_STEPS.SHIPPING_MANUAL_ENTRY) clearAddressTypeahead();
 
   switch (step) {
     case FLOW_STEPS.INIT_CONNECTING: {
@@ -676,9 +845,7 @@ function renderStep(step) {
         if (choice === "Continue automatically") {
           const user = mockUsers.find((u) => u.id === "u1001");
           if (!user) return;
-          user.authenticated = true;
-          transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { authUser: user }, { pushHistory: true });
-          logClient("info", "auth_success", { mode: "auto", userId: user.id });
+          finalizeExistingAuthentication(user, "auto", user.phone);
           return;
         }
         transitionTo(FLOW_STEPS.EXISTING_AUTH_IDENTIFIER, {}, { pushHistory: true });
@@ -708,9 +875,6 @@ function renderStep(step) {
 
     case FLOW_STEPS.INTENT_DISCOVERY:
       hideAvailabilityCard();
-      if (state.context.authUser) {
-        postMessage("bot", `Authentication successful for ${state.context.authUser.name}.`);
-      }
       postMessage("bot", "What do you need today: mobility, home internet, landline, or bundle?");
       showChoiceButtons(["Mobility", "Home internet", "Landline", "Bundle"], async (choice) => {
         postMessage("user", choice);
@@ -742,26 +906,23 @@ function renderStep(step) {
 
     case FLOW_STEPS.PAYMENT_METHOD:
       tokenizeBtn.disabled = false;
-      postMessage("bot", "Select payment method: Visa, MasterCard, or Existing Payment.");
-      showChoiceButtons(["Visa", "MasterCard", "Use Existing Payment"], (choice) => {
-        postMessage("user", choice);
-        if (choice === "Visa") {
-          choosePaymentMethod("visa");
-          return;
-        }
-        if (choice === "MasterCard") {
-          choosePaymentMethod("mastercard");
-          return;
-        }
-        choosePaymentMethod("existing");
+      postMessage("bot", "Select payment method: Visa, MasterCard, Amex, or Existing Payment.");
+      renderPaymentChoices(state.context.authUser, (method, label) => {
+        postMessage("user", label);
+        choosePaymentMethod(method);
       });
       break;
 
     case FLOW_STEPS.PAYMENT_CONFIRM_LAST4:
-      postMessage(
-        "bot",
-        `Please confirm you are using your ${state.context.payment.method} ending in ${state.context.payment.expectedLast4}.`
-      );
+      if (state.context.payment.method === "existing") {
+        const savedType = describePaymentMethod("existing", state.context.authUser);
+        postMessage("bot", `Do you want to use your ${savedType} ending in ${state.context.payment.expectedLast4}?`);
+      } else {
+        postMessage(
+          "bot",
+          `Please confirm you are using your ${describePaymentMethod(state.context.payment.method, state.context.authUser)} ending in ${state.context.payment.expectedLast4}.`
+        );
+      }
       showChoiceButtons(["Yes, confirm", "No, choose another method"], (choice) => {
         postMessage("user", choice);
         if (choice === "Yes, confirm") {
@@ -775,8 +936,8 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.PAYMENT_CVV:
-      postMessage("bot", "Enter your 3-digit CVV to finalize payment authorization.");
-      setChatInputHint("3-digit CVV");
+      postMessage("bot", "Enter your 3-digit CVC to finalize payment authorization.");
+      setChatInputHint("3-digit CVC");
       break;
 
     case FLOW_STEPS.SHIPPING_SELECTION:
@@ -808,6 +969,7 @@ function renderStep(step) {
     case FLOW_STEPS.SHIPPING_MANUAL_ENTRY:
       postMessage("bot", "Enter the full shipping address.");
       setChatInputHint("Full shipping address");
+      clearAddressTypeahead();
       break;
 
     case FLOW_STEPS.ORDER_REVIEW: {
@@ -932,9 +1094,7 @@ async function handleChatInput(message) {
         logClient("error", "auth_failure", { identifier: trimmed, viaChatInput: true });
         return;
       }
-      user.authenticated = true;
-      transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { authUser: user }, { pushHistory: true });
-      logClient("info", "auth_success", { mode: "manual", userId: user.id, viaChatInput: true });
+      finalizeExistingAuthentication(user, "manual", trimmed);
       return;
     }
 
@@ -942,9 +1102,7 @@ async function handleChatInput(message) {
       if (lower.includes("continue automatically") || lower === "auto" || lower === "yes") {
         const user = mockUsers.find((u) => u.id === "u1001");
         if (!user) return;
-        user.authenticated = true;
-        transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { authUser: user }, { pushHistory: true });
-        logClient("info", "auth_success", { mode: "auto", userId: user.id, viaChatInput: true });
+        finalizeExistingAuthentication(user, "auto", user.phone);
         return;
       }
       if (lower.includes("phone") || lower.includes("email") || lower.includes("authenticate")) {
@@ -985,6 +1143,23 @@ async function handleChatInput(message) {
         { pushHistory: true }
       );
       postMessage("bot", `New client profile created (ID: ${leadId}). Continuing to plan discovery.`);
+      const hash = await createIdentityHash(
+        `${state.context.newOnboarding.fullName || ""}|${state.context.newOnboarding.email || ""}|${trimmed}|${Date.now()}`
+      );
+      const secureRef = `${generateSecureRef()}-${hash}`;
+      applyContextPatch({
+        authMeta: {
+          mode: "new-client",
+          phone: trimmed,
+          email: state.context.newOnboarding.email,
+          secureRef
+        }
+      });
+      setStatus();
+      postMessage(
+        "bot",
+        `Profile captured. Name: ${state.context.newOnboarding.fullName}, Email: ${state.context.newOnboarding.email}, Phone: ${formatPhone(trimmed)}. Secure reference ${secureRef}.`
+      );
       logClient("info", "new_customer_created", {
         leadId,
         fullName: state.context.newOnboarding.fullName,
@@ -1045,7 +1220,7 @@ async function handleChatInput(message) {
 
     case FLOW_STEPS.PAYMENT_CVV:
       if (!/^\d{3}$/.test(trimmed)) {
-        postMessage("bot", "Invalid CVV. Please provide exactly 3 digits.");
+        postMessage("bot", "Invalid CVC. Please provide exactly 3 digits.");
         logClient("error", "cvv_invalid", { cvvLength: trimmed.length, viaChatInput: true });
         return;
       }
@@ -1057,6 +1232,7 @@ async function handleChatInput(message) {
         }
       });
       logClient("info", "cvv_validated", { method: state.context.payment.method, viaChatInput: true });
+      postMessage("bot", `CVC validated for card ending in ${state.context.payment.expectedLast4}.`);
       transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true });
       return;
 
@@ -1069,11 +1245,15 @@ async function handleChatInput(message) {
         choosePaymentMethod("mastercard");
         return;
       }
+      if (lower.includes("amex") || lower.includes("american express")) {
+        choosePaymentMethod("amex");
+        return;
+      }
       if (lower.includes("existing") || lower.includes("saved")) {
         choosePaymentMethod("existing");
         return;
       }
-      postMessage("bot", "Please select Visa, MasterCard, or Use Existing Payment.");
+      postMessage("bot", "Please select Visa, MasterCard, Amex, or Use Existing Payment.");
       return;
 
     case FLOW_STEPS.PAYMENT_CONFIRM_LAST4:
@@ -1285,18 +1465,14 @@ existingCustomerBtn.addEventListener("click", () => {
   if (state.pendingAuthMode === "auto") {
     const user = mockUsers.find((u) => u.id === "u1001");
     if (user) {
-      user.authenticated = true;
-      transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { authUser: user }, { pushHistory: true });
-      logClient("info", "auth_success", { mode: "auto", userId: user.id });
+      finalizeExistingAuthentication(user, "auto", user.phone);
     }
   }
 
   if (state.pendingAuthMode === "manual" && authIdentifierInput.value.trim()) {
     const user = resolveUserFromIdentifier(authIdentifierInput.value.trim());
     if (user) {
-      user.authenticated = true;
-      transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { authUser: user }, { pushHistory: true });
-      logClient("info", "auth_success", { mode: "manual", userId: user.id, viaLanding: true });
+      finalizeExistingAuthentication(user, "manual", authIdentifierInput.value.trim());
     }
   }
 });
@@ -1372,7 +1548,17 @@ chatForm.addEventListener("submit", async (event) => {
   chatInput.value = "";
   const userMessage = state.flowStep === FLOW_STEPS.PAYMENT_CVV ? "***" : message;
   postMessage("user", userMessage);
+  clearAddressTypeahead();
   await handleChatInput(message);
+});
+
+chatInput.addEventListener("input", () => {
+  queueAddressTypeahead(chatInput.value.trim());
+});
+
+chatInput.addEventListener("blur", () => {
+  const t = setTimeout(() => clearAddressTypeahead(), 150);
+  state.timers.push(t);
 });
 
 window.addEventListener("error", (event) => {

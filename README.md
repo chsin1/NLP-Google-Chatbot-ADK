@@ -27,6 +27,12 @@ Open:
 
 - <http://localhost:3000>
 
+Run unit tests:
+
+```bash
+node --test tests/*.test.mjs
+```
+
 ## Optional LLM hookup
 
 By default, intent classification uses a local fallback classifier.
