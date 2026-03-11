@@ -459,6 +459,29 @@ button {
   overflow-x: auto;
 }
 
+.carousel-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.carousel-controls button {
+  border-radius: 999px;
+  border: 1px solid #9eb7d6;
+  background: #f4f8ff;
+  color: #0f4b8d;
+  padding: 6px 14px;
+  font-weight: 600;
+}
+
+#carousel-page-label {
+  font-size: 0.88rem;
+  color: #304961;
+  font-weight: 600;
+}
+
 .product-card {
   min-width: 208px;
   border: 1px solid var(--line);

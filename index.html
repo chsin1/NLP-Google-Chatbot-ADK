@@ -136,6 +136,11 @@
         <section class="assistant-panels">
           <div class="panel-card">
             <h3>Product Carousel</h3>
+            <div class="carousel-controls">
+              <button id="carousel-prev-btn" type="button">Prev</button>
+              <span id="carousel-page-label">Page 1 of 3</span>
+              <button id="carousel-next-btn" type="button">Next</button>
+            </div>
             <div id="carousel" class="carousel"></div>
           </div>
 
@@ -148,8 +153,8 @@
 
           <div class="panel-card">
             <h3>Checkout & Order</h3>
-          <div class="small" id="checkout-status">Status: waiting for eligibility approval.</div>
-          <div id="order-summary" class="order-summary">No order created yet.</div>
+            <div class="small" id="checkout-status">Status: waiting for eligibility approval.</div>
+            <div id="order-summary" class="order-summary">No order created yet.</div>
             <button id="tokenize-btn" disabled>Choose Payment Method</button>
             <button id="place-order-btn" disabled>Place Order & Confirm</button>
           </div>
