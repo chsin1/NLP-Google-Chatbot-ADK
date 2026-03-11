@@ -35,3 +35,49 @@ export function getExpectedLast4(method, user) {
   if (method === "existing") return user?.savedCardLast4 || "2781";
   return "0000";
 }
+
+export function canAccessOfferBrowse(context = {}) {
+  if (context.authUser) return true;
+  return context.customerType === "new" && Boolean(context.newOnboarding?.leadId);
+}
+
+export function getEligibilityProfile(context = {}) {
+  if (context.authUser) return context.authUser;
+
+  if (context.customerType === "new" && context.newOnboarding?.leadId) {
+    return {
+      id: context.newOnboarding.leadId,
+      name: context.newOnboarding.fullName || "New Client",
+      age: 25,
+      accountType: "Primary",
+      creditScore: 680,
+      existingPaymentToken: null,
+      savedCardLast4: null,
+      savedCardType: null,
+      prefilledAddress: null
+    };
+  }
+
+  return null;
+}
+
+export function getFinancingEligibleItems(basket = []) {
+  return basket.filter((item) => item.financingEligible && typeof item.devicePrice === "number" && item.devicePrice > 0);
+}
+
+export function getFinancingAmount(basket = []) {
+  return getFinancingEligibleItems(basket).reduce((sum, item) => sum + item.devicePrice, 0);
+}
+
+export function calculateFinancingMonthly(amount, termMonths) {
+  if (!amount || !termMonths) return 0;
+  return Number((amount / termMonths).toFixed(2));
+}
+
+export function calculateCombinedMonthly(serviceMonthly, financingMonthly) {
+  return Number((Number(serviceMonthly || 0) + Number(financingMonthly || 0)).toFixed(2));
+}
+
+export function runMockFinancingApproval(randomFn = Math.random, threshold = 0.75) {
+  return randomFn() < threshold;
+}

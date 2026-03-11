@@ -1,4 +1,16 @@
-import { formatPhone, getExpectedLast4, inferAuthContact, maskEmail } from "./shared/client-utils.mjs";
+import {
+  calculateCombinedMonthly,
+  calculateFinancingMonthly,
+  canAccessOfferBrowse,
+  formatPhone,
+  getFinancingAmount,
+  getFinancingEligibleItems,
+  getEligibilityProfile,
+  getExpectedLast4,
+  inferAuthContact,
+  maskEmail,
+  runMockFinancingApproval
+} from "./shared/client-utils.mjs";
 
 const FLOW_STEPS = {
   INIT_CONNECTING: "INIT_CONNECTING",
@@ -14,6 +26,9 @@ const FLOW_STEPS = {
   BASKET_REVIEW: "BASKET_REVIEW",
   ELIGIBILITY_CHECK: "ELIGIBILITY_CHECK",
   PAYMENT_METHOD: "PAYMENT_METHOD",
+  PAYMENT_FINANCING_TERM: "PAYMENT_FINANCING_TERM",
+  PAYMENT_FINANCING_APPROVAL: "PAYMENT_FINANCING_APPROVAL",
+  PAYMENT_FINANCING_CONFIRM: "PAYMENT_FINANCING_CONFIRM",
   PAYMENT_CONFIRM_LAST4: "PAYMENT_CONFIRM_LAST4",
   PAYMENT_CVV: "PAYMENT_CVV",
   SHIPPING_SELECTION: "SHIPPING_SELECTION",
@@ -80,6 +95,8 @@ const offers = [
     name: "Bell 5G+ Essential 100",
     description: "100 GB high-speed data, nationwide 5G+ access.",
     monthlyPrice: 75,
+    financingEligible: true,
+    devicePrice: 899,
     minCreditScore: 620,
     minAge: 18,
     requiresPrimaryHolder: false
@@ -90,6 +107,8 @@ const offers = [
     name: "Bell Ultimate 175 + Device Financing",
     description: "Premium data + flagship phone financing option.",
     monthlyPrice: 110,
+    financingEligible: true,
+    devicePrice: 1499,
     minCreditScore: 700,
     minAge: 18,
     requiresPrimaryHolder: true
@@ -100,6 +119,8 @@ const offers = [
     name: "Fibe 1.5 Gigabit",
     description: "Up to 1.5 Gbps speeds for heavy home usage.",
     monthlyPrice: 95,
+    financingEligible: false,
+    devicePrice: null,
     minCreditScore: 600,
     minAge: 18,
     requiresPrimaryHolder: false
@@ -110,6 +131,8 @@ const offers = [
     name: "Fibe 500 Starter",
     description: "Balanced speed and value for streaming homes.",
     monthlyPrice: 70,
+    financingEligible: false,
+    devicePrice: null,
     minCreditScore: 560,
     minAge: 18,
     requiresPrimaryHolder: false
@@ -120,6 +143,8 @@ const offers = [
     name: "Home Phone Lite",
     description: "Canada-wide calls with voicemail included.",
     monthlyPrice: 38,
+    financingEligible: false,
+    devicePrice: null,
     minCreditScore: 500,
     minAge: 18,
     requiresPrimaryHolder: false
@@ -130,6 +155,8 @@ const offers = [
     name: "Home Phone Plus International",
     description: "International call minutes and call display.",
     monthlyPrice: 52,
+    financingEligible: false,
+    devicePrice: null,
     minCreditScore: 560,
     minAge: 18,
     requiresPrimaryHolder: true
@@ -205,6 +232,15 @@ const state = {
       cvvValidated: false,
       verified: false,
       token: null
+    },
+    financing: {
+      selected: false,
+      termMonths: null,
+      approvalStatus: null,
+      approvedAmount: 0,
+      monthlyPayment: 0,
+      decisionId: null,
+      eligibleDeviceItems: []
     },
     shipping: {
       mode: null,
@@ -388,6 +424,15 @@ function resetSessionState() {
       verified: false,
       token: null
     },
+    financing: {
+      selected: false,
+      termMonths: null,
+      approvalStatus: null,
+      approvedAmount: 0,
+      monthlyPayment: 0,
+      decisionId: null,
+      eligibleDeviceItems: []
+    },
     shipping: {
       mode: null,
       address: null,
@@ -429,9 +474,15 @@ function isStepValid(nextStep, ctx) {
     case FLOW_STEPS.EXISTING_AUTH_MODE:
       return ctx.customerType === "existing";
     case FLOW_STEPS.OFFER_BROWSE:
-      return Boolean(ctx.authUser);
+      return canAccessOfferBrowse(ctx);
     case FLOW_STEPS.PAYMENT_METHOD:
       return ctx.basket.length > 0;
+    case FLOW_STEPS.PAYMENT_FINANCING_TERM:
+      return getFinancingAmount(ctx.basket) > 0;
+    case FLOW_STEPS.PAYMENT_FINANCING_APPROVAL:
+      return getFinancingAmount(ctx.basket) > 0 && (ctx.financing.termMonths === 24 || ctx.financing.termMonths === 36);
+    case FLOW_STEPS.PAYMENT_FINANCING_CONFIRM:
+      return ctx.financing.approvalStatus === "approved";
     case FLOW_STEPS.PAYMENT_CONFIRM_LAST4:
       return Boolean(ctx.payment.method);
     case FLOW_STEPS.PAYMENT_CVV:
@@ -460,6 +511,7 @@ function getPatchedContext(patch = {}) {
   if (patch.intent !== undefined) next.intent = patch.intent;
   if (patch.basket !== undefined) next.basket = patch.basket;
   if (patch.payment) next.payment = { ...next.payment, ...patch.payment };
+  if (patch.financing) next.financing = { ...next.financing, ...patch.financing };
   if (patch.shipping) next.shipping = { ...next.shipping, ...patch.shipping };
   if (patch.newOnboarding) next.newOnboarding = { ...next.newOnboarding, ...patch.newOnboarding };
   if (patch.authMeta) next.authMeta = { ...next.authMeta, ...patch.authMeta };
@@ -572,7 +624,7 @@ function renderBasket() {
 
   const total = state.context.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
   basketTotal.textContent = `Total: ${currency(total)}/month`;
-  validateBtn.disabled = !state.context.authUser || state.context.basket.length === 0;
+  validateBtn.disabled = !canAccessOfferBrowse(state.context) || state.context.basket.length === 0;
 }
 
 function detectIntentFallback(text = "") {
@@ -642,13 +694,17 @@ function renderPaymentChoices(user, onPick) {
     { label: "Visa", value: "visa", logoClass: "visa", logoText: "Visa" },
     { label: "MasterCard", value: "mastercard", logoClass: "mastercard", logoText: "MC" },
     { label: "Amex", value: "amex", logoClass: "amex", logoText: "Amex" },
-    {
-      label: user?.savedCardLast4 ? `Use Existing Payment (•••• ${user.savedCardLast4})` : "Use Existing Payment",
+    { label: "Bell Smart Financing", value: "smart_financing", logoClass: "existing", logoText: "Bell" }
+  ];
+
+  if (user?.savedCardLast4) {
+    choices.push({
+      label: `Use Existing Payment (•••• ${user.savedCardLast4})`,
       value: "existing",
       logoClass: "existing",
       logoText: "Saved"
-    }
-  ];
+    });
+  }
 
   choices.forEach((choice) => {
     const button = document.createElement("button");
@@ -661,9 +717,42 @@ function renderPaymentChoices(user, onPick) {
 }
 
 function choosePaymentMethod(method) {
-  const user = state.context.authUser;
+  const user = getEligibilityProfile(state.context);
   if (!user) {
-    postMessage("bot", "Please authenticate first.");
+    postMessage("bot", "Please complete authentication or onboarding first.");
+    return;
+  }
+
+  if (method === "smart_financing") {
+    const eligibleItems = getFinancingEligibleItems(state.context.basket);
+    const approvedAmount = getFinancingAmount(state.context.basket);
+    if (approvedAmount <= 0) {
+      postMessage("bot", "Smart Financing is available for eligible mobility devices only.");
+      logClient("info", "financing_fallback_to_card", { reason: "no_eligible_devices" });
+      return;
+    }
+
+    applyContextPatch({
+      payment: {
+        method: null,
+        expectedLast4: null,
+        last4Confirmed: false,
+        cvvValidated: false,
+        verified: false,
+        token: null
+      },
+      financing: {
+        selected: true,
+        termMonths: null,
+        approvalStatus: null,
+        approvedAmount,
+        monthlyPayment: 0,
+        decisionId: null,
+        eligibleDeviceItems: eligibleItems.map((item) => item.id)
+      }
+    });
+    logClient("info", "financing_selected", { approvedAmount, itemCount: eligibleItems.length });
+    transitionTo(FLOW_STEPS.PAYMENT_FINANCING_TERM, {}, { pushHistory: true });
     return;
   }
 
@@ -683,6 +772,15 @@ function choosePaymentMethod(method) {
       cvvValidated: false,
       verified: false,
       token: null
+    },
+    financing: {
+      selected: false,
+      termMonths: null,
+      approvalStatus: null,
+      approvedAmount: 0,
+      monthlyPayment: 0,
+      decisionId: null,
+      eligibleDeviceItems: []
     }
   });
 
@@ -698,10 +796,21 @@ function describePaymentMethod(method, user) {
   return method.toUpperCase();
 }
 
+function generateFinancingDecisionId() {
+  return `FIN-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+}
+
+function getCheckoutTotals() {
+  const serviceMonthly = state.context.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
+  const financingMonthly = state.context.financing.selected ? state.context.financing.monthlyPayment : 0;
+  const combinedMonthly = calculateCombinedMonthly(serviceMonthly, financingMonthly);
+  return { serviceMonthly, financingMonthly, combinedMonthly };
+}
+
 function runEligibilityCheck() {
-  const user = state.context.authUser;
+  const user = getEligibilityProfile(state.context);
   if (!user) {
-    postMessage("bot", "Please authenticate first.");
+    postMessage("bot", "Please complete authentication or onboarding first.");
     logClient("error", "eligibility_without_auth");
     return;
   }
@@ -783,19 +892,23 @@ function queueAddressTypeahead(query) {
 }
 
 function confirmOrder() {
-  const total = state.context.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
+  const { serviceMonthly, financingMonthly, combinedMonthly } = getCheckoutTotals();
   const orderId = `ORD-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   const confirmationCode = `CNF-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-
+  const financingSummary = state.context.financing.selected
+    ? ` Financing: ${currency(state.context.financing.approvedAmount)} over ${state.context.financing.termMonths} months (${currency(financingMonthly)}/month), reference ${state.context.financing.decisionId}.`
+    : "";
   orderSummary.textContent =
-    `Order ${orderId} confirmed (${confirmationCode}). Monthly total ${currency(total)}. Shipping to ${state.context.shipping.address}.`;
+    `Order ${orderId} confirmed (${confirmationCode}). Service ${currency(serviceMonthly)}/month.${financingSummary} Combined monthly due ${currency(combinedMonthly)}. Shipping to ${state.context.shipping.address}.`;
   checkoutStatus.textContent = "Status: order captured and confirmed.";
   postMessage("bot", `Order confirmed. Order ID ${orderId}, confirmation ${confirmationCode}.`);
 
   logClient("info", "order_submission_success", {
     orderId,
     confirmationCode,
-    total,
+    serviceMonthly,
+    financingMonthly,
+    combinedMonthly,
     shippingMode: state.context.shipping.mode
   });
 
@@ -906,21 +1019,110 @@ function renderStep(step) {
 
     case FLOW_STEPS.PAYMENT_METHOD:
       tokenizeBtn.disabled = false;
-      postMessage("bot", "Select payment method: Visa, MasterCard, Amex, or Existing Payment.");
-      renderPaymentChoices(state.context.authUser, (method, label) => {
+      const paymentProfile = getEligibilityProfile(state.context);
+      const supportsExisting = Boolean(paymentProfile?.savedCardLast4);
+      postMessage(
+        "bot",
+        supportsExisting
+          ? "Select payment method: Visa, MasterCard, Amex, Existing Payment, or Bell Smart Financing."
+          : "Select payment method: Visa, MasterCard, Amex, or Bell Smart Financing."
+      );
+      renderPaymentChoices(paymentProfile, (method, label) => {
         postMessage("user", label);
         choosePaymentMethod(method);
       });
       break;
 
+    case FLOW_STEPS.PAYMENT_FINANCING_TERM:
+      postMessage(
+        "bot",
+        `Bell Smart Financing selected. Device amount eligible for financing: ${currency(state.context.financing.approvedAmount)}. Choose a term.`
+      );
+      showChoiceButtons(["24 months", "36 months"], (choice) => {
+        postMessage("user", choice);
+        const termMonths = choice.startsWith("24") ? 24 : 36;
+        applyContextPatch({ financing: { termMonths, approvalStatus: "pending" } });
+        logClient("info", "financing_term_selected", { termMonths });
+        transitionTo(FLOW_STEPS.PAYMENT_FINANCING_APPROVAL, {}, { pushHistory: true });
+      });
+      break;
+
+    case FLOW_STEPS.PAYMENT_FINANCING_APPROVAL: {
+      const termMonths = state.context.financing.termMonths;
+      const approvedAmount = state.context.financing.approvedAmount || getFinancingAmount(state.context.basket);
+      const decisionId = generateFinancingDecisionId();
+      logClient("info", "financing_approval_requested", { termMonths, approvedAmount, decisionId });
+      const approved = runMockFinancingApproval();
+      if (!approved) {
+        applyContextPatch({
+          financing: {
+            approvalStatus: "declined",
+            decisionId
+          }
+        });
+        postMessage("bot", "Bell Smart Financing was not approved this time. Please choose Visa, MasterCard, Amex, or existing payment.");
+        logClient("info", "financing_declined", { decisionId, termMonths, approvedAmount });
+        logClient("info", "financing_fallback_to_card", { reason: "declined", decisionId });
+        transitionTo(FLOW_STEPS.PAYMENT_METHOD, {}, { pushHistory: true });
+        return;
+      }
+
+      const monthlyPayment = calculateFinancingMonthly(approvedAmount, termMonths);
+      applyContextPatch({
+        financing: {
+          approvalStatus: "approved",
+          decisionId,
+          monthlyPayment
+        }
+      });
+      logClient("info", "financing_approved", { decisionId, termMonths, approvedAmount, monthlyPayment });
+      transitionTo(FLOW_STEPS.PAYMENT_FINANCING_CONFIRM, {}, { pushHistory: false });
+      break;
+    }
+
+    case FLOW_STEPS.PAYMENT_FINANCING_CONFIRM:
+      postMessage(
+        "bot",
+        `Financing approved. Device amount ${currency(state.context.financing.approvedAmount)} over ${state.context.financing.termMonths} months at ${currency(state.context.financing.monthlyPayment)}/month. Decision reference ${state.context.financing.decisionId}.`
+      );
+      showChoiceButtons(["Confirm financing", "Choose another payment method"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "Confirm financing") {
+          applyContextPatch({
+            payment: {
+              method: "smart_financing",
+              expectedLast4: null,
+              last4Confirmed: true,
+              cvvValidated: true,
+              verified: true,
+              token: `fin_${Date.now()}`
+            },
+            financing: {
+              selected: true
+            }
+          });
+          logClient("info", "financing_confirmed", {
+            decisionId: state.context.financing.decisionId,
+            termMonths: state.context.financing.termMonths,
+            approvedAmount: state.context.financing.approvedAmount,
+            monthlyPayment: state.context.financing.monthlyPayment
+          });
+          transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true });
+          return;
+        }
+        logClient("info", "financing_fallback_to_card", { reason: "user_changed_method" });
+        transitionTo(FLOW_STEPS.PAYMENT_METHOD, {}, { pushHistory: true });
+      });
+      break;
+
     case FLOW_STEPS.PAYMENT_CONFIRM_LAST4:
       if (state.context.payment.method === "existing") {
-        const savedType = describePaymentMethod("existing", state.context.authUser);
+        const savedType = describePaymentMethod("existing", getEligibilityProfile(state.context));
         postMessage("bot", `Do you want to use your ${savedType} ending in ${state.context.payment.expectedLast4}?`);
       } else {
         postMessage(
           "bot",
-          `Please confirm you are using your ${describePaymentMethod(state.context.payment.method, state.context.authUser)} ending in ${state.context.payment.expectedLast4}.`
+          `Please confirm you are using your ${describePaymentMethod(state.context.payment.method, getEligibilityProfile(state.context))} ending in ${state.context.payment.expectedLast4}.`
         );
       }
       showChoiceButtons(["Yes, confirm", "No, choose another method"], (choice) => {
@@ -945,7 +1147,7 @@ function renderStep(step) {
       showChoiceButtons(["Use prefilled address", "Enter new address", "Lookup address"], (choice) => {
         postMessage("user", choice);
         if (choice === "Use prefilled address") {
-          const address = state.context.authUser?.prefilledAddress || "100 Default St, Toronto, ON";
+          const address = getEligibilityProfile(state.context)?.prefilledAddress || "100 Default St, Toronto, ON";
           applyContextPatch({ shipping: { mode: "prefilled", address } });
           logClient("info", "shipping_prefilled_selected", { address });
           transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
@@ -973,16 +1175,24 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.ORDER_REVIEW: {
-      const total = state.context.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
+      const { serviceMonthly, financingMonthly, combinedMonthly } = getCheckoutTotals();
+      const financingDetail = state.context.financing.selected
+        ? ` Financing ${currency(state.context.financing.approvedAmount)} over ${state.context.financing.termMonths} months (${currency(financingMonthly)}/month), ref ${state.context.financing.decisionId}.`
+        : "";
       postMessage(
         "bot",
-        `Order review: ${state.context.basket.length} item(s), ${currency(total)}/month, shipping to ${state.context.shipping.address}.`
+        `Order review: ${state.context.basket.length} item(s), service ${currency(serviceMonthly)}/month.${financingDetail} Combined monthly due ${currency(combinedMonthly)}. Shipping to ${state.context.shipping.address}.`
       );
       checkoutStatus.textContent = "Status: ready to place order.";
-      orderSummary.textContent =
-        `Payment ${state.context.payment.method} ending ${state.context.payment.expectedLast4}. Shipping: ${state.context.shipping.address}.`;
+      const paymentLine = state.context.payment.method === "smart_financing"
+        ? `Payment: Bell Smart Financing approved (${state.context.financing.termMonths} months).`
+        : `Payment ${state.context.payment.method} ending ${state.context.payment.expectedLast4}.`;
+      const financingLine = state.context.financing.selected
+        ? ` Device amount financed: ${currency(state.context.financing.approvedAmount)}. Term: ${state.context.financing.termMonths}. Financing monthly: ${currency(financingMonthly)}. Decision reference: ${state.context.financing.decisionId}.`
+        : "";
+      orderSummary.textContent = `${paymentLine}${financingLine} Service monthly: ${currency(serviceMonthly)}. Combined monthly due: ${currency(combinedMonthly)}. Shipping: ${state.context.shipping.address}.`;
       placeOrderBtn.disabled = false;
-      logClient("info", "order_submission_attempt", { basketItems: state.context.basket.length, total });
+      logClient("info", "order_submission_attempt", { basketItems: state.context.basket.length, serviceMonthly, financingMonthly, combinedMonthly });
       break;
     }
 
@@ -1003,6 +1213,10 @@ function handleGlobalCommands(message) {
   const cmd = normalizeCommand(message);
 
   if (cmd.includes("go back") || cmd === "back" || cmd.includes("previous step")) {
+    if (state.flowStep === FLOW_STEPS.PAYMENT_FINANCING_CONFIRM) {
+      transitionTo(FLOW_STEPS.PAYMENT_FINANCING_TERM, {}, { pushHistory: false });
+      return true;
+    }
     goBack();
     return true;
   }
@@ -1237,6 +1451,14 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.PAYMENT_METHOD:
+      if (lower.includes("smart financing") || lower.includes("bell smart financing") || lower.includes("financing")) {
+        choosePaymentMethod("smart_financing");
+        return;
+      }
+      if ((lower.includes("existing") || lower.includes("saved")) && !getEligibilityProfile(state.context)?.savedCardLast4) {
+        postMessage("bot", "No saved payment method is available for this profile. Please choose Visa, MasterCard, or Amex.");
+        return;
+      }
       if (lower.includes("visa")) {
         choosePaymentMethod("visa");
         return;
@@ -1253,7 +1475,53 @@ async function handleChatInput(message) {
         choosePaymentMethod("existing");
         return;
       }
-      postMessage("bot", "Please select Visa, MasterCard, Amex, or Use Existing Payment.");
+      postMessage("bot", "Please select Visa, MasterCard, Amex, Existing Payment, or Bell Smart Financing.");
+      return;
+
+    case FLOW_STEPS.PAYMENT_FINANCING_TERM:
+      if (lower.includes("24")) {
+        applyContextPatch({ financing: { termMonths: 24, approvalStatus: "pending" } });
+        logClient("info", "financing_term_selected", { termMonths: 24, viaChatInput: true });
+        transitionTo(FLOW_STEPS.PAYMENT_FINANCING_APPROVAL, {}, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("36")) {
+        applyContextPatch({ financing: { termMonths: 36, approvalStatus: "pending" } });
+        logClient("info", "financing_term_selected", { termMonths: 36, viaChatInput: true });
+        transitionTo(FLOW_STEPS.PAYMENT_FINANCING_APPROVAL, {}, { pushHistory: true });
+        return;
+      }
+      postMessage("bot", "Please select a financing term: 24 months or 36 months.");
+      return;
+
+    case FLOW_STEPS.PAYMENT_FINANCING_CONFIRM:
+      if (lower.includes("confirm")) {
+        applyContextPatch({
+          payment: {
+            method: "smart_financing",
+            expectedLast4: null,
+            last4Confirmed: true,
+            cvvValidated: true,
+            verified: true,
+            token: `fin_${Date.now()}`
+          },
+          financing: {
+            selected: true
+          }
+        });
+        logClient("info", "financing_confirmed", {
+          decisionId: state.context.financing.decisionId,
+          viaChatInput: true
+        });
+        transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("another") || lower.includes("card") || lower.includes("payment")) {
+        logClient("info", "financing_fallback_to_card", { reason: "user_changed_method", viaChatInput: true });
+        transitionTo(FLOW_STEPS.PAYMENT_METHOD, {}, { pushHistory: true });
+        return;
+      }
+      postMessage("bot", "Please reply with 'confirm financing' or 'choose another payment method'.");
       return;
 
     case FLOW_STEPS.PAYMENT_CONFIRM_LAST4:
@@ -1272,7 +1540,7 @@ async function handleChatInput(message) {
 
     case FLOW_STEPS.SHIPPING_SELECTION:
       if (lower.includes("prefilled")) {
-        const address = state.context.authUser?.prefilledAddress || "100 Default St, Toronto, ON";
+        const address = getEligibilityProfile(state.context)?.prefilledAddress || "100 Default St, Toronto, ON";
         applyContextPatch({ shipping: { mode: "prefilled", address } });
         logClient("info", "shipping_prefilled_selected", { address, viaChatInput: true });
         transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
