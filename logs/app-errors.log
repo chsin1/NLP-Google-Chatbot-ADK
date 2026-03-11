@@ -1,0 +1,10 @@
+{"ts":"2026-03-11T03:49:59.935Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}
+{"ts":"2026-03-11T03:50:13.121Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}
+{"ts":"2026-03-11T03:50:16.104Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"EXISTING_AUTH_MODE","context":{"areaCode":null,"customerType":null}}}
+{"ts":"2026-03-11T03:50:22.827Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}
+{"ts":"2026-03-11T03:50:32.942Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}
+{"ts":"2026-03-11T03:50:38.492Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}
+{"ts":"2026-03-11T03:50:44.737Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"EXISTING_AUTH_MODE","context":{"areaCode":null,"customerType":null}}}
+{"ts":"2026-03-11T03:50:50.139Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}
+{"ts":"2026-03-11T03:50:53.380Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}
+{"ts":"2026-03-11T03:50:59.963Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}

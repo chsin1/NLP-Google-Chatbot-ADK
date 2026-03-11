@@ -15,6 +15,7 @@ const FLOW_STEPS = {
   PAYMENT_CONFIRM_LAST4: "PAYMENT_CONFIRM_LAST4",
   PAYMENT_CVV: "PAYMENT_CVV",
   SHIPPING_SELECTION: "SHIPPING_SELECTION",
+  SHIPPING_MANUAL_ENTRY: "SHIPPING_MANUAL_ENTRY",
   SHIPPING_LOOKUP: "SHIPPING_LOOKUP",
   ORDER_REVIEW: "ORDER_REVIEW",
   ORDER_CONFIRMED: "ORDER_CONFIRMED"
@@ -248,6 +249,14 @@ function clearQuickActions() {
   quickActions.innerHTML = "";
 }
 
+function resetChatInputHint() {
+  chatInput.placeholder = "Type your message here...";
+}
+
+function setChatInputHint(placeholder) {
+  chatInput.placeholder = placeholder || "Type your message here...";
+}
+
 function showChoiceButtons(labels, onPick) {
   clearQuickActions();
   labels.forEach((label) => {
@@ -257,35 +266,6 @@ function showChoiceButtons(labels, onPick) {
     button.addEventListener("click", () => onPick(label));
     quickActions.appendChild(button);
   });
-}
-
-function showInputPrompt({ placeholder, buttonLabel, initialValue = "", onSubmit }) {
-  clearQuickActions();
-  const wrap = document.createElement("div");
-  wrap.className = "quick-input";
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.placeholder = placeholder;
-  input.value = initialValue;
-
-  const submit = document.createElement("button");
-  submit.type = "button";
-  submit.textContent = buttonLabel;
-
-  const handleSubmit = () => onSubmit(input.value.trim());
-  submit.addEventListener("click", handleSubmit);
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      handleSubmit();
-    }
-  });
-
-  wrap.appendChild(input);
-  wrap.appendChild(submit);
-  quickActions.appendChild(wrap);
-  input.focus();
 }
 
 function showAvailabilityCard() {
@@ -362,6 +342,7 @@ function resetSessionState() {
   authIdentifierInput.value = "";
   chatWindow.innerHTML = "";
   clearQuickActions();
+  resetChatInputHint();
   hideAvailabilityCard();
   renderBasket();
   renderCarouselPage();
@@ -369,8 +350,7 @@ function resetSessionState() {
   setStatus();
 }
 
-function isStepValid(nextStep) {
-  const ctx = state.context;
+function isStepValid(nextStep, ctx) {
   switch (nextStep) {
     case FLOW_STEPS.AVAILABILITY_SELECTION:
       return Boolean(ctx.areaCode);
@@ -388,16 +368,18 @@ function isStepValid(nextStep) {
       return ctx.payment.verified;
     case FLOW_STEPS.SHIPPING_LOOKUP:
       return ctx.payment.verified;
+    case FLOW_STEPS.SHIPPING_MANUAL_ENTRY:
+      return ctx.payment.verified;
     case FLOW_STEPS.ORDER_REVIEW:
       return Boolean(ctx.shipping.address);
     case FLOW_STEPS.ORDER_CONFIRMED:
-      return Boolean(ctx.shipping.address) && ctx.basket.length > 0;
+      return true;
     default:
       return true;
   }
 }
 
-function applyContextPatch(patch = {}) {
+function getPatchedContext(patch = {}) {
   const next = deepClone(state.context);
 
   if (patch.areaCode !== undefined) next.areaCode = patch.areaCode;
@@ -409,36 +391,23 @@ function applyContextPatch(patch = {}) {
   if (patch.shipping) next.shipping = { ...next.shipping, ...patch.shipping };
   if (patch.newOnboarding) next.newOnboarding = { ...next.newOnboarding, ...patch.newOnboarding };
 
-  state.context = next;
+  return next;
+}
+
+function applyContextPatch(patch = {}) {
+  state.context = getPatchedContext(patch);
 }
 
 function transitionTo(nextStep, patchContext = {}, { pushHistory = true } = {}) {
-  if (!isStepValid(nextStep)) {
+  const nextContext = getPatchedContext(patchContext);
+  if (!isStepValid(nextStep, nextContext)) {
     logClient("error", "invalid_flow_transition", {
       from: state.flowStep,
       to: nextStep,
       context: { areaCode: state.context.areaCode, customerType: state.context.customerType }
     });
-    postMessage(
-      "bot",
-      "I need a quick clarification before moving forward. Do you want to continue this step, go back, re-login, or start fresh?"
-    );
-    logClient("info", "flow_clarify_prompt", { from: state.flowStep, attempted: nextStep });
-    showChoiceButtons(["Continue", "Go back", "Re-login", "Start fresh"], (choice) => {
-      if (choice === "Continue") {
-        renderStep(state.flowStep);
-        return;
-      }
-      if (choice === "Go back") {
-        goBack();
-        return;
-      }
-      if (choice === "Re-login") {
-        transitionTo(FLOW_STEPS.EXISTING_AUTH_MODE, {}, { pushHistory: false });
-        return;
-      }
-      refreshChat();
-    });
+    postMessage("bot", "Cannot continue yet. Please complete the current step first.");
+    renderStep(state.flowStep);
     return;
   }
 
@@ -451,7 +420,7 @@ function transitionTo(nextStep, patchContext = {}, { pushHistory = true } = {}) 
     });
   }
 
-  applyContextPatch(patchContext);
+  state.context = nextContext;
   const prev = state.flowStep;
   state.flowStep = nextStep;
   logClient("info", "flow_transition", { from: prev, to: nextStep, patchContext });
@@ -672,6 +641,7 @@ function renderStep(step) {
   renderBasket();
   renderCarouselPage();
   setStatus();
+  resetChatInputHint();
 
   switch (step) {
     case FLOW_STEPS.INIT_CONNECTING: {
@@ -690,19 +660,7 @@ function renderStep(step) {
     case FLOW_STEPS.AREA_CODE_ENTRY:
       hideAvailabilityCard();
       postMessage("bot", "Enter your 3-digit area code to unlock offers.");
-      showInputPrompt({
-        placeholder: "Area code (e.g., 416)",
-        buttonLabel: "Unlock",
-        onSubmit: (value) => {
-          if (!/^\d{3}$/.test(value)) {
-            postMessage("bot", "Please enter a valid 3-digit area code.");
-            logClient("error", "invalid_area_code", { value });
-            return;
-          }
-          postMessage("user", value);
-          transitionTo(FLOW_STEPS.AVAILABILITY_SELECTION, { areaCode: value }, { pushHistory: true });
-        }
-      });
+      setChatInputHint("Area code (e.g., 416)");
       break;
 
     case FLOW_STEPS.AVAILABILITY_SELECTION:
@@ -729,92 +687,23 @@ function renderStep(step) {
 
     case FLOW_STEPS.EXISTING_AUTH_IDENTIFIER:
       postMessage("bot", "Enter your phone or email to authenticate.");
-      showInputPrompt({
-        placeholder: "416-555-1111 or alex.test@gmail.com",
-        buttonLabel: "Authenticate",
-        initialValue: authIdentifierInput.value,
-        onSubmit: (identifier) => {
-          authIdentifierInput.value = identifier;
-          postMessage("user", identifier);
-          logClient("info", "auth_attempt", { identifier });
-          const user = resolveUserFromIdentifier(identifier);
-          if (!user) {
-            postMessage("bot", "Authentication failed. Use phone starting 416/647/986 or alex.test@gmail.com.");
-            logClient("error", "auth_failure", { identifier });
-            return;
-          }
-          user.authenticated = true;
-          transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { authUser: user }, { pushHistory: true });
-          logClient("info", "auth_success", { mode: "manual", userId: user.id });
-        }
-      });
+      setChatInputHint("416-555-1111 or alex.test@gmail.com");
       break;
 
     case FLOW_STEPS.NEW_ONBOARD_NAME:
       hideAvailabilityCard();
       postMessage("bot", "Welcome. Let us create your new client profile. Enter your full name.");
-      showInputPrompt({
-        placeholder: "Full name",
-        buttonLabel: "Next",
-        initialValue: state.context.newOnboarding.fullName || "",
-        onSubmit: (fullName) => {
-          if (!fullName) {
-            postMessage("bot", "Full name is required.");
-            return;
-          }
-          postMessage("user", fullName);
-          transitionTo(FLOW_STEPS.NEW_ONBOARD_EMAIL, { newOnboarding: { fullName } }, { pushHistory: true });
-        }
-      });
+      setChatInputHint("Full name");
       break;
 
     case FLOW_STEPS.NEW_ONBOARD_EMAIL:
       postMessage("bot", "Enter your email address.");
-      showInputPrompt({
-        placeholder: "Email",
-        buttonLabel: "Next",
-        initialValue: state.context.newOnboarding.email || "",
-        onSubmit: (email) => {
-          if (!email.includes("@")) {
-            postMessage("bot", "Please enter a valid email address.");
-            return;
-          }
-          postMessage("user", email);
-          transitionTo(FLOW_STEPS.NEW_ONBOARD_PHONE, { newOnboarding: { email } }, { pushHistory: true });
-        }
-      });
+      setChatInputHint("Email");
       break;
 
     case FLOW_STEPS.NEW_ONBOARD_PHONE:
       postMessage("bot", "Enter your phone number.");
-      showInputPrompt({
-        placeholder: "Phone number",
-        buttonLabel: "Create client",
-        initialValue: state.context.newOnboarding.phone || "",
-        onSubmit: (phone) => {
-          if (phone.replace(/\D/g, "").length < 10) {
-            postMessage("bot", "Please enter a valid phone number.");
-            return;
-          }
-          postMessage("user", phone);
-          const leadId = `lead_${Date.now()}`;
-          transitionTo(
-            FLOW_STEPS.INTENT_DISCOVERY,
-            {
-              newOnboarding: { phone, leadId },
-              customerType: "new"
-            },
-            { pushHistory: true }
-          );
-          postMessage("bot", `New client created (ID: ${leadId}). Let us continue with plan discovery.`);
-          logClient("info", "new_customer_created", {
-            leadId,
-            fullName: state.context.newOnboarding.fullName,
-            email: state.context.newOnboarding.email,
-            phone
-          });
-        }
-      });
+      setChatInputHint("Phone number");
       break;
 
     case FLOW_STEPS.INTENT_DISCOVERY:
@@ -887,27 +776,7 @@ function renderStep(step) {
 
     case FLOW_STEPS.PAYMENT_CVV:
       postMessage("bot", "Enter your 3-digit CVV to finalize payment authorization.");
-      showInputPrompt({
-        placeholder: "3-digit CVV",
-        buttonLabel: "Verify",
-        onSubmit: (cvv) => {
-          if (!/^\d{3}$/.test(cvv)) {
-            postMessage("bot", "Invalid CVV. Please provide exactly 3 digits.");
-            logClient("error", "cvv_invalid", { cvvLength: cvv.length });
-            return;
-          }
-          postMessage("user", "***");
-          applyContextPatch({
-            payment: {
-              cvvValidated: true,
-              verified: true,
-              token: state.context.authUser?.existingPaymentToken || `tok_${Date.now()}`
-            }
-          });
-          logClient("info", "cvv_validated", { method: state.context.payment.method });
-          transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true });
-        }
-      });
+      setChatInputHint("3-digit CVV");
       break;
 
     case FLOW_STEPS.SHIPPING_SELECTION:
@@ -923,20 +792,7 @@ function renderStep(step) {
         }
 
         if (choice === "Enter new address") {
-          showInputPrompt({
-            placeholder: "Full shipping address",
-            buttonLabel: "Save address",
-            onSubmit: (address) => {
-              if (address.length < 10) {
-                postMessage("bot", "Please provide a complete address.");
-                return;
-              }
-              postMessage("user", address);
-              applyContextPatch({ shipping: { mode: "manual", address } });
-              logClient("info", "shipping_manual_entered", { address });
-              transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
-            }
-          });
+          transitionTo(FLOW_STEPS.SHIPPING_MANUAL_ENTRY, {}, { pushHistory: true });
           return;
         }
 
@@ -946,69 +802,12 @@ function renderStep(step) {
 
     case FLOW_STEPS.SHIPPING_LOOKUP:
       postMessage("bot", "Enter an address keyword to lookup shipping addresses.");
-      showInputPrompt({
-        placeholder: "e.g., Front St",
-        buttonLabel: "Lookup",
-        onSubmit: async (query) => {
-          if (!query) {
-            postMessage("bot", "Please enter a lookup query.");
-            return;
-          }
+      setChatInputHint("e.g., Front St");
+      break;
 
-          postMessage("user", query);
-          logClient("info", "shipping_lookup_requested", { query, areaCode: state.context.areaCode });
-
-          try {
-            const payload = await lookupAddresses(query);
-            const suggestions = payload.suggestions || [];
-            applyContextPatch({ shipping: { lookupQuery: query, suggestions } });
-
-            if (suggestions.length === 0) {
-              postMessage("bot", "No suggestions found. Enter a manual address instead.");
-              showInputPrompt({
-                placeholder: "Full shipping address",
-                buttonLabel: "Save address",
-                onSubmit: (address) => {
-                  if (address.length < 10) {
-                    postMessage("bot", "Please provide a complete address.");
-                    return;
-                  }
-                  postMessage("user", address);
-                  applyContextPatch({ shipping: { mode: "manual_fallback", address } });
-                  logClient("info", "shipping_manual_entered", { address, fallback: true });
-                  transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
-                }
-              });
-              return;
-            }
-
-            postMessage("bot", "Select one suggested address or choose manual entry.");
-            const suggestionLabels = suggestions.map((s) => `${s.line1}, ${s.city}`);
-            showChoiceButtons([...suggestionLabels, "Enter address manually"], (choice) => {
-              postMessage("user", choice);
-              if (choice === "Enter address manually") {
-                transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true });
-                return;
-              }
-
-              const selected = suggestions.find((s) => `${s.line1}, ${s.city}` === choice);
-              if (!selected) {
-                postMessage("bot", "Please select a valid address suggestion.");
-                return;
-              }
-
-              const address = `${selected.line1}, ${selected.city}, ${selected.province} ${selected.postalCode}`;
-              applyContextPatch({ shipping: { mode: "lookup", address } });
-              logClient("info", "shipping_lookup_selected", { address, id: selected.id });
-              transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
-            });
-          } catch {
-            postMessage("bot", "Lookup is unavailable. Please enter address manually.");
-            logClient("error", "shipping_lookup_failed", { query });
-            transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true });
-          }
-        }
-      });
+    case FLOW_STEPS.SHIPPING_MANUAL_ENTRY:
+      postMessage("bot", "Enter the full shipping address.");
+      setChatInputHint("Full shipping address");
       break;
 
     case FLOW_STEPS.ORDER_REVIEW: {
@@ -1081,23 +880,56 @@ async function handleChatInput(message) {
   if (handleGlobalCommands(message)) {
     return;
   }
+  const trimmed = message.trim();
+  const lower = trimmed.toLowerCase();
 
   switch (state.flowStep) {
-    case FLOW_STEPS.AREA_CODE_ENTRY:
-      if (!/^\d{3}$/.test(message.trim())) {
-        postMessage("bot", "Please enter a valid 3-digit area code.");
+    case FLOW_STEPS.INIT_CONNECTING:
+      postMessage("bot", "We are still connecting you. Please hold for a moment.");
+      return;
+
+    case FLOW_STEPS.AVAILABILITY_SELECTION:
+      if (lower.includes("existing")) {
+        hideAvailabilityCard();
+        transitionTo(
+          FLOW_STEPS.EXISTING_AUTH_MODE,
+          {
+            customerType: "existing"
+          },
+          { pushHistory: true }
+        );
         return;
       }
-      transitionTo(FLOW_STEPS.AVAILABILITY_SELECTION, { areaCode: message.trim() }, { pushHistory: true });
+      if (lower.includes("new")) {
+        hideAvailabilityCard();
+        transitionTo(
+          FLOW_STEPS.NEW_ONBOARD_NAME,
+          {
+            customerType: "new"
+          },
+          { pushHistory: true }
+        );
+        return;
+      }
+      postMessage("bot", "Please choose 'I'm new to Bell' or 'I'm an existing Bell customer'.");
+      return;
+
+    case FLOW_STEPS.AREA_CODE_ENTRY:
+      if (!/^\d{3}$/.test(trimmed)) {
+        postMessage("bot", "Please enter a valid 3-digit area code.");
+        logClient("error", "invalid_area_code", { value: trimmed, viaChatInput: true });
+        return;
+      }
+      transitionTo(FLOW_STEPS.AVAILABILITY_SELECTION, { areaCode: trimmed }, { pushHistory: true });
       return;
 
     case FLOW_STEPS.EXISTING_AUTH_IDENTIFIER: {
-      authIdentifierInput.value = message.trim();
-      logClient("info", "auth_attempt", { identifier: message.trim(), viaChatInput: true });
-      const user = resolveUserFromIdentifier(message.trim());
+      authIdentifierInput.value = trimmed;
+      logClient("info", "auth_attempt", { identifier: trimmed, viaChatInput: true });
+      const user = resolveUserFromIdentifier(trimmed);
       if (!user) {
         postMessage("bot", "Authentication failed. Use phone starting 416/647/986 or alex.test@gmail.com.");
-        logClient("error", "auth_failure", { identifier: message.trim(), viaChatInput: true });
+        logClient("error", "auth_failure", { identifier: trimmed, viaChatInput: true });
         return;
       }
       user.authenticated = true;
@@ -1106,40 +938,63 @@ async function handleChatInput(message) {
       return;
     }
 
+    case FLOW_STEPS.EXISTING_AUTH_MODE:
+      if (lower.includes("continue automatically") || lower === "auto" || lower === "yes") {
+        const user = mockUsers.find((u) => u.id === "u1001");
+        if (!user) return;
+        user.authenticated = true;
+        transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { authUser: user }, { pushHistory: true });
+        logClient("info", "auth_success", { mode: "auto", userId: user.id, viaChatInput: true });
+        return;
+      }
+      if (lower.includes("phone") || lower.includes("email") || lower.includes("authenticate")) {
+        transitionTo(FLOW_STEPS.EXISTING_AUTH_IDENTIFIER, {}, { pushHistory: true });
+        return;
+      }
+      postMessage("bot", "Choose 'Continue automatically' or 'Authenticate with phone/email'.");
+      return;
+
     case FLOW_STEPS.NEW_ONBOARD_NAME:
-      if (!message.trim()) {
+      if (!trimmed) {
         postMessage("bot", "Full name is required.");
         return;
       }
-      transitionTo(FLOW_STEPS.NEW_ONBOARD_EMAIL, { newOnboarding: { fullName: message.trim() } }, { pushHistory: true });
+      transitionTo(FLOW_STEPS.NEW_ONBOARD_EMAIL, { newOnboarding: { fullName: trimmed } }, { pushHistory: true });
       return;
 
     case FLOW_STEPS.NEW_ONBOARD_EMAIL:
-      if (!message.includes("@")) {
+      if (!trimmed.includes("@")) {
         postMessage("bot", "Please enter a valid email address.");
         return;
       }
-      transitionTo(FLOW_STEPS.NEW_ONBOARD_PHONE, { newOnboarding: { email: message.trim() } }, { pushHistory: true });
+      transitionTo(FLOW_STEPS.NEW_ONBOARD_PHONE, { newOnboarding: { email: trimmed } }, { pushHistory: true });
       return;
 
     case FLOW_STEPS.NEW_ONBOARD_PHONE:
-      if (message.replace(/\D/g, "").length < 10) {
+      if (trimmed.replace(/\D/g, "").length < 10) {
         postMessage("bot", "Please enter a valid phone number.");
         return;
       }
+      const leadId = `lead_${Date.now()}`;
       transitionTo(
         FLOW_STEPS.INTENT_DISCOVERY,
         {
-          newOnboarding: { phone: message.trim(), leadId: `lead_${Date.now()}` },
+          newOnboarding: { phone: trimmed, leadId },
           customerType: "new"
         },
         { pushHistory: true }
       );
-      postMessage("bot", "New client profile created. Continuing to plan discovery.");
+      postMessage("bot", `New client profile created (ID: ${leadId}). Continuing to plan discovery.`);
+      logClient("info", "new_customer_created", {
+        leadId,
+        fullName: state.context.newOnboarding.fullName,
+        email: state.context.newOnboarding.email,
+        phone: trimmed
+      });
       return;
 
     case FLOW_STEPS.INTENT_DISCOVERY: {
-      const intent = await detectIntent(message);
+      const intent = await detectIntent(trimmed);
       const pageMap = { mobility: 0, "home internet": 1, landline: 2, bundle: 0 };
       state.offerPageIndex = pageMap[intent] ?? 0;
       transitionTo(FLOW_STEPS.OFFER_BROWSE, { intent }, { pushHistory: true });
@@ -1147,12 +1002,30 @@ async function handleChatInput(message) {
     }
 
     case FLOW_STEPS.OFFER_BROWSE:
-      if (message.toLowerCase().includes("checkout")) {
+      if (lower.includes("checkout")) {
         if (state.context.basket.length === 0) {
           postMessage("bot", "Please add at least one item to your basket first.");
           return;
         }
         transitionTo(FLOW_STEPS.BASKET_REVIEW, {}, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("mobility")) {
+        state.offerPageIndex = 0;
+        renderCarouselPage();
+        postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+        return;
+      }
+      if (lower.includes("internet")) {
+        state.offerPageIndex = 1;
+        renderCarouselPage();
+        postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+        return;
+      }
+      if (lower.includes("landline") || lower.includes("home phone")) {
+        state.offerPageIndex = 2;
+        renderCarouselPage();
+        postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
         return;
       }
       postMessage(
@@ -1163,7 +1036,7 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.ORDER_REVIEW:
-      if (message.toLowerCase().includes("place order") || message.toLowerCase().includes("confirm")) {
+      if (lower.includes("place order") || lower.includes("confirm")) {
         confirmOrder();
         return;
       }
@@ -1171,9 +1044,9 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.PAYMENT_CVV:
-      if (!/^\d{3}$/.test(message.trim())) {
+      if (!/^\d{3}$/.test(trimmed)) {
         postMessage("bot", "Invalid CVV. Please provide exactly 3 digits.");
-        logClient("error", "cvv_invalid", { cvvLength: message.trim().length, viaChatInput: true });
+        logClient("error", "cvv_invalid", { cvvLength: trimmed.length, viaChatInput: true });
         return;
       }
       applyContextPatch({
@@ -1187,20 +1060,103 @@ async function handleChatInput(message) {
       transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true });
       return;
 
+    case FLOW_STEPS.PAYMENT_METHOD:
+      if (lower.includes("visa")) {
+        choosePaymentMethod("visa");
+        return;
+      }
+      if (lower.includes("master")) {
+        choosePaymentMethod("mastercard");
+        return;
+      }
+      if (lower.includes("existing") || lower.includes("saved")) {
+        choosePaymentMethod("existing");
+        return;
+      }
+      postMessage("bot", "Please select Visa, MasterCard, or Use Existing Payment.");
+      return;
+
+    case FLOW_STEPS.PAYMENT_CONFIRM_LAST4:
+      if (lower.includes("yes") || lower.includes("confirm")) {
+        applyContextPatch({ payment: { last4Confirmed: true } });
+        logClient("info", "payment_confirmed", { method: state.context.payment.method, viaChatInput: true });
+        transitionTo(FLOW_STEPS.PAYMENT_CVV, {}, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("no") || lower.includes("another")) {
+        transitionTo(FLOW_STEPS.PAYMENT_METHOD, {}, { pushHistory: true });
+        return;
+      }
+      postMessage("bot", "Please reply 'Yes, confirm' or 'No, choose another method'.");
+      return;
+
+    case FLOW_STEPS.SHIPPING_SELECTION:
+      if (lower.includes("prefilled")) {
+        const address = state.context.authUser?.prefilledAddress || "100 Default St, Toronto, ON";
+        applyContextPatch({ shipping: { mode: "prefilled", address } });
+        logClient("info", "shipping_prefilled_selected", { address, viaChatInput: true });
+        transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("new")) {
+        transitionTo(FLOW_STEPS.SHIPPING_MANUAL_ENTRY, {}, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("lookup")) {
+        transitionTo(FLOW_STEPS.SHIPPING_LOOKUP, {}, { pushHistory: true });
+        return;
+      }
+      postMessage("bot", "Please choose prefilled address, enter new address, or lookup address.");
+      return;
+
+    case FLOW_STEPS.SHIPPING_MANUAL_ENTRY:
+      if (trimmed.length < 10) {
+        postMessage("bot", "Please provide a complete address.");
+        return;
+      }
+      applyContextPatch({ shipping: { mode: "manual", address: trimmed } });
+      logClient("info", "shipping_manual_entered", { address: trimmed });
+      transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
+      return;
+
     case FLOW_STEPS.SHIPPING_LOOKUP:
+      if (lower === "enter address manually" || lower === "manual") {
+        transitionTo(FLOW_STEPS.SHIPPING_MANUAL_ENTRY, {}, { pushHistory: true });
+        return;
+      }
       try {
-        const payload = await lookupAddresses(message.trim());
+        logClient("info", "shipping_lookup_requested", { query: trimmed, areaCode: state.context.areaCode });
+        const payload = await lookupAddresses(trimmed);
         const suggestions = payload.suggestions || [];
-        applyContextPatch({ shipping: { lookupQuery: message.trim(), suggestions } });
+        applyContextPatch({ shipping: { lookupQuery: trimmed, suggestions } });
         if (suggestions.length === 0) {
-          postMessage("bot", "No suggestions found. Enter full address manually.");
-          transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true });
+          postMessage("bot", "No suggestions found. Type your full address now.");
+          transitionTo(FLOW_STEPS.SHIPPING_MANUAL_ENTRY, {}, { pushHistory: true });
           return;
         }
-        postMessage("bot", "I found suggestions in the lookup options. Select one there, or type another query.");
+        postMessage("bot", "Select one suggested address or choose manual entry.");
+        const suggestionLabels = suggestions.map((s) => `${s.line1}, ${s.city}`);
+        showChoiceButtons([...suggestionLabels, "Enter address manually"], (choice) => {
+          postMessage("user", choice);
+          if (choice === "Enter address manually") {
+            transitionTo(FLOW_STEPS.SHIPPING_MANUAL_ENTRY, {}, { pushHistory: true });
+            return;
+          }
+
+          const selected = suggestions.find((s) => `${s.line1}, ${s.city}` === choice);
+          if (!selected) {
+            postMessage("bot", "Please select a valid address suggestion.");
+            return;
+          }
+
+          const address = `${selected.line1}, ${selected.city}, ${selected.province} ${selected.postalCode}`;
+          applyContextPatch({ shipping: { mode: "lookup", address } });
+          logClient("info", "shipping_lookup_selected", { address, id: selected.id });
+          transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
+        });
       } catch {
         postMessage("bot", "Lookup unavailable. Enter full shipping address manually.");
-        transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true });
+        transitionTo(FLOW_STEPS.SHIPPING_MANUAL_ENTRY, {}, { pushHistory: true });
       }
       return;
 
@@ -1238,9 +1194,13 @@ function closeChatWidget() {
   chatMenu.classList.add("hidden");
 }
 
-function startConversation() {
+function startConversation({ skipConnecting = false } = {}) {
   if (state.chatStarted) return;
   state.chatStarted = true;
+  if (skipConnecting) {
+    transitionTo(FLOW_STEPS.AREA_CODE_ENTRY, {}, { pushHistory: false });
+    return;
+  }
   transitionTo(FLOW_STEPS.INIT_CONNECTING, {}, { pushHistory: false });
 }
 
@@ -1269,10 +1229,15 @@ function endChat() {
 }
 
 function runTopLoginFlow(mode) {
+  clearTimers();
   openChatWidget();
-  startConversation();
+  if (!state.chatStarted) {
+    startConversation({ skipConnecting: true });
+  } else {
+    transitionTo(FLOW_STEPS.AREA_CODE_ENTRY, {}, { pushHistory: true });
+  }
   state.pendingAuthMode = mode;
-  postMessage("bot", "After area code unlock, choose 'I'm an existing Bell customer' below to continue authentication.");
+  postMessage("bot", "Login selected. Enter area code to unlock offers.");
 }
 
 chatLauncher.addEventListener("click", toggleChatWidget);
@@ -1405,7 +1370,8 @@ chatForm.addEventListener("submit", async (event) => {
   const message = chatInput.value.trim();
   if (!message) return;
   chatInput.value = "";
-  postMessage("user", message);
+  const userMessage = state.flowStep === FLOW_STEPS.PAYMENT_CVV ? "***" : message;
+  postMessage("user", userMessage);
   await handleChatInput(message);
 });
 
