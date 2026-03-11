@@ -1,0 +1,7 @@
+# QA Checklist Log
+# Append one JSON line per QA run via /api/log (level=qa) or manual notes below.
+# Focus: top-of-funnel, new customer onboarding, existing authentication, payment selection, order completion.
+{"ts":"2026-03-11T03:20:58.237Z","level":"qa","event":"qa_probe","details":{"step":"log_endpoint_check"}}
+{"ts":"2026-03-10T23:21:00-04:00","level":"qa","event":"syntax_check","details":{"files":["app.js","server.mjs"],"result":"pass"}}
+{"ts":"2026-03-10T23:21:00-04:00","level":"qa","event":"flow_update_review","details":{"items":["area-code-card-gating","auth-tile-hide","payment-method-wording"],"result":"implemented"}}
+{"ts":"2026-03-11T03:22:30.828Z","level":"qa","event":"post_fix_probe","details":{"scope":"logging+flow"}}

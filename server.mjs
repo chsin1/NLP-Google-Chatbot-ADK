@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +7,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || "127.0.0.1";
+const LOG_DIR = path.join(__dirname, "logs");
+const LOG_FILES = {
+  info: path.join(LOG_DIR, "app-events.log"),
+  error: path.join(LOG_DIR, "app-errors.log"),
+  qa: path.join(LOG_DIR, "qa-checklist.log")
+};
 
 const staticTypes = {
   ".html": "text/html; charset=utf-8",
@@ -73,8 +79,40 @@ function json(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+async function writeLog(level, payload = {}) {
+  const logLevel = level === "error" ? "error" : level === "qa" ? "qa" : "info";
+  await mkdir(LOG_DIR, { recursive: true });
+  const line = JSON.stringify({
+    ts: new Date().toISOString(),
+    level: logLevel,
+    ...payload
+  });
+  await appendFile(LOG_FILES[logLevel], `${line}\n`, "utf8");
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  if (req.method === "POST" && url.pathname === "/api/log") {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+
+    req.on("end", async () => {
+      try {
+        const parsed = JSON.parse(body || "{}");
+        await writeLog(parsed.level, {
+          event: parsed.event || "unknown_event",
+          details: parsed.details || {}
+        });
+        json(res, 200, { ok: true });
+      } catch {
+        json(res, 400, { error: "Invalid log payload" });
+      }
+    });
+    return;
+  }
 
   if (req.method === "POST" && url.pathname === "/api/intent") {
     let body = "";

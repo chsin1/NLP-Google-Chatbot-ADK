@@ -109,6 +109,7 @@ const openChatOffers = document.getElementById("open-chat-offers");
 const autoLoginBtn = document.getElementById("auto-login-btn");
 const manualLoginBtn = document.getElementById("manual-login-btn");
 const authIdentifierInput = document.getElementById("auth-identifier-input");
+const loginSections = document.getElementById("login-sections");
 
 const chatMenuBtn = document.getElementById("chat-menu-btn");
 const chatMenu = document.getElementById("chat-menu");
@@ -141,11 +142,13 @@ const state = {
   muted: false,
   currentUser: null,
   customerType: null,
+  pendingAuthMode: null,
   areaCode: null,
   newCustomerLead: null,
   intent: null,
   basket: [],
   validationApproved: false,
+  paymentMethod: null,
   paymentToken: null,
   order: null
 };
@@ -163,14 +166,36 @@ function postMessage(role, text, { force = false } = {}) {
   chatWindow.scrollTop = chatWindow.scrollHeight;
 }
 
+async function logClient(level, event, details = {}) {
+  try {
+    await fetch("/api/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ level, event, details })
+    });
+  } catch {
+    // no-op: logging should never interrupt UX
+  }
+}
+
+function hideLoginSections() {
+  loginSections.classList.add("hidden");
+}
+
+function showLoginSections() {
+  loginSections.classList.remove("hidden");
+}
+
 function setStatus() {
   if (!state.currentUser || !state.currentUser.authenticated) {
     sessionStatus.textContent = "Session: not authenticated";
+    showLoginSections();
     return;
   }
   sessionStatus.textContent =
     `Session: authenticated as ${state.currentUser.name} (${state.currentUser.id})` +
     (state.areaCode ? ` | area code ${state.areaCode}` : "");
+  hideLoginSections();
 }
 
 function clearQuickActions() {
@@ -227,11 +252,13 @@ function showAreaCodeInput(onSuccess) {
     onSubmit: (value) => {
       if (!/^\d{3}$/.test(value)) {
         postMessage("bot", "Please enter a valid 3-digit area code.");
+        logClient("error", "invalid_area_code", { value });
         return;
       }
       state.areaCode = value;
       postMessage("user", value);
       postMessage("bot", `Area code ${value} accepted. Offers unlocked.`);
+      logClient("info", "area_code_unlocked", { areaCode: value, pendingAuthMode: state.pendingAuthMode });
       showAvailabilityCard();
       clearQuickActions();
       if (onSuccess) onSuccess();
@@ -249,6 +276,7 @@ function showAvailabilityCard() {
 
 function resetCheckoutFlow() {
   state.validationApproved = false;
+  state.paymentMethod = null;
   state.paymentToken = null;
   state.order = null;
   tokenizeBtn.disabled = true;
@@ -338,6 +366,7 @@ function runEligibility() {
   const user = state.currentUser;
   if (!user) {
     postMessage("bot", "Please authenticate first.");
+    logClient("error", "eligibility_without_auth");
     return;
   }
 
@@ -355,34 +384,49 @@ function runEligibility() {
     placeOrderBtn.disabled = true;
     checkoutStatus.textContent = "Status: eligibility failed. Update basket or hand off.";
     postMessage("bot", `Validation result: ${failures.join("; ")}.`);
+    logClient("info", "eligibility_failed", { failures });
     return;
   }
 
   state.validationApproved = true;
   tokenizeBtn.disabled = false;
   placeOrderBtn.disabled = true;
-  checkoutStatus.textContent = "Status: eligible. Tokenization required before order placement.";
-  orderSummary.textContent = `Eligible basket with ${state.basket.length} item(s). Ready for tokenization.`;
-  postMessage("bot", "Validation approved. Click Tokenize Payment, then Place Order & Confirm.");
+  checkoutStatus.textContent = "Status: eligible. Payment method selection required before order placement.";
+  orderSummary.textContent = `Eligible basket with ${state.basket.length} item(s). Ready for payment selection.`;
+  postMessage("bot", "Validation approved. Choose payment method, then Place Order & Confirm.");
+  logClient("info", "eligibility_approved", { basketItems: state.basket.length });
 }
 
-function tokenizeCheckout() {
+function choosePaymentMethod() {
   if (!state.currentUser?.authenticated) {
     postMessage("bot", "Please authenticate first.");
+    logClient("error", "payment_without_auth");
     return;
   }
   if (!state.validationApproved) {
-    postMessage("bot", "Please run eligibility checks before tokenization.");
+    postMessage("bot", "Please run eligibility checks before choosing payment.");
+    logClient("error", "payment_without_eligibility");
     return;
   }
-
-  state.paymentToken = state.currentUser.existingPaymentToken || generateToken(state.currentUser.id);
-  checkoutStatus.textContent = state.currentUser.existingPaymentToken
-    ? "Status: reused existing tokenized payment method."
-    : "Status: new payment token generated.";
-  postMessage("bot", `Tokenization complete (${state.paymentToken}).`);
-  orderSummary.textContent = `Payment token ready. Basket total ${basketTotal.textContent.replace("Total: ", "")}.`;
-  placeOrderBtn.disabled = false;
+  showChoiceButtons(["Pay with Visa", "Pay with Mastercard", "Use saved payment option"], (choice) => {
+    postMessage("user", choice);
+    if (choice === "Use saved payment option" && state.currentUser.existingPaymentToken) {
+      state.paymentMethod = "saved option";
+      state.paymentToken = state.currentUser.existingPaymentToken;
+    } else {
+      state.paymentMethod = choice.replace("Pay with ", "").toLowerCase();
+      state.paymentToken = generateToken(state.currentUser.id);
+    }
+    checkoutStatus.textContent = `Status: payment method selected (${state.paymentMethod}).`;
+    postMessage("bot", `Payment method captured using ${state.paymentMethod}.`);
+    orderSummary.textContent =
+      `Payment method ${state.paymentMethod}. Basket total ${basketTotal.textContent.replace("Total: ", "")}.`;
+    placeOrderBtn.disabled = false;
+    logClient("info", "payment_method_selected", {
+      method: state.paymentMethod,
+      hasSavedToken: Boolean(state.currentUser.existingPaymentToken)
+    });
+  });
 }
 
 function placeOrderAndConfirm() {
@@ -391,7 +435,12 @@ function placeOrderAndConfirm() {
     return;
   }
   if (!state.validationApproved || !state.paymentToken || state.basket.length === 0) {
-    postMessage("bot", "Complete eligibility + tokenization and ensure basket has items.");
+    postMessage("bot", "Complete eligibility + payment method and ensure basket has items.");
+    logClient("error", "order_place_blocked", {
+      validationApproved: state.validationApproved,
+      hasPaymentToken: Boolean(state.paymentToken),
+      basketItems: state.basket.length
+    });
     return;
   }
 
@@ -410,12 +459,15 @@ function placeOrderAndConfirm() {
   checkoutStatus.textContent = "Status: order captured and confirmed.";
   orderSummary.textContent = `Order ${orderId} confirmed (${confirmationCode}). Monthly total ${currency(total)}.`;
   postMessage("bot", `Order confirmed. Order ID ${orderId}, confirmation ${confirmationCode}.`);
+  logClient("info", "order_confirmed", { orderId, confirmationCode, total });
 }
 
 function authenticateUser(user) {
   user.authenticated = true;
   state.currentUser = user;
+  state.pendingAuthMode = null;
   setStatus();
+  logClient("info", "user_authenticated", { userId: user.id, name: user.name });
 
   if (user.name === "Alex Carter") {
     postMessage("bot", "Authentication successful for Alex Carter. Starting workflow now.");
@@ -489,8 +541,9 @@ function autoLogin() {
   ensureChatInitialized();
   postMessage("bot", "We are connecting you, please hold.");
   postMessage("bot", "Automatic sign-in selected. Confirm your area code to continue.");
+  state.pendingAuthMode = "auto";
   requireAreaCodeForNext(() => {
-    authenticateUser(mockUsers.find((u) => u.id === "u1001"));
+    postMessage("bot", "Please select your customer type from the section below.");
   });
 }
 
@@ -499,8 +552,9 @@ function manualLogin() {
   ensureChatInitialized();
   postMessage("bot", "We are connecting you, please hold.");
   postMessage("bot", "Manual sign-in selected. Confirm your area code, then authenticate.");
+  state.pendingAuthMode = "manual";
   requireAreaCodeForNext(() => {
-    showManualAuthenticationPrompt();
+    postMessage("bot", "Please select your customer type from the section below.");
   });
 }
 
@@ -544,6 +598,7 @@ function routeNewCustomerOnboarding() {
                 phone,
                 areaCode: state.areaCode
               };
+              logClient("info", "new_customer_created", state.newCustomerLead);
               postMessage(
                 "bot",
                 `New client created for ${fullName}. Onboarding is started and I can now guide plan selection, account setup, and activation.`
@@ -568,6 +623,14 @@ function routeNewCustomerOnboarding() {
 function routeExistingCustomerAuth() {
   state.customerType = "existing";
   postMessage("bot", "Please authenticate now as an existing customer.", { force: true });
+  if (state.pendingAuthMode === "auto") {
+    authenticateUser(mockUsers.find((u) => u.id === "u1001"));
+    return;
+  }
+  if (state.pendingAuthMode === "manual") {
+    showManualAuthenticationPrompt();
+    return;
+  }
   showExistingCustomerLoginOptions();
 }
 
@@ -601,7 +664,7 @@ function startConversation() {
     window.setTimeout(() => {
       postMessage("bot", "Enter your area code to unlock offers.");
       showAreaCodeInput(() => {
-        askCustomerTypeQuestion();
+        postMessage("bot", "Please select one option from the section below to continue.");
       });
     }, 700);
   }, 500);
@@ -635,12 +698,14 @@ function wipeSession({ closeWidget = false, restart = false } = {}) {
   state.chatStarted = false;
   state.currentUser = null;
   state.customerType = null;
+  state.pendingAuthMode = null;
   state.areaCode = null;
   state.newCustomerLead = null;
   state.intent = null;
   state.basket = [];
   state.muted = false;
   state.validationApproved = false;
+  state.paymentMethod = null;
   state.paymentToken = null;
   state.order = null;
 
@@ -666,6 +731,7 @@ function wipeSession({ closeWidget = false, restart = false } = {}) {
     openChatWidget();
     startConversation();
   }
+  logClient("info", "session_wiped", { closeWidget, restart });
 }
 
 function refreshChat() {
@@ -713,16 +779,18 @@ endChatBtn.addEventListener("click", () => {
 
 newCustomerBtn.addEventListener("click", () => {
   postMessage("user", "I'm new to Bell");
+  hideAvailabilityCard();
   routeNewCustomerOnboarding();
 });
 
 existingCustomerBtn.addEventListener("click", () => {
   postMessage("user", "I'm an existing Bell customer");
+  hideAvailabilityCard();
   routeExistingCustomerAuth();
 });
 
 validateBtn.addEventListener("click", runEligibility);
-tokenizeBtn.addEventListener("click", tokenizeCheckout);
+tokenizeBtn.addEventListener("click", choosePaymentMethod);
 placeOrderBtn.addEventListener("click", placeOrderAndConfirm);
 
 chatForm.addEventListener("submit", async (event) => {
@@ -756,6 +824,21 @@ chatForm.addEventListener("submit", async (event) => {
     "bot",
     `I detected intent: ${intent}. Here are matching offers for area code ${state.areaCode}. Add any combination to your basket.`
   );
+});
+
+window.addEventListener("error", (event) => {
+  logClient("error", "frontend_error", {
+    message: event.message,
+    source: event.filename,
+    line: event.lineno,
+    col: event.colno
+  });
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  logClient("error", "frontend_unhandled_rejection", {
+    reason: String(event.reason || "unknown")
+  });
 });
 
 function boot() {
