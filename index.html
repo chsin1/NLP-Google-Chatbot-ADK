@@ -13,55 +13,143 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">Bell Sales Assistant</div>
-      <div class="status" id="session-status">Session: not authenticated</div>
+    <header class="bell-header">
+      <div class="brand-row">
+        <div class="logo">Bell</div>
+        <nav>
+          <a href="#">Mobility</a>
+          <a href="#">Internet</a>
+          <a href="#">TV & streaming</a>
+          <a href="#">Bundles</a>
+          <a href="#">Home phone</a>
+          <a href="#">Promotions</a>
+          <a href="#">Support</a>
+        </nav>
+        <button class="header-login" id="open-chat-header">Log in</button>
+      </div>
+      <div class="promo-row">Order online and discover area-specific offers in chat.</div>
     </header>
 
-    <main class="layout">
-      <section class="chat-section">
-        <div id="chat-window" class="chat-window" aria-live="polite"></div>
-
-        <form id="chat-form" class="chat-form" autocomplete="off">
-          <input
-            id="chat-input"
-            type="text"
-            placeholder="Tell me what you need (mobility, internet, landline, upgrade)..."
-            required
-          />
-          <button type="submit">Send</button>
-        </form>
+    <main class="landing">
+      <section class="hero">
+        <div class="hero-copy">
+          <h1>Type in your area code.<br />Arrive at great offers.</h1>
+          <p>Get Bell-like mobility, internet and home phone bundles through a guided assistant.</p>
+          <div class="hero-actions">
+            <button id="open-chat-offers" class="primary">Find my offers</button>
+            <button class="secondary">1 800 799-5859</button>
+          </div>
+        </div>
+        <div class="hero-visual" aria-hidden="true">
+          <div class="shape"></div>
+        </div>
       </section>
 
-      <aside class="side-panel">
-        <section class="panel-card">
-          <h2>Mock Authentication</h2>
-          <p class="small">Select a user after consent is granted.</p>
-          <select id="mock-user-select" disabled></select>
-          <button id="auth-btn" disabled>Authenticate</button>
-        </section>
+      <section class="login-sections">
+        <article class="login-card">
+          <h2>Automatic sign-in</h2>
+          <p>Use stored profile and continue as a pre-authenticated Bell customer.</p>
+          <button id="auto-login-btn" class="primary">Continue automatically</button>
+        </article>
 
-        <section class="panel-card">
-          <h2>Product Carousel</h2>
-          <div id="carousel" class="carousel"></div>
-        </section>
+        <article class="login-card">
+          <h2>Manual sign-in</h2>
+          <p>Select a mock profile and authenticate manually.</p>
+          <select id="mock-user-select"></select>
+          <button id="manual-login-btn" class="primary">Sign in manually</button>
+        </article>
+      </section>
 
-        <section class="panel-card">
-          <h2>Basket</h2>
-          <ul id="basket-list" class="basket-list"></ul>
-          <div class="basket-total" id="basket-total">Total: CAD $0.00/month</div>
-          <button id="validate-btn" disabled>Run Eligibility & Credit Checks</button>
-        </section>
-
-        <section class="panel-card">
-          <h2>Checkout & Order</h2>
-          <div class="small" id="checkout-status">Status: waiting for eligibility approval.</div>
-          <div id="order-summary" class="order-summary">No order created yet.</div>
-          <button id="tokenize-btn" disabled>Tokenize Payment</button>
-          <button id="place-order-btn" disabled>Place Order & Confirm</button>
-        </section>
-      </aside>
+      <section class="workflow-strip">
+        <div class="wf-pill">Mobility plans</div>
+        <div class="wf-pill">Internet</div>
+        <div class="wf-pill">Phones</div>
+        <div class="wf-pill">TV</div>
+        <div class="wf-pill">Streaming</div>
+      </section>
     </main>
+
+    <button id="chat-launcher" class="chat-launcher" aria-label="Open chat">Chat</button>
+
+    <section id="chat-widget" class="chat-widget hidden" aria-live="polite">
+      <header class="chat-topbar">
+        <div class="chat-brand">Chatting with Bell</div>
+        <div class="chat-topbar-actions">
+          <button id="chat-menu-btn" class="chat-menu-btn" aria-label="Chat options">...</button>
+          <div id="chat-menu" class="chat-menu hidden">
+            <button id="mute-chat-btn" type="button">Mute Chat</button>
+            <button id="refresh-chat-btn" type="button">Refresh</button>
+            <button id="end-chat-btn" type="button">End Chat</button>
+          </div>
+          <button id="close-chat" class="close-chat" aria-label="Minimize chat">-</button>
+        </div>
+      </header>
+
+      <div class="chat-body">
+        <section class="conversation-pane">
+          <div id="chat-window" class="chat-window"></div>
+          <div id="quick-actions" class="quick-actions"></div>
+          <section id="availability-card" class="availability-card hidden">
+            <div class="availability-head">
+              <div class="availability-title">Check availability</div>
+            </div>
+            <div class="availability-content">
+              <p class="availability-hero">
+                Great news. Bell offers are available in your area.
+              </p>
+              <p class="availability-sub">
+                Plus, get connected faster with easy and convenient self-install options.
+              </p>
+              <div class="availability-grid">
+                <article>
+                  <h4>I'm new to Bell</h4>
+                  <p>Order internet on its own.</p>
+                  <button id="new-customer-btn" type="button" class="primary">Get started</button>
+                </article>
+                <article>
+                  <h4>I'm an existing Bell customer</h4>
+                  <p>Add Internet to your account or manage your current service.</p>
+                  <button id="existing-customer-btn" type="button" class="primary">Add Internet</button>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <form id="chat-form" class="chat-form" autocomplete="off">
+            <input
+              id="chat-input"
+              type="text"
+              placeholder="Type your message here..."
+              required
+            />
+            <button type="submit">Send</button>
+          </form>
+          <div class="session-status" id="session-status">Session: not authenticated</div>
+        </section>
+
+        <section class="assistant-panels">
+          <div class="panel-card">
+            <h3>Product Carousel</h3>
+            <div id="carousel" class="carousel"></div>
+          </div>
+
+          <div class="panel-card">
+            <h3>Basket</h3>
+            <ul id="basket-list" class="basket-list"></ul>
+            <div class="basket-total" id="basket-total">Total: CAD $0.00/month</div>
+            <button id="validate-btn" disabled>Run Eligibility & Credit Checks</button>
+          </div>
+
+          <div class="panel-card">
+            <h3>Checkout & Order</h3>
+            <div class="small" id="checkout-status">Status: waiting for eligibility approval.</div>
+            <div id="order-summary" class="order-summary">No order created yet.</div>
+            <button id="tokenize-btn" disabled>Tokenize Payment</button>
+            <button id="place-order-btn" disabled>Place Order & Confirm</button>
+          </div>
+        </section>
+      </div>
+    </section>
 
     <script type="module" src="./app.js"></script>
   </body>
