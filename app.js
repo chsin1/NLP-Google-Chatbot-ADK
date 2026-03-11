@@ -142,6 +142,7 @@ const state = {
   currentUser: null,
   customerType: null,
   areaCode: null,
+  newCustomerLead: null,
   intent: null,
   basket: [],
   validationApproved: false,
@@ -187,39 +188,29 @@ function showChoiceButtons(labels, onPick) {
   });
 }
 
-function showAreaCodeInput(onSuccess) {
+function showInputPrompt({ placeholder, buttonLabel, initialValue = "", onSubmit }) {
   clearQuickActions();
   const wrap = document.createElement("div");
   wrap.className = "quick-input";
 
   const input = document.createElement("input");
   input.type = "text";
-  input.maxLength = 3;
-  input.placeholder = "Enter 3-digit area code to unlock offers";
+  input.placeholder = placeholder;
+  input.value = initialValue;
 
   const submit = document.createElement("button");
   submit.type = "button";
-  submit.textContent = "Unlock";
+  submit.textContent = buttonLabel;
 
-  const submitAreaCode = () => {
-    const value = input.value.trim();
-    if (!/^\d{3}$/.test(value)) {
-      postMessage("bot", "Please enter a valid 3-digit area code.");
-      return;
-    }
-    state.areaCode = value;
-    postMessage("user", value);
-    postMessage("bot", `Area code ${value} accepted. Offers unlocked.`);
-    showAvailabilityCard();
-    clearQuickActions();
-    if (onSuccess) onSuccess();
+  const handleSubmit = () => {
+    onSubmit(input.value.trim());
   };
 
-  submit.addEventListener("click", submitAreaCode);
+  submit.addEventListener("click", handleSubmit);
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
-      submitAreaCode();
+      handleSubmit();
     }
   });
 
@@ -227,6 +218,25 @@ function showAreaCodeInput(onSuccess) {
   wrap.appendChild(submit);
   quickActions.appendChild(wrap);
   input.focus();
+}
+
+function showAreaCodeInput(onSuccess) {
+  showInputPrompt({
+    placeholder: "Enter 3-digit area code to unlock offers",
+    buttonLabel: "Unlock",
+    onSubmit: (value) => {
+      if (!/^\d{3}$/.test(value)) {
+        postMessage("bot", "Please enter a valid 3-digit area code.");
+        return;
+      }
+      state.areaCode = value;
+      postMessage("user", value);
+      postMessage("bot", `Area code ${value} accepted. Offers unlocked.`);
+      showAvailabilityCard();
+      clearQuickActions();
+      if (onSuccess) onSuccess();
+    }
+  });
 }
 
 function hideAvailabilityCard() {
@@ -431,47 +441,134 @@ function resolveUserFromIdentifier(raw) {
   return mockUsers.find((u) => u.id === userId);
 }
 
-function requireAreaCodeBeforeAuth() {
-  if (state.areaCode) return true;
-  postMessage("bot", "Enter your area code first to unlock offers and continue authentication.");
-  showAreaCodeInput(() => {
-    askCustomerTypeQuestion();
+function requireAreaCodeForNext(nextStep) {
+  if (state.areaCode) {
+    nextStep();
+    return;
+  }
+  postMessage("bot", "Enter your area code first to unlock offers and continue.");
+  showAreaCodeInput(nextStep);
+}
+
+function showManualAuthenticationPrompt() {
+  postMessage("bot", "Enter your phone or email to authenticate.");
+  showInputPrompt({
+    placeholder: "416-555-1111 or alex.test@gmail.com",
+    buttonLabel: "Authenticate",
+    initialValue: authIdentifierInput.value || "",
+    onSubmit: (identifier) => {
+      authIdentifierInput.value = identifier;
+      const user = resolveUserFromIdentifier(identifier);
+      if (!user) {
+        postMessage(
+          "bot",
+          "Authentication failed. Use phone starting with 416/647/986 or alex.test@gmail.com for Alex Carter."
+        );
+        return;
+      }
+      postMessage("user", identifier);
+      authenticateUser(user);
+    }
   });
-  return false;
+}
+
+function showExistingCustomerLoginOptions() {
+  postMessage("bot", "Select login method to continue.");
+  showChoiceButtons(["Continue automatically", "Authenticate with phone/email"], (choice) => {
+    postMessage("user", choice);
+    if (choice === "Continue automatically") {
+      authenticateUser(mockUsers.find((u) => u.id === "u1001"));
+      return;
+    }
+    showManualAuthenticationPrompt();
+  });
 }
 
 function autoLogin() {
   openChatWidget();
-  if (!state.chatStarted) startConversation();
-  if (!requireAreaCodeBeforeAuth()) return;
-  authenticateUser(mockUsers.find((u) => u.id === "u1001"));
+  ensureChatInitialized();
+  postMessage("bot", "We are connecting you, please hold.");
+  postMessage("bot", "Automatic sign-in selected. Confirm your area code to continue.");
+  requireAreaCodeForNext(() => {
+    authenticateUser(mockUsers.find((u) => u.id === "u1001"));
+  });
 }
 
 function manualLogin() {
   openChatWidget();
-  if (!state.chatStarted) startConversation();
-  if (!requireAreaCodeBeforeAuth()) return;
-
-  const user = resolveUserFromIdentifier(authIdentifierInput.value);
-  if (!user) {
-    postMessage(
-      "bot",
-      "Authentication failed. Use phone starting with 416/647/986 or alex.test@gmail.com for Alex Carter."
-    );
-    return;
-  }
-  authenticateUser(user);
+  ensureChatInitialized();
+  postMessage("bot", "We are connecting you, please hold.");
+  postMessage("bot", "Manual sign-in selected. Confirm your area code, then authenticate.");
+  requireAreaCodeForNext(() => {
+    showManualAuthenticationPrompt();
+  });
 }
 
 function routeNewCustomerOnboarding() {
   state.customerType = "new";
   postMessage("bot", "You are being transferred into the new customer onboarding workflow.");
-  postMessage("bot", "Onboarding steps: profile setup, service selection, account creation, and schedule activation.");
+  postMessage("bot", "Please enter your full name to create a new client profile.");
+  showInputPrompt({
+    placeholder: "Full name",
+    buttonLabel: "Next",
+    onSubmit: (fullName) => {
+      if (!fullName) {
+        postMessage("bot", "Full name is required.");
+        return;
+      }
+      postMessage("user", fullName);
+      postMessage("bot", "Now enter your email address.");
+      showInputPrompt({
+        placeholder: "Email address",
+        buttonLabel: "Next",
+        onSubmit: (email) => {
+          if (!email.includes("@")) {
+            postMessage("bot", "Please enter a valid email.");
+            return;
+          }
+          postMessage("user", email);
+          postMessage("bot", "Finally, enter your phone number.");
+          showInputPrompt({
+            placeholder: "Phone number",
+            buttonLabel: "Create client",
+            onSubmit: (phone) => {
+              if (phone.replace(/\D/g, "").length < 10) {
+                postMessage("bot", "Please enter a valid phone number.");
+                return;
+              }
+              postMessage("user", phone);
+              state.newCustomerLead = {
+                id: `lead_${Date.now()}`,
+                fullName,
+                email,
+                phone,
+                areaCode: state.areaCode
+              };
+              postMessage(
+                "bot",
+                `New client created for ${fullName}. Onboarding is started and I can now guide plan selection, account setup, and activation.`
+              );
+              showChoiceButtons(["Start new-customer plan selection", "Talk to onboarding specialist"], (choice) => {
+                postMessage("user", choice);
+                if (choice === "Start new-customer plan selection") {
+                  renderCarousel("home internet");
+                  postMessage("bot", "Here are starter plans you can choose from.");
+                  return;
+                }
+                postMessage("bot", "I will transfer you to an onboarding specialist.");
+              });
+            }
+          });
+        }
+      });
+    }
+  });
 }
 
 function routeExistingCustomerAuth() {
   state.customerType = "existing";
-  postMessage("bot", "Please authenticate now. Use Automatic sign-in or Manual sign-in (phone/email).", { force: true });
+  postMessage("bot", "Please authenticate now as an existing customer.", { force: true });
+  showExistingCustomerLoginOptions();
 }
 
 function askCustomerTypeQuestion() {
@@ -487,12 +584,17 @@ function askCustomerTypeQuestion() {
   });
 }
 
-function startConversation() {
+function ensureChatInitialized() {
   if (state.chatStarted) return;
   state.chatStarted = true;
   chatInput.disabled = false;
   hideAvailabilityCard();
   clearQuickActions();
+}
+
+function startConversation() {
+  if (state.chatStarted) return;
+  ensureChatInitialized();
 
   window.setTimeout(() => {
     postMessage("bot", "We are connecting you, please hold.");
@@ -534,6 +636,7 @@ function wipeSession({ closeWidget = false, restart = false } = {}) {
   state.currentUser = null;
   state.customerType = null;
   state.areaCode = null;
+  state.newCustomerLead = null;
   state.intent = null;
   state.basket = [];
   state.muted = false;
