@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bell-Style Agentic Sales Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Bell Sales Assistant</div>
+      <div class="status" id="session-status">Session: not authenticated</div>
+    </header>
+
+    <main class="layout">
+      <section class="chat-section">
+        <div id="chat-window" class="chat-window" aria-live="polite"></div>
+
+        <form id="chat-form" class="chat-form" autocomplete="off">
+          <input
+            id="chat-input"
+            type="text"
+            placeholder="Tell me what you need (mobility, internet, landline, upgrade)..."
+            required
+          />
+          <button type="submit">Send</button>
+        </form>
+      </section>
+
+      <aside class="side-panel">
+        <section class="panel-card">
+          <h2>Mock Authentication</h2>
+          <p class="small">Select a user after consent is granted.</p>
+          <select id="mock-user-select" disabled></select>
+          <button id="auth-btn" disabled>Authenticate</button>
+        </section>
+
+        <section class="panel-card">
+          <h2>Product Carousel</h2>
+          <div id="carousel" class="carousel"></div>
+        </section>
+
+        <section class="panel-card">
+          <h2>Basket</h2>
+          <ul id="basket-list" class="basket-list"></ul>
+          <div class="basket-total" id="basket-total">Total: CAD $0.00/month</div>
+          <button id="validate-btn" disabled>Run Eligibility & Credit Checks</button>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
