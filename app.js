@@ -7,7 +7,8 @@ const mockUsers = [
     authenticated: false,
     age: 34,
     accountType: "Primary",
-    creditScore: 742
+    creditScore: 742,
+    existingPaymentToken: "tok_saved_u1001"
   },
   {
     id: "u1002",
@@ -17,7 +18,8 @@ const mockUsers = [
     authenticated: false,
     age: 21,
     accountType: "Secondary",
-    creditScore: 608
+    creditScore: 608,
+    existingPaymentToken: null
   },
   {
     id: "u1003",
@@ -27,7 +29,8 @@ const mockUsers = [
     authenticated: false,
     age: 17,
     accountType: "Primary",
-    creditScore: 690
+    creditScore: 690,
+    existingPaymentToken: null
   }
 ];
 
@@ -104,12 +107,19 @@ const carousel = document.getElementById("carousel");
 const basketList = document.getElementById("basket-list");
 const basketTotal = document.getElementById("basket-total");
 const validateBtn = document.getElementById("validate-btn");
+const tokenizeBtn = document.getElementById("tokenize-btn");
+const placeOrderBtn = document.getElementById("place-order-btn");
+const checkoutStatus = document.getElementById("checkout-status");
+const orderSummary = document.getElementById("order-summary");
 
 const state = {
   phase: "consent",
   currentUser: null,
   intent: null,
-  basket: []
+  basket: [],
+  validationApproved: false,
+  paymentToken: null,
+  order: null
 };
 
 function currency(amount) {
@@ -122,6 +132,27 @@ function postMessage(role, text) {
   el.textContent = text;
   chatWindow.appendChild(el);
   chatWindow.scrollTop = chatWindow.scrollHeight;
+}
+
+function generateToken(userId) {
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `tok_${userId}_${suffix}`;
+}
+
+function generateOrderId() {
+  const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12);
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `ORD-${timestamp}-${suffix}`;
+}
+
+function resetCheckoutFlow() {
+  state.validationApproved = false;
+  state.paymentToken = null;
+  state.order = null;
+  tokenizeBtn.disabled = true;
+  placeOrderBtn.disabled = true;
+  checkoutStatus.textContent = "Status: waiting for eligibility approval.";
+  orderSummary.textContent = "No order created yet.";
 }
 
 function setStatus() {
@@ -176,6 +207,7 @@ function addToBasket(offerId) {
     return;
   }
   state.basket.push(offer);
+  resetCheckoutFlow();
   renderBasket();
   postMessage("bot", `Added ${offer.name} to your basket.`);
 }
@@ -192,6 +224,9 @@ function renderBasket() {
   const total = state.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
   basketTotal.textContent = `Total: ${currency(total)}/month`;
   validateBtn.disabled = state.basket.length === 0 || !state.currentUser?.authenticated;
+  if (state.basket.length === 0) {
+    resetCheckoutFlow();
+  }
 }
 
 async function detectIntentWithLLM(message) {
@@ -245,6 +280,11 @@ function runEligibility() {
   }
 
   if (failures.length > 0) {
+    state.validationApproved = false;
+    state.paymentToken = null;
+    tokenizeBtn.disabled = true;
+    placeOrderBtn.disabled = true;
+    checkoutStatus.textContent = "Status: eligibility failed. Update basket or hand off.";
     postMessage(
       "bot",
       `Validation result: I found eligibility constraints. ${failures.join("; ")}. I can suggest alternatives or hand off to a human agent.`
@@ -252,9 +292,77 @@ function runEligibility() {
     return;
   }
 
+  state.validationApproved = true;
+  tokenizeBtn.disabled = false;
+  placeOrderBtn.disabled = true;
+  checkoutStatus.textContent = "Status: eligible. Tokenization required before order placement.";
+  orderSummary.textContent = `Eligible basket with ${state.basket.length} item(s). Ready for tokenization.`;
   postMessage(
     "bot",
-    `Validation result: approved. Basket is eligible based on mock age/account/credit checks. Next step is checkout tokenization and order capture.`
+    "Validation result: approved. Basket is eligible based on mock age/account/credit checks. Please click Tokenize Payment, then Place Order & Confirm."
+  );
+}
+
+function tokenizeCheckout() {
+  if (!state.currentUser?.authenticated) {
+    postMessage("bot", "Please authenticate first.");
+    return;
+  }
+  if (!state.validationApproved) {
+    postMessage("bot", "Please run eligibility checks before tokenization.");
+    return;
+  }
+
+  if (state.currentUser.existingPaymentToken) {
+    state.paymentToken = state.currentUser.existingPaymentToken;
+    checkoutStatus.textContent = "Status: reused existing tokenized payment method.";
+    postMessage("bot", `Tokenization complete using saved token (${state.paymentToken}).`);
+  } else {
+    state.paymentToken = generateToken(state.currentUser.id);
+    checkoutStatus.textContent = "Status: new payment token generated.";
+    postMessage("bot", `Tokenization complete. Generated token (${state.paymentToken}).`);
+  }
+
+  orderSummary.textContent = `Payment token ready. Basket total ${basketTotal.textContent.replace("Total: ", "")}.`;
+  placeOrderBtn.disabled = false;
+}
+
+function placeOrderAndConfirm() {
+  if (!state.currentUser?.authenticated) {
+    postMessage("bot", "Please authenticate first.");
+    return;
+  }
+  if (!state.validationApproved || !state.paymentToken) {
+    postMessage("bot", "Please complete eligibility and tokenization before placing the order.");
+    return;
+  }
+  if (state.basket.length === 0) {
+    postMessage("bot", "Basket is empty.");
+    return;
+  }
+
+  const total = state.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
+  const orderId = generateOrderId();
+  const confirmationCode = `CNF-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  state.order = {
+    orderId,
+    confirmationCode,
+    total
+  };
+
+  state.basket = [];
+  state.validationApproved = false;
+  state.paymentToken = null;
+  renderBasket();
+  tokenizeBtn.disabled = true;
+  placeOrderBtn.disabled = true;
+  checkoutStatus.textContent = "Status: order captured and confirmed.";
+  orderSummary.textContent =
+    `Order ${orderId} confirmed (${confirmationCode}). ` +
+    `Monthly total ${currency(total)}. Tokenization and order capture completed.`;
+  postMessage(
+    "bot",
+    `Order confirmed. Order ID ${orderId}, confirmation ${confirmationCode}. I have captured this order in session memory and can now provide next-step fulfillment details.`
   );
 }
 
@@ -334,10 +442,13 @@ authBtn.addEventListener("click", () => {
 });
 
 validateBtn.addEventListener("click", runEligibility);
+tokenizeBtn.addEventListener("click", tokenizeCheckout);
+placeOrderBtn.addEventListener("click", placeOrderAndConfirm);
 
 function boot() {
   initAuthUsers();
   renderCarousel();
+  resetCheckoutFlow();
   renderBasket();
   setStatus();
   postMessage(
