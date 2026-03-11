@@ -41,6 +41,11 @@
           </div>
         </div>
         <div class="hero-visual" aria-hidden="true">
+          <img
+            class="hero-photo"
+            src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1600&q=80"
+            alt="Happy couple browsing offers online"
+          />
           <div class="shape"></div>
         </div>
       </section>
@@ -54,8 +59,9 @@
 
         <article class="login-card">
           <h2>Manual sign-in</h2>
-          <p>Select a mock profile and authenticate manually.</p>
-          <select id="mock-user-select"></select>
+          <p>Authenticate by phone or email.</p>
+          <input id="auth-identifier-input" type="text" placeholder="416-555-1111 or alex.test@gmail.com" />
+          <div class="small">Phone mapping: 416 Alex, 647 Maya, 986 Daniel</div>
           <button id="manual-login-btn" class="primary">Sign in manually</button>
         </article>
       </section>

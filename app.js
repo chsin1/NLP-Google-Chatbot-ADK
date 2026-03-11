@@ -94,6 +94,13 @@ const offers = [
   }
 ];
 
+const phonePrefixToUser = {
+  "416": "u1001",
+  "647": "u1002",
+  "986": "u1003"
+};
+const alexEmail = "alex.test@gmail.com";
+
 const chatLauncher = document.getElementById("chat-launcher");
 const chatWidget = document.getElementById("chat-widget");
 const closeChat = document.getElementById("close-chat");
@@ -101,6 +108,7 @@ const openChatHeader = document.getElementById("open-chat-header");
 const openChatOffers = document.getElementById("open-chat-offers");
 const autoLoginBtn = document.getElementById("auto-login-btn");
 const manualLoginBtn = document.getElementById("manual-login-btn");
+const authIdentifierInput = document.getElementById("auth-identifier-input");
 
 const chatMenuBtn = document.getElementById("chat-menu-btn");
 const chatMenu = document.getElementById("chat-menu");
@@ -116,7 +124,6 @@ const availabilityCard = document.getElementById("availability-card");
 const newCustomerBtn = document.getElementById("new-customer-btn");
 const existingCustomerBtn = document.getElementById("existing-customer-btn");
 
-const userSelect = document.getElementById("mock-user-select");
 const sessionStatus = document.getElementById("session-status");
 
 const carousel = document.getElementById("carousel");
@@ -130,14 +137,11 @@ const checkoutStatus = document.getElementById("checkout-status");
 const orderSummary = document.getElementById("order-summary");
 
 const state = {
-  phase: "idle",
   chatStarted: false,
-  chatEnded: false,
   muted: false,
   currentUser: null,
   customerType: null,
   areaCode: null,
-  pendingLoginMethod: null,
   intent: null,
   basket: [],
   validationApproved: false,
@@ -150,9 +154,7 @@ function currency(amount) {
 }
 
 function postMessage(role, text, { force = false } = {}) {
-  if (role === "bot" && state.muted && !force) {
-    return;
-  }
+  if (role === "bot" && state.muted && !force) return;
   const el = document.createElement("div");
   el.className = `msg ${role}`;
   el.textContent = text;
@@ -177,35 +179,27 @@ function clearQuickActions() {
 function showChoiceButtons(labels, onPick) {
   clearQuickActions();
   labels.forEach((label) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = label;
-    btn.addEventListener("click", () => onPick(label));
-    quickActions.appendChild(btn);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", () => onPick(label));
+    quickActions.appendChild(button);
   });
 }
 
-function hideAvailabilityCard() {
-  availabilityCard.classList.add("hidden");
-}
-
-function showAvailabilityCard() {
-  availabilityCard.classList.remove("hidden");
-}
-
-function showAreaCodeInput() {
+function showAreaCodeInput(onSuccess) {
   clearQuickActions();
   const wrap = document.createElement("div");
   wrap.className = "quick-input";
 
   const input = document.createElement("input");
   input.type = "text";
-  input.placeholder = "Enter 3-digit area code (e.g., 416)";
   input.maxLength = 3;
+  input.placeholder = "Enter 3-digit area code to unlock offers";
 
   const submit = document.createElement("button");
   submit.type = "button";
-  submit.textContent = "Confirm";
+  submit.textContent = "Unlock";
 
   const submitAreaCode = () => {
     const value = input.value.trim();
@@ -213,13 +207,12 @@ function showAreaCodeInput() {
       postMessage("bot", "Please enter a valid 3-digit area code.");
       return;
     }
-
     state.areaCode = value;
     postMessage("user", value);
-    postMessage("bot", `Thanks. Checking offers for area code ${value}.`);
-    state.phase = "availability";
+    postMessage("bot", `Area code ${value} accepted. Offers unlocked.`);
     showAvailabilityCard();
     clearQuickActions();
+    if (onSuccess) onSuccess();
   };
 
   submit.addEventListener("click", submitAreaCode);
@@ -236,6 +229,14 @@ function showAreaCodeInput() {
   input.focus();
 }
 
+function hideAvailabilityCard() {
+  availabilityCard.classList.add("hidden");
+}
+
+function showAvailabilityCard() {
+  availabilityCard.classList.remove("hidden");
+}
+
 function resetCheckoutFlow() {
   state.validationApproved = false;
   state.paymentToken = null;
@@ -249,9 +250,7 @@ function resetCheckoutFlow() {
 function renderCarousel(category) {
   const normalized = (category || "").toLowerCase();
   const filtered = offers.filter((offer) => {
-    if (!normalized || normalized === "bundle") {
-      return true;
-    }
+    if (!normalized || normalized === "bundle") return true;
     return offer.category === normalized;
   });
 
@@ -265,7 +264,6 @@ function renderCarousel(category) {
       <div class="product-meta">${offer.description}</div>
       <div class="product-price">${currency(offer.monthlyPrice)}/month</div>
     `;
-
     const addBtn = document.createElement("button");
     addBtn.textContent = "Add to basket";
     addBtn.addEventListener("click", () => addToBasket(offer.id));
@@ -291,24 +289,19 @@ function renderBasket() {
     li.innerHTML = `<span>${idx + 1}. ${item.name}</span><span>${currency(item.monthlyPrice)}</span>`;
     basketList.appendChild(li);
   });
-
   const total = state.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
   basketTotal.textContent = `Total: ${currency(total)}/month`;
   validateBtn.disabled = state.basket.length === 0 || !state.currentUser?.authenticated;
-  if (state.basket.length === 0) {
-    resetCheckoutFlow();
-  }
+  if (state.basket.length === 0) resetCheckoutFlow();
 }
 
 function generateToken(userId) {
-  const suffix = Math.random().toString(36).slice(2, 8);
-  return `tok_${userId}_${suffix}`;
+  return `tok_${userId}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function generateOrderId() {
   const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12);
-  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `ORD-${timestamp}-${suffix}`;
+  return `ORD-${timestamp}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
 async function detectIntentWithLLM(message) {
@@ -318,9 +311,7 @@ async function detectIntentWithLLM(message) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message })
     });
-    if (!response.ok) {
-      throw new Error("intent API error");
-    }
+    if (!response.ok) throw new Error("intent API error");
     const payload = await response.json();
     return payload.intent;
   } catch {
@@ -353,10 +344,7 @@ function runEligibility() {
     tokenizeBtn.disabled = true;
     placeOrderBtn.disabled = true;
     checkoutStatus.textContent = "Status: eligibility failed. Update basket or hand off.";
-    postMessage(
-      "bot",
-      `Validation result: I found eligibility constraints. ${failures.join("; ")}. I can suggest alternatives or hand off to a human agent.`
-    );
+    postMessage("bot", `Validation result: ${failures.join("; ")}.`);
     return;
   }
 
@@ -365,10 +353,7 @@ function runEligibility() {
   placeOrderBtn.disabled = true;
   checkoutStatus.textContent = "Status: eligible. Tokenization required before order placement.";
   orderSummary.textContent = `Eligible basket with ${state.basket.length} item(s). Ready for tokenization.`;
-  postMessage(
-    "bot",
-    "Validation result: approved. Basket is eligible based on mock age/account/credit checks. Click Tokenize Payment, then Place Order & Confirm."
-  );
+  postMessage("bot", "Validation approved. Click Tokenize Payment, then Place Order & Confirm.");
 }
 
 function tokenizeCheckout() {
@@ -381,16 +366,11 @@ function tokenizeCheckout() {
     return;
   }
 
-  if (state.currentUser.existingPaymentToken) {
-    state.paymentToken = state.currentUser.existingPaymentToken;
-    checkoutStatus.textContent = "Status: reused existing tokenized payment method.";
-    postMessage("bot", `Tokenization complete using saved token (${state.paymentToken}).`);
-  } else {
-    state.paymentToken = generateToken(state.currentUser.id);
-    checkoutStatus.textContent = "Status: new payment token generated.";
-    postMessage("bot", `Tokenization complete. Generated token (${state.paymentToken}).`);
-  }
-
+  state.paymentToken = state.currentUser.existingPaymentToken || generateToken(state.currentUser.id);
+  checkoutStatus.textContent = state.currentUser.existingPaymentToken
+    ? "Status: reused existing tokenized payment method."
+    : "Status: new payment token generated.";
+  postMessage("bot", `Tokenization complete (${state.paymentToken}).`);
   orderSummary.textContent = `Payment token ready. Basket total ${basketTotal.textContent.replace("Total: ", "")}.`;
   placeOrderBtn.disabled = false;
 }
@@ -400,111 +380,128 @@ function placeOrderAndConfirm() {
     postMessage("bot", "Please authenticate first.");
     return;
   }
-  if (!state.validationApproved || !state.paymentToken) {
-    postMessage("bot", "Please complete eligibility and tokenization before placing the order.");
-    return;
-  }
-  if (state.basket.length === 0) {
-    postMessage("bot", "Basket is empty.");
+  if (!state.validationApproved || !state.paymentToken || state.basket.length === 0) {
+    postMessage("bot", "Complete eligibility + tokenization and ensure basket has items.");
     return;
   }
 
   const total = state.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
   const orderId = generateOrderId();
   const confirmationCode = `CNF-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-  state.order = { orderId, confirmationCode, total };
 
+  state.order = { orderId, confirmationCode, total };
   state.basket = [];
   state.validationApproved = false;
   state.paymentToken = null;
+
   renderBasket();
   tokenizeBtn.disabled = true;
   placeOrderBtn.disabled = true;
   checkoutStatus.textContent = "Status: order captured and confirmed.";
-  orderSummary.textContent =
-    `Order ${orderId} confirmed (${confirmationCode}). Monthly total ${currency(total)}. ` +
-    "Tokenization and order capture completed.";
-  postMessage(
-    "bot",
-    `Order confirmed. Order ID ${orderId}, confirmation ${confirmationCode}. I have captured this order in session memory and can provide next-step fulfillment details.`
-  );
+  orderSummary.textContent = `Order ${orderId} confirmed (${confirmationCode}). Monthly total ${currency(total)}.`;
+  postMessage("bot", `Order confirmed. Order ID ${orderId}, confirmation ${confirmationCode}.`);
 }
 
 function authenticateUser(user) {
   user.authenticated = true;
   state.currentUser = user;
-  state.phase = "qualified";
   setStatus();
+
+  if (user.name === "Alex Carter") {
+    postMessage("bot", "Authentication successful for Alex Carter. Starting workflow now.");
+    postMessage("bot", "What do you want today: mobility, home internet, landline, or a bundle?");
+    return;
+  }
+
   postMessage(
     "bot",
-    `Authentication successful for ${user.name}. What do you want today: mobility, home internet, landline, or a bundle?`
+    `${user.name} authenticated. This demo only auto-starts the full workflow for Alex Carter. I can transfer ${user.name} to guided onboarding.`
   );
 }
 
-function ensureAreaCodeBeforeAuth(method) {
-  if (!state.areaCode) {
-    state.pendingLoginMethod = method;
-    postMessage("bot", "Before login, please enter your area code.");
-    showAreaCodeInput();
-    return false;
-  }
-  return true;
+function resolveUserFromIdentifier(raw) {
+  const value = raw.trim().toLowerCase();
+  if (!value) return null;
+  if (value === alexEmail) return mockUsers.find((u) => u.id === "u1001");
+
+  const digits = value.replace(/\D/g, "");
+  const prefix = digits.slice(0, 3);
+  const userId = phonePrefixToUser[prefix];
+  if (!userId) return null;
+  return mockUsers.find((u) => u.id === userId);
+}
+
+function requireAreaCodeBeforeAuth() {
+  if (state.areaCode) return true;
+  postMessage("bot", "Enter your area code first to unlock offers and continue authentication.");
+  showAreaCodeInput(() => {
+    askCustomerTypeQuestion();
+  });
+  return false;
 }
 
 function autoLogin() {
   openChatWidget();
-  if (!state.chatStarted) {
-    startConversation();
-  }
-  if (!ensureAreaCodeBeforeAuth("auto")) {
-    return;
-  }
-  const selected = mockUsers.find((u) => u.id === "u1001");
-  authenticateUser(selected);
+  if (!state.chatStarted) startConversation();
+  if (!requireAreaCodeBeforeAuth()) return;
+  authenticateUser(mockUsers.find((u) => u.id === "u1001"));
 }
 
 function manualLogin() {
   openChatWidget();
-  if (!state.chatStarted) {
-    startConversation();
-  }
-  if (!ensureAreaCodeBeforeAuth("manual")) {
+  if (!state.chatStarted) startConversation();
+  if (!requireAreaCodeBeforeAuth()) return;
+
+  const user = resolveUserFromIdentifier(authIdentifierInput.value);
+  if (!user) {
+    postMessage(
+      "bot",
+      "Authentication failed. Use phone starting with 416/647/986 or alex.test@gmail.com for Alex Carter."
+    );
     return;
   }
-  const selected = mockUsers.find((u) => u.id === userSelect.value);
-  if (!selected) {
-    postMessage("bot", "Please select a valid profile in Manual sign-in.");
-    return;
-  }
-  authenticateUser(selected);
+  authenticateUser(user);
+}
+
+function routeNewCustomerOnboarding() {
+  state.customerType = "new";
+  postMessage("bot", "You are being transferred into the new customer onboarding workflow.");
+  postMessage("bot", "Onboarding steps: profile setup, service selection, account creation, and schedule activation.");
+}
+
+function routeExistingCustomerAuth() {
+  state.customerType = "existing";
+  postMessage("bot", "Please authenticate now. Use Automatic sign-in or Manual sign-in (phone/email).", { force: true });
+}
+
+function askCustomerTypeQuestion() {
+  postMessage("bot", "Welcome. I'm Bell's virtual assistant. I use AI to offer you assistance, quickly.");
+  postMessage("bot", "Are you a current Bell customer?");
+  showChoiceButtons(["Yes", "No"], (answer) => {
+    postMessage("user", answer);
+    if (answer === "Yes") {
+      routeExistingCustomerAuth();
+      return;
+    }
+    routeNewCustomerOnboarding();
+  });
 }
 
 function startConversation() {
   if (state.chatStarted) return;
   state.chatStarted = true;
-  state.chatEnded = false;
+  chatInput.disabled = false;
   hideAvailabilityCard();
   clearQuickActions();
-  chatInput.disabled = false;
 
   window.setTimeout(() => {
     postMessage("bot", "We are connecting you, please hold.");
     window.setTimeout(() => {
-      postMessage("bot", "Welcome. I'm Bell's virtual assistant. I use AI to offer you assistance, quickly.");
-      postMessage("bot", "Are you a current Bell customer?");
-      showChoiceButtons(["Yes", "No"], (answer) => {
-        postMessage("user", answer);
-        if (answer === "Yes") {
-          state.customerType = "existing";
-          postMessage("bot", "Great. Please enter your area code, then continue to authentication.");
-          showAreaCodeInput();
-          return;
-        }
-        state.customerType = "new";
-        postMessage("bot", "No problem. Please enter your area code and I will guide you through new sign-up.");
-        showAreaCodeInput();
+      postMessage("bot", "Enter your area code to unlock offers.");
+      showAreaCodeInput(() => {
+        askCustomerTypeQuestion();
       });
-    }, 800);
+    }, 700);
   }, 500);
 }
 
@@ -520,55 +517,60 @@ function closeChatWidget() {
 function toggleChatWidget() {
   if (chatWidget.classList.contains("hidden")) {
     openChatWidget();
-    if (!state.chatStarted || state.chatEnded) {
-      startConversation();
-    }
+    if (!state.chatStarted) startConversation();
     return;
   }
   closeChatWidget();
 }
 
-function clearSessionAuth() {
+function clearAuthState() {
   mockUsers.forEach((u) => {
     u.authenticated = false;
   });
 }
 
-function resetConversationState() {
-  state.phase = "idle";
+function wipeSession({ closeWidget = false, restart = false } = {}) {
   state.chatStarted = false;
-  state.chatEnded = false;
   state.currentUser = null;
   state.customerType = null;
   state.areaCode = null;
-  state.pendingLoginMethod = null;
   state.intent = null;
-  clearSessionAuth();
-  setStatus();
-}
+  state.basket = [];
+  state.muted = false;
+  state.validationApproved = false;
+  state.paymentToken = null;
+  state.order = null;
 
-function refreshChat() {
   chatWindow.innerHTML = "";
   clearQuickActions();
   hideAvailabilityCard();
-  resetConversationState();
-  state.basket = [];
+  chatInput.disabled = false;
+  chatMenu.classList.add("hidden");
+  muteChatBtn.textContent = "Mute Chat";
+
+  clearAuthState();
+  authIdentifierInput.value = "";
+
+  renderCarousel();
   renderBasket();
   resetCheckoutFlow();
-  renderCarousel();
-  startConversation();
+  setStatus();
+
+  if (closeWidget) {
+    closeChatWidget();
+  }
+  if (restart) {
+    openChatWidget();
+    startConversation();
+  }
+}
+
+function refreshChat() {
+  wipeSession({ restart: true });
 }
 
 function endChat() {
-  state.chatEnded = true;
-  state.chatStarted = false;
-  chatInput.disabled = true;
-  clearQuickActions();
-  hideAvailabilityCard();
-  postMessage("bot", "Chat ended. Click the chat button to start again.", { force: true });
-  window.setTimeout(() => {
-    closeChatWidget();
-  }, 500);
+  wipeSession({ closeWidget: true, restart: false });
 }
 
 function toggleMute() {
@@ -577,28 +579,14 @@ function toggleMute() {
   postMessage("bot", state.muted ? "Chat muted." : "Chat unmuted.", { force: true });
 }
 
-function initAuthUsers() {
-  userSelect.innerHTML = "";
-  mockUsers.forEach((u) => {
-    const option = document.createElement("option");
-    option.value = u.id;
-    option.textContent = `${u.name} (${u.id}) - credit ${u.creditScore}`;
-    userSelect.appendChild(option);
-  });
-}
-
 chatLauncher.addEventListener("click", toggleChatWidget);
 openChatHeader.addEventListener("click", () => {
   openChatWidget();
-  if (!state.chatStarted || state.chatEnded) {
-    startConversation();
-  }
+  if (!state.chatStarted) startConversation();
 });
 openChatOffers.addEventListener("click", () => {
   openChatWidget();
-  if (!state.chatStarted || state.chatEnded) {
-    startConversation();
-  }
+  if (!state.chatStarted) startConversation();
 });
 closeChat.addEventListener("click", closeChatWidget);
 autoLoginBtn.addEventListener("click", autoLogin);
@@ -621,25 +609,13 @@ endChatBtn.addEventListener("click", () => {
 });
 
 newCustomerBtn.addEventListener("click", () => {
-  state.customerType = "new";
   postMessage("user", "I'm new to Bell");
-  postMessage("bot", "Great, let's sign you up as a new customer. I can now show starter plans or transfer you to the signup flow.");
+  routeNewCustomerOnboarding();
 });
 
 existingCustomerBtn.addEventListener("click", () => {
-  state.customerType = "existing";
   postMessage("user", "I'm an existing Bell customer");
-  postMessage("bot", "Perfect. Please authenticate now using Automatic sign-in or Manual sign-in.");
-
-  if (state.pendingLoginMethod === "auto") {
-    state.pendingLoginMethod = null;
-    autoLogin();
-    return;
-  }
-  if (state.pendingLoginMethod === "manual") {
-    state.pendingLoginMethod = null;
-    manualLogin();
-  }
+  routeExistingCustomerAuth();
 });
 
 validateBtn.addEventListener("click", runEligibility);
@@ -655,7 +631,12 @@ chatForm.addEventListener("submit", async (event) => {
   chatInput.value = "";
 
   if (!state.currentUser?.authenticated) {
-    postMessage("bot", "Please complete area code and authentication first.");
+    postMessage("bot", "Authenticate first. If you're not a customer, I can continue onboarding.");
+    return;
+  }
+
+  if (state.currentUser.name !== "Alex Carter") {
+    postMessage("bot", "Only Alex Carter proceeds into the full workflow in this demo. I can keep this in onboarding mode.");
     return;
   }
 
@@ -670,12 +651,11 @@ chatForm.addEventListener("submit", async (event) => {
   renderCarousel(intent);
   postMessage(
     "bot",
-    `I detected intent: ${intent}. Here are matching Bell-style offers for area code ${state.areaCode}. Add any combination to your basket.`
+    `I detected intent: ${intent}. Here are matching offers for area code ${state.areaCode}. Add any combination to your basket.`
   );
 });
 
 function boot() {
-  initAuthUsers();
   setStatus();
   resetCheckoutFlow();
   renderCarousel();
