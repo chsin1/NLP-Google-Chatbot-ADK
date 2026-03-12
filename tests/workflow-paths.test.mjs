@@ -1,0 +1,76 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  LEGACY_FLOW_STEPS,
+  PATH_STATUS,
+  canProceed,
+  nextLoopGuard,
+  parseHelpdeskIntent,
+  parseSalesIntentDeterministic,
+  stableContextHash
+} from "../shared/workflow-utils.mjs";
+
+function baseContext() {
+  return {
+    selectedEntryIntent: "New Products / Upgrades",
+    customerType: "existing",
+    areaCode: "416",
+    authUser: { id: "u1001" },
+    intent: "mobility",
+    basket: [{ financingEligible: true, devicePrice: 899 }],
+    payment: { method: "visa", last4Confirmed: true, verified: true },
+    financing: { planType: "smartpay", termMonths: 24, approvalStatus: "approved" },
+    newOnboarding: { leadId: "lead_123" },
+    shipping: { address: "100 Test Ave" }
+  };
+}
+
+test("legacy state list explicitly tracks deprecated steps", () => {
+  assert.deepEqual(LEGACY_FLOW_STEPS, ["AREA_CODE_ENTRY", "AVAILABILITY_SELECTION", "CLIENT_TYPE_SELECTION"]);
+  assert.equal(PATH_STATUS.IN_PROGRESS, "in_progress");
+});
+
+test("forward path canProceed coverage for existing + checkout", () => {
+  const ctx = baseContext();
+  assert.equal(canProceed("CUSTOMER_STATUS_SELECTION", ctx), true);
+  assert.equal(canProceed("EXISTING_AREA_CODE_CHECK", ctx), true);
+  assert.equal(canProceed("EXISTING_AUTH_MODE", ctx), true);
+  assert.equal(canProceed("OFFER_BROWSE", ctx), true);
+  assert.equal(canProceed("PAYMENT_METHOD", ctx), true);
+  assert.equal(canProceed("PAYMENT_CONFIRM_LAST4", ctx), true);
+  assert.equal(canProceed("PAYMENT_CVV", ctx), true);
+  assert.equal(canProceed("SHIPPING_SELECTION", ctx), true);
+  assert.equal(canProceed("ORDER_REVIEW", ctx), true);
+  assert.equal(canProceed("ORDER_CONFIRMED", ctx), true);
+});
+
+test("negative gating checks fail when required context is missing", () => {
+  const ctx = baseContext();
+  ctx.areaCode = null;
+  assert.equal(canProceed("EXISTING_AUTH_MODE", ctx), false);
+  assert.equal(canProceed("OFFER_BROWSE", ctx), false);
+  ctx.payment.verified = false;
+  assert.equal(canProceed("SHIPPING_SELECTION", ctx), false);
+  ctx.shipping.address = "";
+  assert.equal(canProceed("ORDER_REVIEW", ctx), false);
+});
+
+test("deterministic parser detects helpdesk routes and sales intent", () => {
+  assert.equal(parseHelpdeskIntent("I need hardware support"), "hardware");
+  assert.equal(parseHelpdeskIntent("Corporate support please"), "corporate_support");
+  assert.equal(parseHelpdeskIntent("help desk and troubleshooting"), "support");
+  assert.equal(parseSalesIntentDeterministic("Need home internet"), "home internet");
+  assert.equal(parseSalesIntentDeterministic("show me bundles"), "bundle");
+  assert.equal(parseSalesIntentDeterministic("nonsense input"), null);
+});
+
+test("loop guard marks stuck after repeated same-step no-context changes", () => {
+  const ctx = baseContext();
+  const hash = stableContextHash(ctx);
+  let guard = nextLoopGuard({}, "HELPDESK_ENTRY", hash, 3);
+  assert.equal(guard.stuck, false);
+  guard = nextLoopGuard(guard, "HELPDESK_ENTRY", hash, 3);
+  assert.equal(guard.stuck, false);
+  guard = nextLoopGuard(guard, "HELPDESK_ENTRY", hash, 3);
+  assert.equal(guard.stuck, true);
+});

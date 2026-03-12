@@ -33,6 +33,36 @@ Run unit tests:
 node --test tests/*.test.mjs
 ```
 
+Metrics API (rolling KPI view from logs):
+
+```bash
+curl "http://localhost:3000/api/metrics?days=30"
+```
+
+Optional window params:
+
+- `days` (default `30`)
+- `since` (ISO timestamp)
+- `until` (ISO timestamp)
+
+Example:
+
+```bash
+curl "http://localhost:3000/api/metrics?since=2026-03-01T00:00:00.000Z&until=2026-03-31T23:59:59.000Z"
+```
+
+The metrics payload includes KPI families for:
+
+- Session volume and conversion rate
+- Auth success/failure rate
+- Order attempt/success/blocked rates
+- Clarification, escalation, and loop-detection rates
+- Financing adoption and approval rate
+- Shipping lookup/manual usage
+- Path started/completed/failed coverage
+- Route breakdown (`sales`, `support`, `corporate`, `agent`)
+- Daily trend series and top error events
+
 ## Optional LLM hookup
 
 By default, intent classification uses a local fallback classifier.

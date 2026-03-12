@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyIntentFallback, rankAddressSuggestions } from "./shared/flow-utils.mjs";
+import { buildMetrics, parseJsonLines } from "./shared/metrics-utils.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,6 +84,15 @@ async function writeLog(level, payload = {}) {
   await appendFile(LOG_FILES[logLevel], `${line}\n`, "utf8");
 }
 
+async function readLogLines(filePath) {
+  try {
+    const raw = await readFile(filePath, "utf8");
+    return parseJsonLines(raw);
+  } catch {
+    return [];
+  }
+}
+
 function collectRequestBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -135,6 +145,22 @@ const server = createServer(async (req, res) => {
       json(res, 200, { suggestions });
     } catch {
       json(res, 400, { error: "Invalid JSON body" });
+    }
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/metrics") {
+    try {
+      const days = Number(url.searchParams.get("days") || 30);
+      const since = url.searchParams.get("since");
+      const until = url.searchParams.get("until");
+      const events = await readLogLines(LOG_FILES.info);
+      const errors = await readLogLines(LOG_FILES.error);
+      const qa = await readLogLines(LOG_FILES.qa);
+      const metrics = buildMetrics(events, errors, qa, { days, since, until });
+      json(res, 200, metrics);
+    } catch {
+      json(res, 500, { error: "Unable to compute metrics" });
     }
     return;
   }

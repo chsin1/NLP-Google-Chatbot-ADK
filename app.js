@@ -15,21 +15,27 @@ import {
   runMockFinancingApproval
 } from "./shared/client-utils.mjs";
 import { buildReceiptHtml, getRetryOutcome, resolveRouteFromStep } from "./shared/conversation-utils.mjs";
+import {
+  LEGACY_FLOW_STEPS,
+  PATH_STATUS,
+  canProceed as canProceedStep,
+  nextLoopGuard,
+  parseHelpdeskIntent,
+  parseSalesIntentDeterministic,
+  stableContextHash
+} from "./shared/workflow-utils.mjs";
 
 const FLOW_STEPS = {
   INIT_CONNECTING: "INIT_CONNECTING",
   CUSTOMER_STATUS_SELECTION: "CUSTOMER_STATUS_SELECTION",
   EXISTING_AREA_CODE_CHECK: "EXISTING_AREA_CODE_CHECK",
-  AREA_CODE_ENTRY: "AREA_CODE_ENTRY",
   NEW_AREA_CODE_ENTRY: "NEW_AREA_CODE_ENTRY",
-  AVAILABILITY_SELECTION: "AVAILABILITY_SELECTION",
   EXISTING_AUTH_MODE: "EXISTING_AUTH_MODE",
   EXISTING_AUTH_IDENTIFIER: "EXISTING_AUTH_IDENTIFIER",
   NEW_ONBOARD_NAME: "NEW_ONBOARD_NAME",
   NEW_ONBOARD_EMAIL: "NEW_ONBOARD_EMAIL",
   NEW_ONBOARD_PHONE: "NEW_ONBOARD_PHONE",
   HELPDESK_ENTRY: "HELPDESK_ENTRY",
-  CLIENT_TYPE_SELECTION: "CLIENT_TYPE_SELECTION",
   CORPORATE_DISCOVERY: "CORPORATE_DISCOVERY",
   SUPPORT_DISCOVERY: "SUPPORT_DISCOVERY",
   HARDWARE_TROUBLESHOOT: "HARDWARE_TROUBLESHOOT",
@@ -55,6 +61,57 @@ const FLOW_STEPS = {
   SHIPPING_LOOKUP: "SHIPPING_LOOKUP",
   ORDER_REVIEW: "ORDER_REVIEW",
   ORDER_CONFIRMED: "ORDER_CONFIRMED"
+};
+
+const STEP_CONTRACT = {
+  [FLOW_STEPS.HELPDESK_ENTRY]: {
+    validInputs: ["help desk", "new products / upgrades", "troubleshoot existing services", "hardware support", "corporate support"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.CUSTOMER_STATUS_SELECTION],
+    fallbackTarget: FLOW_STEPS.HELPDESK_ENTRY
+  },
+  [FLOW_STEPS.CUSTOMER_STATUS_SELECTION]: {
+    validInputs: ["new client", "existing bell client"],
+    requiredContext: ["selectedEntryIntent"],
+    allowedNext: [FLOW_STEPS.EXISTING_AREA_CODE_CHECK, FLOW_STEPS.NEW_ONBOARD_NAME],
+    fallbackTarget: FLOW_STEPS.HELPDESK_ENTRY
+  },
+  [FLOW_STEPS.EXISTING_AREA_CODE_CHECK]: {
+    validInputs: ["3-digit area code"],
+    requiredContext: ["customerType"],
+    allowedNext: [FLOW_STEPS.EXISTING_AUTH_MODE],
+    fallbackTarget: FLOW_STEPS.CUSTOMER_STATUS_SELECTION
+  },
+  [FLOW_STEPS.NEW_ONBOARD_NAME]: {
+    validInputs: ["full name"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.NEW_ONBOARD_EMAIL],
+    fallbackTarget: FLOW_STEPS.NEW_ONBOARD_NAME
+  },
+  [FLOW_STEPS.NEW_ONBOARD_EMAIL]: {
+    validInputs: ["email"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.NEW_ONBOARD_PHONE],
+    fallbackTarget: FLOW_STEPS.NEW_ONBOARD_EMAIL
+  },
+  [FLOW_STEPS.NEW_ONBOARD_PHONE]: {
+    validInputs: ["phone number"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.NEW_AREA_CODE_ENTRY],
+    fallbackTarget: FLOW_STEPS.NEW_ONBOARD_PHONE
+  },
+  [FLOW_STEPS.NEW_AREA_CODE_ENTRY]: {
+    validInputs: ["3-digit area code"],
+    requiredContext: ["customerType"],
+    allowedNext: [FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SUPPORT_DISCOVERY, FLOW_STEPS.HARDWARE_TROUBLESHOOT, FLOW_STEPS.CORPORATE_DISCOVERY],
+    fallbackTarget: FLOW_STEPS.NEW_AREA_CODE_ENTRY
+  },
+  [FLOW_STEPS.EXISTING_AUTH_MODE]: {
+    validInputs: ["continue automatically", "authenticate with phone/email"],
+    requiredContext: ["customerType", "areaCode"],
+    allowedNext: [FLOW_STEPS.EXISTING_AUTH_IDENTIFIER, FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SUPPORT_DISCOVERY, FLOW_STEPS.HARDWARE_TROUBLESHOOT, FLOW_STEPS.CORPORATE_DISCOVERY],
+    fallbackTarget: FLOW_STEPS.EXISTING_AUTH_MODE
+  }
 };
 
 const CATEGORY_PAGES = ["mobility", "home internet", "landline"];
@@ -263,6 +320,16 @@ const state = {
     areaCodeRequiredForTask: false,
     customerStatusAsked: false,
     selectedEntryIntent: null,
+    loopGuard: {
+      lastStep: null,
+      lastContextHash: null,
+      sameStepCount: 0
+    },
+    pathMeta: {
+      currentJourney: null,
+      journeyStartedAt: null,
+      journeyStatus: PATH_STATUS.IDLE
+    },
     customerType: null,
     clientType: null,
     authUser: null,
@@ -493,6 +560,16 @@ function resetSessionState() {
     areaCodeRequiredForTask: false,
     customerStatusAsked: false,
     selectedEntryIntent: null,
+    loopGuard: {
+      lastStep: null,
+      lastContextHash: null,
+      sameStepCount: 0
+    },
+    pathMeta: {
+      currentJourney: null,
+      journeyStartedAt: null,
+      journeyStatus: PATH_STATUS.IDLE
+    },
     customerType: null,
     clientType: null,
     authUser: null,
@@ -572,46 +649,10 @@ function resetSessionState() {
 }
 
 function isStepValid(nextStep, ctx) {
-  switch (nextStep) {
-    case FLOW_STEPS.CUSTOMER_STATUS_SELECTION:
-      return Boolean(ctx.selectedEntryIntent);
-    case FLOW_STEPS.EXISTING_AREA_CODE_CHECK:
-      return ctx.customerType === "existing";
-    case FLOW_STEPS.AVAILABILITY_SELECTION:
-      return Boolean(ctx.areaCode);
-    case FLOW_STEPS.EXISTING_AUTH_MODE:
-      return ctx.customerType === "existing";
-    case FLOW_STEPS.DEVICE_OS_SELECTION:
-      return ctx.intent === "mobility";
-    case FLOW_STEPS.PAYMENT_FINANCING_TERM:
-      return getFinancingAmount(ctx.basket) > 0;
-    case FLOW_STEPS.PAYMENT_FINANCING_UPFRONT:
-      return getFinancingAmount(ctx.basket) > 0 && Boolean(ctx.financing.planType);
-    case FLOW_STEPS.PAYMENT_FINANCING_APPROVAL:
-      return getFinancingAmount(ctx.basket) > 0 && Boolean(ctx.financing.planType) && (ctx.financing.termMonths === 24 || ctx.financing.termMonths === 36);
-    case FLOW_STEPS.PAYMENT_FINANCING_CONFIRM:
-      return ctx.financing.approvalStatus === "approved";
-    case FLOW_STEPS.OFFER_BROWSE:
-      return canAccessOfferBrowse(ctx) && Boolean(ctx.areaCode);
-    case FLOW_STEPS.PAYMENT_METHOD:
-      return ctx.basket.length > 0;
-    case FLOW_STEPS.PAYMENT_CONFIRM_LAST4:
-      return Boolean(ctx.payment.method);
-    case FLOW_STEPS.PAYMENT_CVV:
-      return ctx.payment.last4Confirmed;
-    case FLOW_STEPS.SHIPPING_SELECTION:
-      return ctx.payment.verified;
-    case FLOW_STEPS.SHIPPING_LOOKUP:
-      return ctx.payment.verified;
-    case FLOW_STEPS.SHIPPING_MANUAL_ENTRY:
-      return ctx.payment.verified;
-    case FLOW_STEPS.ORDER_REVIEW:
-      return Boolean(ctx.shipping.address);
-    case FLOW_STEPS.ORDER_CONFIRMED:
-      return true;
-    default:
-      return true;
+  if (LEGACY_FLOW_STEPS.includes(nextStep)) {
+    return false;
   }
+  return canProceedStep(nextStep, ctx);
 }
 
 function getPatchedContext(patch = {}) {
@@ -622,6 +663,8 @@ function getPatchedContext(patch = {}) {
   if (patch.areaCodeRequiredForTask !== undefined) next.areaCodeRequiredForTask = patch.areaCodeRequiredForTask;
   if (patch.customerStatusAsked !== undefined) next.customerStatusAsked = patch.customerStatusAsked;
   if (patch.selectedEntryIntent !== undefined) next.selectedEntryIntent = patch.selectedEntryIntent;
+  if (patch.loopGuard) next.loopGuard = { ...next.loopGuard, ...patch.loopGuard };
+  if (patch.pathMeta) next.pathMeta = { ...next.pathMeta, ...patch.pathMeta };
   if (patch.customerType !== undefined) next.customerType = patch.customerType;
   if (patch.clientType !== undefined) next.clientType = patch.clientType;
   if (patch.authUser !== undefined) next.authUser = patch.authUser;
@@ -648,7 +691,37 @@ function applyContextPatch(patch = {}) {
   state.context = getPatchedContext(patch);
 }
 
-function transitionTo(nextStep, patchContext = {}, { pushHistory = true } = {}) {
+function transitionTo(nextStep, patchContext = {}, { pushHistory = true, enforceContract = true } = {}) {
+  if (LEGACY_FLOW_STEPS.includes(nextStep)) {
+    logClient("error", "invalid_flow_transition", { from: state.flowStep, to: nextStep, reason: "legacy_step_deprecated" });
+    postMessage("bot", "That step is no longer available. I will keep you in the current flow.");
+    return;
+  }
+
+  const contract = STEP_CONTRACT[state.flowStep];
+  if (
+    enforceContract &&
+    contract?.allowedNext?.length &&
+    nextStep !== state.flowStep &&
+    nextStep !== contract.fallbackTarget &&
+    !contract.allowedNext.includes(nextStep)
+  ) {
+    logClient("error", "invalid_flow_transition", {
+      from: state.flowStep,
+      to: nextStep,
+      reason: "step_contract_violation",
+      fallbackTarget: contract.fallbackTarget
+    });
+    const fallback = contract.fallbackTarget || state.flowStep;
+    if (fallback !== state.flowStep) {
+      transitionTo(fallback, {}, { pushHistory: false });
+      return;
+    }
+    postMessage("bot", "I need one clarification before moving to the next step.");
+    renderStep(state.flowStep);
+    return;
+  }
+
   const nextContext = getPatchedContext(patchContext);
   if (!isStepValid(nextStep, nextContext)) {
     logClient("error", "invalid_flow_transition", {
@@ -656,6 +729,7 @@ function transitionTo(nextStep, patchContext = {}, { pushHistory = true } = {}) 
       to: nextStep,
       context: { areaCode: state.context.areaCode, customerType: state.context.customerType }
     });
+    finishPath(PATH_STATUS.FAILED, { reason: "invalid_transition", to: nextStep });
     postMessage("bot", "Cannot continue yet. Please complete the current step first.");
     renderStep(state.flowStep);
     return;
@@ -672,6 +746,23 @@ function transitionTo(nextStep, patchContext = {}, { pushHistory = true } = {}) 
 
   state.context = nextContext;
   state.context.clarifyRetries = 0;
+  const guard = nextLoopGuard(
+    state.context.loopGuard,
+    nextStep,
+    stableContextHash(state.context),
+    3
+  );
+  state.context.loopGuard = {
+    lastStep: guard.lastStep,
+    lastContextHash: guard.lastContextHash,
+    sameStepCount: guard.sameStepCount
+  };
+  if (guard.stuck) {
+    logClient("info", "flow_loop_detected", {
+      step: nextStep,
+      sameStepCount: guard.sameStepCount
+    });
+  }
   const prev = state.flowStep;
   state.flowStep = nextStep;
   logClient("info", "flow_transition", { from: prev, to: nextStep, patchContext });
@@ -684,7 +775,7 @@ function goBack() {
     logClient("info", "flow_clarify_prompt", { reason: "back_no_history", current: state.flowStep });
     showChoiceButtons(["Login", "Restart", "Continue"], (choice) => {
       if (choice === "Login") {
-        transitionTo(FLOW_STEPS.EXISTING_AREA_CODE_CHECK, { customerType: "existing" }, { pushHistory: false });
+        transitionTo(FLOW_STEPS.EXISTING_AREA_CODE_CHECK, { customerType: "existing" }, { pushHistory: false, enforceContract: false });
         return;
       }
       if (choice === "Restart") {
@@ -760,12 +851,7 @@ function renderBasket() {
 }
 
 function detectIntentFallback(text = "") {
-  const lower = text.toLowerCase();
-  if (lower.includes("internet") || lower.includes("fibe") || lower.includes("wifi")) return "home internet";
-  if (lower.includes("landline") || lower.includes("home phone")) return "landline";
-  if (lower.includes("bundle")) return "bundle";
-  if (lower.includes("human") || lower.includes("agent")) return "human_handoff";
-  return "mobility";
+  return parseSalesIntentDeterministic(text);
 }
 
 async function detectIntent(message) {
@@ -777,9 +863,9 @@ async function detectIntent(message) {
     });
     if (!response.ok) throw new Error("intent endpoint failed");
     const payload = await response.json();
-    return payload.intent || detectIntentFallback(message);
+    return payload.intent || null;
   } catch {
-    return detectIntentFallback(message);
+    return null;
   }
 }
 
@@ -803,8 +889,58 @@ function normalizeEntryIntent(value = "") {
   return "support";
 }
 
+function routeHelpdeskSelection(choice, { pushHistory = true } = {}) {
+  const helpdeskIntent = parseHelpdeskIntent(choice);
+  if (!helpdeskIntent) return false;
+  const selectedEntryIntent =
+    helpdeskIntent === "sales"
+      ? "New Products / Upgrades"
+      : helpdeskIntent === "hardware"
+        ? "Hardware Support"
+        : helpdeskIntent === "corporate_support"
+          ? "Corporate Support"
+          : "Help Desk";
+  transitionTo(
+    FLOW_STEPS.CUSTOMER_STATUS_SELECTION,
+    {
+      selectedEntryIntent,
+      activeTask: helpdeskIntent,
+      areaCodeRequiredForTask: helpdeskIntent !== "corporate_support"
+    },
+    { pushHistory }
+  );
+  return true;
+}
+
+function startPath(route) {
+  const current = state.context.pathMeta.currentJourney;
+  if (current === route && state.context.pathMeta.journeyStatus === PATH_STATUS.IN_PROGRESS) return;
+  applyContextPatch({
+    pathMeta: {
+      currentJourney: route,
+      journeyStartedAt: new Date().toISOString(),
+      journeyStatus: PATH_STATUS.IN_PROGRESS
+    }
+  });
+  logClient("info", "path_started", { route });
+}
+
+function finishPath(status, details = {}) {
+  if (!state.context.pathMeta.currentJourney) return;
+  const route = state.context.pathMeta.currentJourney;
+  applyContextPatch({
+    pathMeta: {
+      ...state.context.pathMeta,
+      journeyStatus: status
+    }
+  });
+  const event = status === PATH_STATUS.COMPLETED ? "path_completed" : "path_failed";
+  logClient(status === PATH_STATUS.COMPLETED ? "info" : "error", event, { route, ...details });
+}
+
 function continueFromSelectedIntent({ pushHistory = true } = {}) {
   const intent = normalizeEntryIntent(state.context.selectedEntryIntent || state.context.activeTask || "");
+  startPath(intent);
   if (intent === "sales") {
     transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory });
     return;
@@ -1210,6 +1346,7 @@ function confirmOrder() {
     chargeToday,
     shippingMode: state.context.shipping.mode
   });
+  finishPath(PATH_STATUS.COMPLETED, { outcome: "order_confirmed", orderId });
 
   applyContextPatch({ basket: [] });
   renderBasket();
@@ -1309,20 +1446,10 @@ function renderStep(step) {
       break;
     }
 
-    case FLOW_STEPS.AREA_CODE_ENTRY:
-      hideAvailabilityCard();
-      postMessage("bot", "Enter your 3-digit area code to unlock offers.");
-      setChatInputHint("Area code (e.g., 416)");
-      break;
-
     case FLOW_STEPS.NEW_AREA_CODE_ENTRY:
       hideAvailabilityCard();
       postMessage("bot", "Thanks. Enter your 3-digit area code so I can unlock local offers.");
       setChatInputHint("Area code (e.g., 416)");
-      break;
-
-    case FLOW_STEPS.AVAILABILITY_SELECTION:
-      hideAvailabilityCard();
       break;
 
     case FLOW_STEPS.EXISTING_AUTH_MODE:
@@ -1390,33 +1517,9 @@ function renderStep(step) {
         ],
         (choice) => {
           postMessage("user", choice);
-          transitionTo(
-            FLOW_STEPS.CUSTOMER_STATUS_SELECTION,
-            {
-              selectedEntryIntent: choice,
-              activeTask: normalizeEntryIntent(choice),
-              areaCodeRequiredForTask: choice !== "Corporate Support"
-            },
-            { pushHistory: true }
-          );
+          routeHelpdeskSelection(choice, { pushHistory: true });
         }
       );
-      break;
-
-    case FLOW_STEPS.CLIENT_TYPE_SELECTION:
-      postMessage("bot", "Please confirm: are you a personal or corporate client?");
-      showChoiceButtons(["Personal Client", "Corporate Client"], (choice) => {
-        postMessage("user", choice);
-        if (choice === "Corporate Client") {
-          applyContextPatch({ clientType: "corporate" });
-          logClient("info", "client_type_selected", { clientType: "corporate" });
-          transitionTo(FLOW_STEPS.CORPORATE_DISCOVERY, { activeTask: "corporate_support" }, { pushHistory: true });
-          return;
-        }
-        applyContextPatch({ clientType: "personal" });
-        logClient("info", "client_type_selected", { clientType: "personal" });
-        continueFromSelectedIntent({ pushHistory: true });
-      });
       break;
 
     case FLOW_STEPS.CORPORATE_DISCOVERY:
@@ -1434,6 +1537,7 @@ function renderStep(step) {
         if (choice === "Resolved") {
           applyContextPatch({ supportCase: { resolved: true } });
           logClient("info", "troubleshooting_resolved", { category: state.context.supportCase.category });
+          finishPath(PATH_STATUS.COMPLETED, { outcome: "support_resolved" });
           transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "support_complete" }, { pushHistory: true });
           return;
         }
@@ -1455,6 +1559,7 @@ function renderStep(step) {
         postMessage("user", choice);
         if (choice === "Resolved") {
           logClient("info", "troubleshooting_resolved", { category: "hardware_resolved" });
+          finishPath(PATH_STATUS.COMPLETED, { outcome: "hardware_resolved" });
           transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "hardware_complete" }, { pushHistory: true });
           return;
         }
@@ -1481,7 +1586,7 @@ function renderStep(step) {
       const nextStep = routeFromAgentAssist(state.context.activeTask);
       postMessage("bot", "Thanks for clarifying. I’ll route you to the right step now.");
       logClient("info", "warm_agent_re_routed_step", { activeTask: state.context.activeTask, nextStep });
-      transitionTo(nextStep, getRoutePatchForStep(nextStep), { pushHistory: false });
+      transitionTo(nextStep, getRoutePatchForStep(nextStep), { pushHistory: false, enforceContract: false });
       break;
     }
 
@@ -1490,7 +1595,11 @@ function renderStep(step) {
       postMessage("bot", "What do you need today: mobility, home internet, landline, or bundle?");
       showChoiceButtons(["Mobility", "Home internet", "Landline", "Bundle"], async (choice) => {
         postMessage("user", choice);
-        const intent = await detectIntent(choice);
+        const intent = parseSalesIntentDeterministic(choice) || (await detectIntent(choice));
+        if (!intent) {
+          handleUnclearInput(choice, "Please choose mobility, home internet, landline, or bundle.");
+          return;
+        }
         const pageMap = {
           mobility: 0,
           "home internet": 1,
@@ -1848,7 +1957,7 @@ function handleGlobalCommands(message) {
   }
 
   if (cmd.includes("re-login") || cmd.includes("login again")) {
-    transitionTo(FLOW_STEPS.EXISTING_AREA_CODE_CHECK, { customerType: "existing" }, { pushHistory: true });
+    transitionTo(FLOW_STEPS.EXISTING_AREA_CODE_CHECK, { customerType: "existing" }, { pushHistory: true, enforceContract: false });
     return true;
   }
 
@@ -1890,6 +1999,42 @@ function getRoutePatchForStep(nextStep) {
 }
 
 function handleUnclearInput(message, fallbackPrompt) {
+  const loopState = nextLoopGuard(
+    state.context.loopGuard,
+    state.flowStep,
+    stableContextHash(state.context),
+    3
+  );
+  applyContextPatch({
+    loopGuard: {
+      lastStep: loopState.lastStep,
+      lastContextHash: loopState.lastContextHash,
+      sameStepCount: loopState.sameStepCount
+    }
+  });
+  if (loopState.stuck) {
+    postMessage("bot", "I may be repeating myself. Choose one option so I can recover quickly.");
+    showChoiceButtons(["Continue", "Go back", "Restart", "Agent assist"], (choice) => {
+      postMessage("user", choice);
+      if (choice === "Continue") {
+        renderStep(state.flowStep);
+        return;
+      }
+      if (choice === "Go back") {
+        goBack();
+        return;
+      }
+      if (choice === "Restart") {
+        refreshChat();
+        return;
+      }
+      applyContextPatch({ escalatedToAgent: true });
+      transitionTo(FLOW_STEPS.WARM_AGENT_ROUTING, { activeTask: "clarification_support" }, { pushHistory: true });
+    });
+    logClient("info", "flow_loop_detected", { step: state.flowStep, sameStepCount: loopState.sameStepCount, source: "unclear_input" });
+    return;
+  }
+
   const outcome = getRetryOutcome(state.context.clarifyRetries, 3);
   applyContextPatch({ clarifyRetries: outcome.nextRetries });
   logClient("info", "clarify_retry_incremented", { retries: outcome.nextRetries, message });
@@ -1955,7 +2100,6 @@ async function handleChatInput(message) {
       );
       return;
 
-    case FLOW_STEPS.AREA_CODE_ENTRY:
     case FLOW_STEPS.NEW_AREA_CODE_ENTRY:
       if (!/^\d{3}$/.test(trimmed)) {
         handleUnclearInput(message, "Please enter a valid 3-digit area code.");
@@ -1978,10 +2122,6 @@ async function handleChatInput(message) {
         },
         { pushHistory: true }
       );
-      return;
-
-    case FLOW_STEPS.AVAILABILITY_SELECTION:
-      postMessage("bot", "Availability has already been confirmed. Please continue with customer verification.");
       return;
 
     case FLOW_STEPS.EXISTING_AUTH_IDENTIFIER: {
@@ -2012,71 +2152,10 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.HELPDESK_ENTRY:
-      if (lower.includes("upgrade") || lower.includes("product") || lower.includes("sales")) {
-        transitionTo(
-          FLOW_STEPS.CUSTOMER_STATUS_SELECTION,
-          {
-            selectedEntryIntent: "New Products / Upgrades",
-            activeTask: "sales",
-            areaCodeRequiredForTask: true
-          },
-          { pushHistory: true }
-        );
-        return;
-      }
-      if (lower.includes("corporate")) {
-        transitionTo(
-          FLOW_STEPS.CUSTOMER_STATUS_SELECTION,
-          {
-            selectedEntryIntent: "Corporate Support",
-            activeTask: "corporate_support",
-            areaCodeRequiredForTask: false
-          },
-          { pushHistory: true }
-        );
-        return;
-      }
-      if (lower.includes("troubleshoot") || lower.includes("help desk") || lower.includes("support")) {
-        transitionTo(
-          FLOW_STEPS.CUSTOMER_STATUS_SELECTION,
-          {
-            selectedEntryIntent: "Help Desk",
-            activeTask: "support",
-            areaCodeRequiredForTask: true
-          },
-          { pushHistory: true }
-        );
-        return;
-      }
-      if (lower.includes("hardware")) {
-        transitionTo(
-          FLOW_STEPS.CUSTOMER_STATUS_SELECTION,
-          {
-            selectedEntryIntent: "Hardware Support",
-            activeTask: "hardware",
-            areaCodeRequiredForTask: true
-          },
-          { pushHistory: true }
-        );
+      if (routeHelpdeskSelection(trimmed, { pushHistory: true })) {
         return;
       }
       handleUnclearInput(message, "Please choose: Help Desk, New Products/Upgrades, Troubleshooting, Hardware, or Corporate Support.");
-      return;
-
-    case FLOW_STEPS.CLIENT_TYPE_SELECTION:
-      if (lower.includes("corporate")) {
-        applyContextPatch({ clientType: "corporate" });
-        logClient("info", "client_type_selected", { clientType: "corporate", viaChatInput: true });
-        transitionTo(FLOW_STEPS.CORPORATE_DISCOVERY, { activeTask: "corporate_support" }, { pushHistory: true });
-        return;
-      }
-      if (lower.includes("personal")) {
-        applyContextPatch({ clientType: "personal" });
-        logClient("info", "client_type_selected", { clientType: "personal", viaChatInput: true });
-        continueFromSelectedIntent({ pushHistory: true });
-        return;
-      }
-      handleUnclearInput(message, "Please indicate personal client or corporate client.");
       return;
 
     case FLOW_STEPS.CORPORATE_DISCOVERY:
@@ -2103,6 +2182,7 @@ async function handleChatInput(message) {
       if (lower.includes("resolved") || lower.includes("fixed")) {
         applyContextPatch({ supportCase: { resolved: true } });
         logClient("info", "troubleshooting_resolved", { viaChatInput: true });
+        finishPath(PATH_STATUS.COMPLETED, { outcome: "support_resolved", viaChatInput: true });
         transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "support_complete" }, { pushHistory: true });
         return;
       }
@@ -2125,6 +2205,7 @@ async function handleChatInput(message) {
     case FLOW_STEPS.HARDWARE_TROUBLESHOOT:
       if (lower.includes("resolved") || lower.includes("fixed")) {
         logClient("info", "troubleshooting_resolved", { category: "hardware_resolved", viaChatInput: true });
+        finishPath(PATH_STATUS.COMPLETED, { outcome: "hardware_resolved", viaChatInput: true });
         transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "hardware_complete" }, { pushHistory: true });
         return;
       }
@@ -2175,7 +2256,7 @@ async function handleChatInput(message) {
     case FLOW_STEPS.AGENT_ASSIST_CLARIFY: {
       const nextStep = routeFromAgentAssist(state.context.activeTask || trimmed);
       logClient("info", "warm_agent_re_routed_step", { activeTask: state.context.activeTask || trimmed, nextStep, viaChatInput: true });
-      transitionTo(nextStep, getRoutePatchForStep(nextStep), { pushHistory: true });
+      transitionTo(nextStep, getRoutePatchForStep(nextStep), { pushHistory: true, enforceContract: false });
       return;
     }
 
@@ -2236,7 +2317,11 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.INTENT_DISCOVERY: {
-      const intent = await detectIntent(trimmed);
+      const intent = parseSalesIntentDeterministic(trimmed) || (await detectIntent(trimmed));
+      if (!intent) {
+        handleUnclearInput(message, "Please tell me if you want mobility, home internet, landline, or bundle.");
+        return;
+      }
       const pageMap = { mobility: 0, "home internet": 1, landline: 2, bundle: 0 };
       state.offerPageIndex = pageMap[intent] ?? 0;
       if (intent === "mobility") {
@@ -2627,7 +2712,7 @@ function runTopLoginFlow(mode) {
   if (!state.chatStarted) {
     startConversation({ skipConnecting: true });
   } else {
-    transitionTo(FLOW_STEPS.HELPDESK_ENTRY, {}, { pushHistory: true });
+    transitionTo(FLOW_STEPS.HELPDESK_ENTRY, {}, { pushHistory: true, enforceContract: false });
   }
   state.pendingAuthMode = mode;
   transitionTo(
@@ -2637,7 +2722,7 @@ function runTopLoginFlow(mode) {
       activeTask: "support",
       areaCodeRequiredForTask: true
     },
-    { pushHistory: true }
+    { pushHistory: true, enforceContract: false }
   );
   postMessage("bot", "Login selected. I will guide you through existing-client verification.");
 }
@@ -2665,7 +2750,7 @@ newCustomerBtn.addEventListener("click", () => {
       activeTask: "sales",
       areaCodeRequiredForTask: true
     },
-    { pushHistory: true }
+    { pushHistory: true, enforceContract: false }
   );
 });
 
@@ -2681,7 +2766,7 @@ existingCustomerBtn.addEventListener("click", () => {
       activeTask: "sales",
       areaCodeRequiredForTask: true
     },
-    { pushHistory: true }
+    { pushHistory: true, enforceContract: false }
   );
 });
 
