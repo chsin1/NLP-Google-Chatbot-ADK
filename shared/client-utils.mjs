@@ -28,6 +28,15 @@ export function inferAuthContact(user, rawIdentifier = "") {
   };
 }
 
+export function deriveAreaCodeFromProfile(authUser = null, rawPhone = "") {
+  const preferred = String(rawPhone || "").replace(/\D/g, "");
+  const profilePhone = String(authUser?.phone || "").replace(/\D/g, "");
+  const source = preferred || profilePhone;
+  if (source.length < 3) return null;
+  const areaCode = source.slice(0, 3);
+  return /^\d{3}$/.test(areaCode) ? areaCode : null;
+}
+
 export function getExpectedLast4(method, user) {
   if (method === "visa") return "2781";
   if (method === "mastercard") return "7891";

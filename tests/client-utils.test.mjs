@@ -6,6 +6,7 @@ import {
   calculateFinancingMonthly,
   calculateInstallationFees,
   canAccessOfferBrowse,
+  deriveAreaCodeFromProfile,
   formatPhone,
   getFinancingAmount,
   getFinancingEligibleItems,
@@ -46,6 +47,15 @@ test("inferAuthContact uses entered phone digits when identifier is phone", () =
   const contact = inferAuthContact(sampleUser, "(647) 111-2222");
   assert.equal(contact.phone, "6471112222");
   assert.equal(contact.email, "alex.test@gmail.com");
+});
+
+test("deriveAreaCodeFromProfile uses explicit phone when provided", () => {
+  assert.equal(deriveAreaCodeFromProfile(sampleUser, "(647) 111-2222"), "647");
+});
+
+test("deriveAreaCodeFromProfile falls back to profile phone", () => {
+  assert.equal(deriveAreaCodeFromProfile(sampleUser, ""), "416");
+  assert.equal(deriveAreaCodeFromProfile(null, ""), null);
 });
 
 test("getExpectedLast4 supports card variants", () => {
