@@ -967,6 +967,29 @@ function describePaymentMethod(method, user) {
   return method.toUpperCase();
 }
 
+function mapPaymentMethodLabel(method, user) {
+  if (method === "smart_financing") return "Bell Smart Financing";
+  if (method === "device_upfront") return "Device paid upfront";
+  if (method === "existing") {
+    const type = user?.savedCardType ? user.savedCardType.toUpperCase() : "Saved card";
+    return `Saved ${type}`;
+  }
+  if (method === "mastercard") return "MasterCard";
+  if (method === "amex") return "Amex";
+  if (method === "visa") return "Visa";
+  return "Payment card";
+}
+
+function getMaskedPaymentAccount(method, expectedLast4, user, financingDecisionId) {
+  if (method === "smart_financing") {
+    return financingDecisionId ? `Decision ${financingDecisionId}` : "Financing account";
+  }
+  if (method === "device_upfront") return expectedLast4 ? `Card ending ${expectedLast4}` : "Paid upfront";
+  const fallbackLast4 = user?.savedCardLast4 || expectedLast4;
+  if (!fallbackLast4) return "Not provided";
+  return `**** ${fallbackLast4}`;
+}
+
 function generateFinancingDecisionId() {
   return `FIN-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
@@ -1070,39 +1093,104 @@ function queueAddressTypeahead(query) {
 
 function confirmOrder() {
   const { serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday } = getCheckoutTotals();
+  const estimatedTaxToday = 0;
+  const estimatedTaxMonthly = 0;
+  const oneTimeSubtotal = chargeToday;
+  const monthlySubtotal = serviceMonthly;
+  const todayTotal = Number((oneTimeSubtotal + estimatedTaxToday).toFixed(2));
+  const monthlyTotal = Number((combinedMonthly + estimatedTaxMonthly).toFixed(2));
   const orderId = `ORD-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   const confirmationCode = `CNF-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  const clientType = state.context.clientType || state.context.customerType || "personal";
+  const profile = getEligibilityProfile(state.context) || {};
+  const displayName = state.context.authUser?.name || state.context.newOnboarding.fullName || "Valued Customer";
+  const contactPhone = formatPhone(state.context.authMeta.phone || state.context.newOnboarding.phone || profile.phone || "not provided");
+  const contactEmail = state.context.authMeta.email || state.context.newOnboarding.email || profile.email || "not provided";
+  const accountReference = state.context.authMeta.secureRef || state.context.newOnboarding.leadId || "N/A";
+  const shippingAddress = state.context.shipping.address || profile.prefilledAddress || "Not provided";
+  const billingAddress = shippingAddress || profile.prefilledAddress || "Not provided";
+  const serviceAddress = shippingAddress || profile.prefilledAddress || "Not provided";
+  const paymentMethodLabel = mapPaymentMethodLabel(state.context.payment.method, state.context.authUser);
+  const maskedPaymentAccount = getMaskedPaymentAccount(
+    state.context.payment.method,
+    state.context.payment.expectedLast4,
+    state.context.authUser,
+    state.context.financing.decisionId
+  );
   const financingSummary = state.context.financing.selected
     ? ` Financing: ${currency(state.context.financing.financedBase)} over ${state.context.financing.termMonths} months (${currency(financingMonthly)}/month), upfront ${currency(state.context.financing.upfrontPayment)}, reference ${state.context.financing.decisionId}.`
     : "";
   orderSummary.textContent =
-    `Order ${orderId} confirmed (${confirmationCode}). Service ${currency(serviceMonthly)}/month.${financingSummary} Installation fees ${currency(installationFees)}. Charge today ${currency(chargeToday)}. Combined monthly due ${currency(combinedMonthly)}. Shipping to ${state.context.shipping.address}.`;
+    `Corporate receipt ready. Order ${orderId} confirmed (${confirmationCode}). Service ${currency(serviceMonthly)}/month.${financingSummary} Installation fees ${currency(installationFees)}. Total due today ${currency(todayTotal)}. Monthly total going forward ${currency(monthlyTotal)}. Shipping to ${shippingAddress}.`;
   checkoutStatus.textContent = "Status: order captured and confirmed.";
-  postMessage("bot", `Order confirmed. Order ID ${orderId}, confirmation ${confirmationCode}.`);
+  postMessage(
+    "bot",
+    `Order confirmed. Order ID ${orderId}, confirmation ${confirmationCode}. Client type ${clientType}. Total due today ${currency(todayTotal)}. Monthly total going forward ${currency(monthlyTotal)}.`
+  );
 
   const receiptPayload = {
-    orderId,
-    confirmationCode,
-    createdAt: new Date().toISOString(),
-    clientType: state.context.clientType || state.context.customerType || "personal",
-    items: state.context.basket.map((item) => ({
+    brand: {
+      companyName: "Bell Canada",
+      channel: "Corporate Assisted Digital Checkout"
+    },
+    order: {
+      orderId,
+      confirmationCode,
+      createdAt: new Date().toISOString(),
+      currency: "CAD",
+      status: "Confirmed"
+    },
+    customer: {
+      clientType,
+      displayName,
+      contactPhone,
+      contactEmail,
+      accountReference
+    },
+    addresses: {
+      billingAddress,
+      shippingAddress,
+      serviceAddress
+    },
+    payment: {
+      methodLabel: paymentMethodLabel,
+      maskedAccount: maskedPaymentAccount,
+      verificationStatus: "Verified",
+      chargeToday: todayTotal
+    },
+    lineItems: state.context.basket.map((item) => ({
       name: item.name,
+      category: item.category || "service",
       monthlyPrice: item.monthlyPrice,
+      oneTimePrice: 0,
+      quantity: 1,
       deviceModel: item.deviceModel || null
     })),
-    serviceMonthly,
+    recurring: {
+      serviceMonthly,
+      financingMonthly,
+      combinedMonthly
+    },
     financing: state.context.financing.selected
       ? {
-          amount: state.context.financing.financedBase,
+          amountFinanced: state.context.financing.financedBase,
+          upfrontPayment: state.context.financing.upfrontPayment || 0,
           termMonths: state.context.financing.termMonths,
           monthlyPayment: state.context.financing.monthlyPayment,
           decisionId: state.context.financing.decisionId
         }
       : null,
-    combinedMonthly,
-    chargeToday,
-    installationFees,
-    shippingAddress: state.context.shipping.address
+    charges: {
+      installationFees,
+      oneTimeSubtotal,
+      monthlySubtotal,
+      estimatedTaxToday,
+      estimatedTaxMonthly,
+      todayTotal,
+      monthlyTotal
+    },
+    disclaimer:
+      "Mock confirmation for prototype use. Taxes are placeholders and final billed amounts may vary."
   };
   const receiptWindow = window.open("", "_blank", "noopener,noreferrer,width=980,height=820");
   if (receiptWindow) {
@@ -1657,12 +1745,13 @@ function renderStep(step) {
 
     case FLOW_STEPS.ORDER_REVIEW: {
       const { serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday } = getCheckoutTotals();
+      const clientType = state.context.clientType || state.context.customerType || "personal";
       const financingDetail = state.context.financing.selected
         ? ` Financing ${currency(state.context.financing.financedBase)} over ${state.context.financing.termMonths} months (${currency(financingMonthly)}/month), upfront ${currency(state.context.financing.upfrontPayment)}, ref ${state.context.financing.decisionId}.`
         : "";
       postMessage(
         "bot",
-        `Order review: ${state.context.basket.length} item(s), service ${currency(serviceMonthly)}/month.${financingDetail} Installation fees ${currency(installationFees)}. Charge today ${currency(chargeToday)}. Combined monthly due ${currency(combinedMonthly)}. Shipping to ${state.context.shipping.address}.`
+        `Corporate order review for ${clientType} client: ${state.context.basket.length} item(s), service ${currency(serviceMonthly)}/month.${financingDetail} Installation fees ${currency(installationFees)}. Total due today ${currency(chargeToday)}. Monthly total going forward ${currency(combinedMonthly)}. Shipping to ${state.context.shipping.address}.`
       );
       checkoutStatus.textContent = "Status: ready to place order.";
       const paymentLine =
@@ -1674,7 +1763,7 @@ function renderStep(step) {
       const financingLine = state.context.financing.selected
         ? ` Device amount financed: ${currency(state.context.financing.financedBase)}. Term: ${state.context.financing.termMonths}. Financing monthly: ${currency(financingMonthly)}. Upfront: ${currency(state.context.financing.upfrontPayment)}. Decision reference: ${state.context.financing.decisionId}.`
         : "";
-      orderSummary.textContent = `${paymentLine}${financingLine} Service monthly: ${currency(serviceMonthly)}. Installation fees: ${currency(installationFees)}. Charge today: ${currency(chargeToday)}. Combined monthly due: ${currency(combinedMonthly)}. Shipping: ${state.context.shipping.address}.`;
+      orderSummary.textContent = `${paymentLine}${financingLine} Service monthly: ${currency(serviceMonthly)}. Installation fees: ${currency(installationFees)}. Total due today: ${currency(chargeToday)}. Monthly total going forward: ${currency(combinedMonthly)}. Shipping: ${state.context.shipping.address}.`;
       placeOrderBtn.disabled = false;
       logClient("info", "order_submission_attempt", { basketItems: state.context.basket.length, serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday });
       break;
