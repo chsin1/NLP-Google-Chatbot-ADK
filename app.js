@@ -32,6 +32,7 @@ const FLOW_STEPS = {
   DEVICE_OS_SELECTION: "DEVICE_OS_SELECTION",
   WARM_AGENT_ROUTING: "WARM_AGENT_ROUTING",
   AGENT_ASSIST_CLARIFY: "AGENT_ASSIST_CLARIFY",
+  AUXILIARY_ASSIST: "AUXILIARY_ASSIST",
   POST_AGENT_RATING: "POST_AGENT_RATING",
   POST_AGENT_FEEDBACK: "POST_AGENT_FEEDBACK",
   INTENT_DISCOVERY: "INTENT_DISCOVERY",
@@ -795,7 +796,7 @@ async function finalizeExistingAuthentication(user, mode, rawIdentifier = "") {
     "bot",
     `Authentication successful. ${user.name} verified. ${contactLabel}. Secure session reference ${secureRef}.`
   );
-  transitionTo(FLOW_STEPS.HELPDESK_ENTRY, {}, { pushHistory: true });
+  transitionTo(FLOW_STEPS.CLIENT_TYPE_SELECTION, {}, { pushHistory: true });
   logClient("info", "auth_success", { mode, userId: user.id, secureRef });
 }
 
@@ -1075,11 +1076,7 @@ function confirmOrder() {
 
   applyContextPatch({ basket: [] });
   renderBasket();
-  if (state.context.escalatedToAgent) {
-    transitionTo(FLOW_STEPS.POST_AGENT_RATING, {}, { pushHistory: true });
-    return;
-  }
-  transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true });
+  transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "order_complete" }, { pushHistory: true });
 }
 
 function renderStep(step) {
@@ -1155,33 +1152,19 @@ function renderStep(step) {
       hideAvailabilityCard();
       postMessage(
         "bot",
-        "Welcome to Bell support. I can help with account support, products and upgrades, troubleshooting, and hardware issues. Are you a personal or corporate client?"
+        "Welcome to Bell support. How can I help you today?"
       );
       showChoiceButtons(
         [
           "Help Desk",
           "New Products / Upgrades",
           "Troubleshoot Existing Services",
-          "Hardware Support",
-          "Personal Client",
-          "Corporate Client"
+          "Hardware Support"
         ],
         (choice) => {
           postMessage("user", choice);
-          if (choice === "Personal Client") {
-            applyContextPatch({ clientType: "personal" });
-            logClient("info", "client_type_selected", { clientType: "personal" });
-            transitionTo(FLOW_STEPS.CLIENT_TYPE_SELECTION, { activeTask: "personal_selection" }, { pushHistory: true });
-            return;
-          }
-          if (choice === "Corporate Client") {
-            applyContextPatch({ clientType: "corporate" });
-            logClient("info", "client_type_selected", { clientType: "corporate" });
-            transitionTo(FLOW_STEPS.CORPORATE_DISCOVERY, { activeTask: "corporate_support" }, { pushHistory: true });
-            return;
-          }
           if (choice === "New Products / Upgrades") {
-            transitionTo(FLOW_STEPS.CLIENT_TYPE_SELECTION, { activeTask: "sales" }, { pushHistory: true });
+            transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory: true });
             return;
           }
           if (choice === "Troubleshoot Existing Services" || choice === "Help Desk") {
@@ -1194,18 +1177,18 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.CLIENT_TYPE_SELECTION:
-      postMessage("bot", "To direct you quickly, are you contacting us as a personal or corporate client?");
+      postMessage("bot", "Before we continue, please confirm: are you a personal or corporate client?");
       showChoiceButtons(["Personal Client", "Corporate Client"], (choice) => {
         postMessage("user", choice);
         if (choice === "Corporate Client") {
           applyContextPatch({ clientType: "corporate" });
           logClient("info", "client_type_selected", { clientType: "corporate" });
-          transitionTo(FLOW_STEPS.CORPORATE_DISCOVERY, { activeTask: "corporate_sales" }, { pushHistory: true });
+          transitionTo(FLOW_STEPS.HELPDESK_ENTRY, { activeTask: "corporate_entry" }, { pushHistory: true });
           return;
         }
         applyContextPatch({ clientType: "personal" });
         logClient("info", "client_type_selected", { clientType: "personal" });
-        transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory: true });
+        transitionTo(FLOW_STEPS.HELPDESK_ENTRY, { activeTask: "personal_entry" }, { pushHistory: true });
       });
       break;
 
@@ -1224,11 +1207,7 @@ function renderStep(step) {
         if (choice === "Resolved") {
           applyContextPatch({ supportCase: { resolved: true } });
           logClient("info", "troubleshooting_resolved", { category: state.context.supportCase.category });
-          if (state.context.escalatedToAgent) {
-            transitionTo(FLOW_STEPS.POST_AGENT_RATING, {}, { pushHistory: true });
-            return;
-          }
-          transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true });
+          transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "support_complete" }, { pushHistory: true });
           return;
         }
         if (choice === "Need specialist") {
@@ -1245,8 +1224,13 @@ function renderStep(step) {
 
     case FLOW_STEPS.HARDWARE_TROUBLESHOOT:
       postMessage("bot", "Let’s troubleshoot your hardware. Which device are you calling about?");
-      showChoiceButtons(["Modem/Router", "Phone device", "TV receiver", "Issue unresolved"], (choice) => {
+      showChoiceButtons(["Modem/Router", "Phone device", "TV receiver", "Resolved", "Issue unresolved"], (choice) => {
         postMessage("user", choice);
+        if (choice === "Resolved") {
+          logClient("info", "troubleshooting_resolved", { category: "hardware_resolved" });
+          transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "hardware_complete" }, { pushHistory: true });
+          return;
+        }
         if (choice === "Issue unresolved") {
           applyContextPatch({ escalatedToAgent: true });
           logClient("info", "troubleshooting_unresolved", { channel: "hardware" });
@@ -1561,6 +1545,33 @@ function renderStep(step) {
       postMessage("bot", "Thank you for contacting Bell. Your request is complete. You can continue shopping or start a fresh session.");
       break;
 
+    case FLOW_STEPS.AUXILIARY_ASSIST:
+      postMessage("bot", "Is there anything else I can help you with today?");
+      showChoiceButtons(
+        ["New Products / Upgrades", "Help Desk / Troubleshooting", "Hardware Support", "No, that is all"],
+        (choice) => {
+          postMessage("user", choice);
+          if (choice === "New Products / Upgrades") {
+            transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory: true });
+            return;
+          }
+          if (choice === "Help Desk / Troubleshooting") {
+            transitionTo(FLOW_STEPS.SUPPORT_DISCOVERY, { activeTask: "support" }, { pushHistory: true });
+            return;
+          }
+          if (choice === "Hardware Support") {
+            transitionTo(FLOW_STEPS.HARDWARE_TROUBLESHOOT, { activeTask: "hardware" }, { pushHistory: true });
+            return;
+          }
+          if (state.context.escalatedToAgent && state.context.agentRating == null) {
+            transitionTo(FLOW_STEPS.POST_AGENT_RATING, {}, { pushHistory: true });
+            return;
+          }
+          transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true });
+        }
+      );
+      break;
+
     case FLOW_STEPS.POST_AGENT_RATING:
       postMessage("bot", "Before you go, please rate your support experience with our agent assistant.");
       showChoiceButtons(["1 star", "2 stars", "3 stars", "4 stars", "5 stars"], (choice) => {
@@ -1731,20 +1742,8 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.HELPDESK_ENTRY:
-      if (lower.includes("corporate")) {
-        applyContextPatch({ clientType: "corporate" });
-        logClient("info", "client_type_selected", { clientType: "corporate", viaChatInput: true });
-        transitionTo(FLOW_STEPS.CORPORATE_DISCOVERY, { activeTask: "corporate_support" }, { pushHistory: true });
-        return;
-      }
-      if (lower.includes("personal")) {
-        applyContextPatch({ clientType: "personal" });
-        logClient("info", "client_type_selected", { clientType: "personal", viaChatInput: true });
-        transitionTo(FLOW_STEPS.CLIENT_TYPE_SELECTION, { activeTask: "personal_selection" }, { pushHistory: true });
-        return;
-      }
       if (lower.includes("upgrade") || lower.includes("product") || lower.includes("sales")) {
-        transitionTo(FLOW_STEPS.CLIENT_TYPE_SELECTION, { activeTask: "sales" }, { pushHistory: true });
+        transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory: true });
         return;
       }
       if (lower.includes("troubleshoot") || lower.includes("help desk") || lower.includes("support")) {
@@ -1755,20 +1754,20 @@ async function handleChatInput(message) {
         transitionTo(FLOW_STEPS.HARDWARE_TROUBLESHOOT, { activeTask: "hardware" }, { pushHistory: true });
         return;
       }
-      handleUnclearInput(message, "Please choose: Help Desk, New Products/Upgrades, Troubleshooting, Hardware, Personal Client, or Corporate Client.");
+      handleUnclearInput(message, "Please choose: Help Desk, New Products/Upgrades, Troubleshooting, or Hardware.");
       return;
 
     case FLOW_STEPS.CLIENT_TYPE_SELECTION:
       if (lower.includes("corporate")) {
         applyContextPatch({ clientType: "corporate" });
         logClient("info", "client_type_selected", { clientType: "corporate", viaChatInput: true });
-        transitionTo(FLOW_STEPS.CORPORATE_DISCOVERY, { activeTask: "corporate_sales" }, { pushHistory: true });
+        transitionTo(FLOW_STEPS.HELPDESK_ENTRY, { activeTask: "corporate_entry" }, { pushHistory: true });
         return;
       }
       if (lower.includes("personal")) {
         applyContextPatch({ clientType: "personal" });
         logClient("info", "client_type_selected", { clientType: "personal", viaChatInput: true });
-        transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory: true });
+        transitionTo(FLOW_STEPS.HELPDESK_ENTRY, { activeTask: "personal_entry" }, { pushHistory: true });
         return;
       }
       handleUnclearInput(message, "Please indicate personal client or corporate client.");
@@ -1798,11 +1797,7 @@ async function handleChatInput(message) {
       if (lower.includes("resolved") || lower.includes("fixed")) {
         applyContextPatch({ supportCase: { resolved: true } });
         logClient("info", "troubleshooting_resolved", { viaChatInput: true });
-        if (state.context.escalatedToAgent) {
-          transitionTo(FLOW_STEPS.POST_AGENT_RATING, {}, { pushHistory: true });
-          return;
-        }
-        transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true });
+        transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "support_complete" }, { pushHistory: true });
         return;
       }
       if (lower.includes("specialist") || lower.includes("agent")) {
@@ -1822,6 +1817,11 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.HARDWARE_TROUBLESHOOT:
+      if (lower.includes("resolved") || lower.includes("fixed")) {
+        logClient("info", "troubleshooting_resolved", { category: "hardware_resolved", viaChatInput: true });
+        transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "hardware_complete" }, { pushHistory: true });
+        return;
+      }
       if (lower.includes("unresolved") || lower.includes("not working")) {
         applyContextPatch({ escalatedToAgent: true });
         logClient("info", "troubleshooting_unresolved", { channel: "hardware", viaChatInput: true });
@@ -1834,6 +1834,30 @@ async function handleChatInput(message) {
         return;
       }
       handleUnclearInput(message, "Please specify modem/router, phone device, TV receiver, or unresolved.");
+      return;
+
+    case FLOW_STEPS.AUXILIARY_ASSIST:
+      if (lower.includes("product") || lower.includes("upgrade") || lower.includes("sales")) {
+        transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("help") || lower.includes("troubleshoot") || lower.includes("support")) {
+        transitionTo(FLOW_STEPS.SUPPORT_DISCOVERY, { activeTask: "support" }, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("hardware")) {
+        transitionTo(FLOW_STEPS.HARDWARE_TROUBLESHOOT, { activeTask: "hardware" }, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("no") || lower.includes("that's all") || lower.includes("that is all") || lower.includes("done")) {
+        if (state.context.escalatedToAgent && state.context.agentRating == null) {
+          transitionTo(FLOW_STEPS.POST_AGENT_RATING, {}, { pushHistory: true });
+          return;
+        }
+        transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true });
+        return;
+      }
+      handleUnclearInput(message, "Please tell me if you want products/upgrades, helpdesk support, hardware support, or no further help.");
       return;
 
     case FLOW_STEPS.WARM_AGENT_ROUTING:
@@ -1872,11 +1896,10 @@ async function handleChatInput(message) {
       }
       const leadId = `lead_${Date.now()}`;
       transitionTo(
-        FLOW_STEPS.HELPDESK_ENTRY,
+        FLOW_STEPS.CLIENT_TYPE_SELECTION,
         {
           newOnboarding: { phone: trimmed, leadId },
-          customerType: "new",
-          clientType: "personal"
+          customerType: "new"
         },
         { pushHistory: true }
       );
