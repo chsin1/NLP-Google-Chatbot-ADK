@@ -8,3 +8,7 @@
 {"ts":"2026-03-11T03:50:50.139Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}
 {"ts":"2026-03-11T03:50:53.380Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}
 {"ts":"2026-03-11T03:50:59.963Z","level":"error","event":"invalid_flow_transition","details":{"from":"AREA_CODE_ENTRY","to":"AVAILABILITY_SELECTION","context":{"areaCode":null,"customerType":null}}}
+{"ts":"2026-03-11T04:23:16.852Z","level":"error","event":"invalid_flow_transition","details":{"from":"INTENT_DISCOVERY","to":"OFFER_BROWSE","context":{"areaCode":"647","customerType":"new"}}}
+{"ts":"2026-03-11T04:23:21.555Z","level":"error","event":"invalid_flow_transition","details":{"from":"INTENT_DISCOVERY","to":"OFFER_BROWSE","context":{"areaCode":"647","customerType":"new"}}}
+{"ts":"2026-03-11T04:23:29.130Z","level":"error","event":"invalid_flow_transition","details":{"from":"INTENT_DISCOVERY","to":"OFFER_BROWSE","context":{"areaCode":"647","customerType":"new"}}}
+{"ts":"2026-03-11T04:23:33.297Z","level":"error","event":"invalid_flow_transition","details":{"from":"INTENT_DISCOVERY","to":"OFFER_BROWSE","context":{"areaCode":"647","customerType":"new"}}}

@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  calculateFinancingBreakdown,
   calculateCombinedMonthly,
   calculateFinancingMonthly,
+  calculateInstallationFees,
   canAccessOfferBrowse,
   formatPhone,
   getFinancingAmount,
@@ -100,4 +102,24 @@ test("calculateCombinedMonthly returns service + financing total", () => {
 test("runMockFinancingApproval respects threshold with deterministic function", () => {
   assert.equal(runMockFinancingApproval(() => 0.2), true);
   assert.equal(runMockFinancingApproval(() => 0.9), false);
+});
+
+test("calculateInstallationFees applies internet and landline setup costs once each", () => {
+  assert.equal(calculateInstallationFees(sampleBasket), 25);
+  assert.equal(
+    calculateInstallationFees([
+      { category: "landline" },
+      { category: "home internet" },
+      { category: "landline" }
+    ]),
+    75
+  );
+});
+
+test("calculateFinancingBreakdown handles upfront and deferred ratio", () => {
+  const breakdown = calculateFinancingBreakdown(1000, 200, 24, 0.35);
+  assert.equal(breakdown.financedBase, 800);
+  assert.equal(breakdown.deferredAmount, 280);
+  assert.equal(breakdown.amortizedAmount, 520);
+  assert.equal(breakdown.monthlyPayment, 21.67);
 });

@@ -81,3 +81,24 @@ export function calculateCombinedMonthly(serviceMonthly, financingMonthly) {
 export function runMockFinancingApproval(randomFn = Math.random, threshold = 0.75) {
   return randomFn() < threshold;
 }
+
+export function calculateInstallationFees(basket = []) {
+  const hasLandline = basket.some((item) => item.category === "landline");
+  const hasInternet = basket.some((item) => item.category === "home internet");
+  return (hasLandline ? 50 : 0) + (hasInternet ? 25 : 0);
+}
+
+export function calculateFinancingBreakdown(totalDeviceAmount, upfrontPayment, termMonths, deferredRatio = 0) {
+  const total = Number(totalDeviceAmount || 0);
+  const upfront = Number(upfrontPayment || 0);
+  const financedBase = Math.max(0, Number((total - upfront).toFixed(2)));
+  const deferredAmount = Number((financedBase * Math.max(0, deferredRatio)).toFixed(2));
+  const amortizedAmount = Number((financedBase - deferredAmount).toFixed(2));
+  const monthlyPayment = termMonths ? Number((amortizedAmount / termMonths).toFixed(2)) : 0;
+  return {
+    financedBase,
+    deferredAmount,
+    amortizedAmount,
+    monthlyPayment
+  };
+}
