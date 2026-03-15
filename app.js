@@ -20,7 +20,6 @@ import {
   PATH_STATUS,
   canProceed as canProceedStep,
   nextLoopGuard,
-  parseHelpdeskIntent,
   parseSalesIntentDeterministic,
   stableContextHash
 } from "./shared/workflow-utils.mjs";
@@ -35,7 +34,9 @@ const FLOW_STEPS = {
   NEW_ONBOARD_NAME: "NEW_ONBOARD_NAME",
   NEW_ONBOARD_EMAIL: "NEW_ONBOARD_EMAIL",
   NEW_ONBOARD_PHONE: "NEW_ONBOARD_PHONE",
+  NEW_ONBOARD_ADDRESS: "NEW_ONBOARD_ADDRESS",
   HELPDESK_ENTRY: "HELPDESK_ENTRY",
+  SERVICE_CLARIFICATION: "SERVICE_CLARIFICATION",
   CORPORATE_DISCOVERY: "CORPORATE_DISCOVERY",
   SUPPORT_DISCOVERY: "SUPPORT_DISCOVERY",
   HARDWARE_TROUBLESHOOT: "HARDWARE_TROUBLESHOOT",
@@ -65,10 +66,22 @@ const FLOW_STEPS = {
 
 const STEP_CONTRACT = {
   [FLOW_STEPS.HELPDESK_ENTRY]: {
-    validInputs: ["help desk", "new products / upgrades", "troubleshoot existing services", "hardware support", "corporate support"],
+    validInputs: ["mobility", "internet", "landline", "bundle"],
     requiredContext: [],
-    allowedNext: [FLOW_STEPS.CUSTOMER_STATUS_SELECTION],
+    allowedNext: [FLOW_STEPS.INTENT_DISCOVERY],
     fallbackTarget: FLOW_STEPS.HELPDESK_ENTRY
+  },
+  [FLOW_STEPS.INTENT_DISCOVERY]: {
+    validInputs: ["mobility", "home internet", "landline", "bundle"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.SERVICE_CLARIFICATION],
+    fallbackTarget: FLOW_STEPS.INTENT_DISCOVERY
+  },
+  [FLOW_STEPS.SERVICE_CLARIFICATION]: {
+    validInputs: ["service clarifier"],
+    requiredContext: ["intent"],
+    allowedNext: [FLOW_STEPS.NEW_ONBOARD_NAME],
+    fallbackTarget: FLOW_STEPS.SERVICE_CLARIFICATION
   },
   [FLOW_STEPS.CUSTOMER_STATUS_SELECTION]: {
     validInputs: ["new client", "existing bell client"],
@@ -97,13 +110,19 @@ const STEP_CONTRACT = {
   [FLOW_STEPS.NEW_ONBOARD_PHONE]: {
     validInputs: ["phone number"],
     requiredContext: [],
-    allowedNext: [FLOW_STEPS.NEW_AREA_CODE_ENTRY],
+    allowedNext: [FLOW_STEPS.NEW_ONBOARD_ADDRESS],
     fallbackTarget: FLOW_STEPS.NEW_ONBOARD_PHONE
+  },
+  [FLOW_STEPS.NEW_ONBOARD_ADDRESS]: {
+    validInputs: ["address"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.NEW_AREA_CODE_ENTRY],
+    fallbackTarget: FLOW_STEPS.NEW_ONBOARD_ADDRESS
   },
   [FLOW_STEPS.NEW_AREA_CODE_ENTRY]: {
     validInputs: ["3-digit area code"],
     requiredContext: ["customerType"],
-    allowedNext: [FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SUPPORT_DISCOVERY, FLOW_STEPS.HARDWARE_TROUBLESHOOT, FLOW_STEPS.CORPORATE_DISCOVERY],
+    allowedNext: [FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.INTENT_DISCOVERY],
     fallbackTarget: FLOW_STEPS.NEW_AREA_CODE_ENTRY
   },
   [FLOW_STEPS.EXISTING_AUTH_MODE]: {
@@ -168,9 +187,9 @@ const offers = [
   {
     id: "mob-001",
     category: "mobility",
-    name: "iPhone 16 + Bell 5G+ Essential 100",
-    description: "100 GB high-speed data with iPhone financing option.",
-    monthlyPrice: 75,
+    name: "iPhone 16 + 5G Essential 100",
+    description: "Bell-style mobility plan with Canada-wide calling and iPhone financing.",
+    monthlyPrice: 89,
     osType: "ios",
     deviceModel: "iPhone 16",
     financingEligible: true,
@@ -182,9 +201,9 @@ const offers = [
   {
     id: "mob-002",
     category: "mobility",
-    name: "Samsung Galaxy S25 + Bell Ultimate 175",
-    description: "Premium data with flagship Android financing option.",
-    monthlyPrice: 110,
+    name: "Samsung Galaxy S25 + Ultimate 175",
+    description: "High-data Bell-style plan with Canada + US calling.",
+    monthlyPrice: 99,
     osType: "android",
     deviceModel: "Galaxy S25",
     financingEligible: true,
@@ -196,23 +215,23 @@ const offers = [
   {
     id: "mob-003",
     category: "mobility",
-    name: "BYOD / Other Device Flex Plan",
-    description: "Bring your own or other device and stay connected.",
-    monthlyPrice: 65,
-    osType: "other",
-    deviceModel: "Other device",
+    name: "Google Pixel 10 + Premium 200",
+    description: "Large-data mobility package with international calling add-on option.",
+    monthlyPrice: 109,
+    osType: "android",
+    deviceModel: "Pixel 10",
     financingEligible: true,
-    devicePrice: 499,
-    minCreditScore: 560,
+    devicePrice: 1199,
+    minCreditScore: 600,
     minAge: 18,
     requiresPrimaryHolder: false
   },
   {
     id: "internet-001",
     category: "home internet",
-    name: "Fibe 1.5 Gigabit",
-    description: "Up to 1.5 Gbps speeds for heavy home usage.",
-    monthlyPrice: 95,
+    name: "Fibe Gigabit 1.5",
+    description: "Up to 1.5 Gbps download and up to 940 Mbps upload for high-demand homes.",
+    monthlyPrice: 110,
     financingEligible: false,
     devicePrice: null,
     minCreditScore: 600,
@@ -222,9 +241,9 @@ const offers = [
   {
     id: "internet-002",
     category: "home internet",
-    name: "Fibe 500 Starter",
-    description: "Balanced speed and value for streaming homes.",
-    monthlyPrice: 70,
+    name: "Fibe 500",
+    description: "Balanced download/upload performance for streaming and hybrid work.",
+    monthlyPrice: 90,
     financingEligible: false,
     devicePrice: null,
     minCreditScore: 560,
@@ -232,10 +251,22 @@ const offers = [
     requiresPrimaryHolder: false
   },
   {
+    id: "internet-003",
+    category: "home internet",
+    name: "Fibe 150",
+    description: "Cost-conscious internet plan with strong everyday performance.",
+    monthlyPrice: 75,
+    financingEligible: false,
+    devicePrice: null,
+    minCreditScore: 540,
+    minAge: 18,
+    requiresPrimaryHolder: false
+  },
+  {
     id: "landline-001",
     category: "landline",
-    name: "Home Phone Lite",
-    description: "Canada-wide calls with voicemail included.",
+    name: "Home Phone Basic",
+    description: "Core local and Canada-wide calling with voicemail.",
     monthlyPrice: 38,
     financingEligible: false,
     devicePrice: null,
@@ -247,13 +278,25 @@ const offers = [
     id: "landline-002",
     category: "landline",
     name: "Home Phone Plus International",
-    description: "International call minutes and call display.",
+    description: "Includes international minutes with call display and voicemail.",
     monthlyPrice: 52,
     financingEligible: false,
     devicePrice: null,
     minCreditScore: 560,
     minAge: 18,
     requiresPrimaryHolder: true
+  },
+  {
+    id: "landline-003",
+    category: "landline",
+    name: "Home Phone Premium",
+    description: "Enhanced calling features and expanded long-distance package.",
+    monthlyPrice: 59,
+    financingEligible: false,
+    devicePrice: null,
+    minCreditScore: 560,
+    minAge: 18,
+    requiresPrimaryHolder: false
   }
 ];
 
@@ -293,6 +336,9 @@ const carousel = document.getElementById("carousel");
 const carouselPrevBtn = document.getElementById("carousel-prev-btn");
 const carouselNextBtn = document.getElementById("carousel-next-btn");
 const carouselPageLabel = document.getElementById("carousel-page-label");
+const panelOffers = document.getElementById("panel-offers");
+const panelBasket = document.getElementById("panel-basket");
+const panelCheckout = document.getElementById("panel-checkout");
 
 const basketList = document.getElementById("basket-list");
 const basketTotal = document.getElementById("basket-total");
@@ -372,7 +418,16 @@ const state = {
       fullName: null,
       email: null,
       phone: null,
+      address: null,
       leadId: null
+    },
+    salesProfile: {
+      serviceType: null,
+      speedPriority: null,
+      phonePreference: null,
+      callingPlan: null,
+      bundleSize: null,
+      stage: null
     },
     supportCase: {
       category: null,
@@ -510,6 +565,16 @@ function showLoginSections() {
   loginSections.classList.remove("hidden");
 }
 
+function setPanelFocus(mode = "all") {
+  const showOffers = mode === "offers" || mode === "all";
+  const showBasket = mode === "basket" || mode === "all";
+  const showCheckout = mode === "checkout" || mode === "all";
+  panelOffers.classList.toggle("hidden", !showOffers);
+  panelBasket.classList.toggle("hidden", !showBasket);
+  panelCheckout.classList.toggle("hidden", !showCheckout);
+  chatWidget.classList.toggle("expanded", mode !== "all");
+}
+
 function setStatus() {
   if (!state.context.authUser && state.context.customerType !== "new") {
     sessionStatus.textContent = "Session: not authenticated";
@@ -612,7 +677,16 @@ function resetSessionState() {
       fullName: null,
       email: null,
       phone: null,
+      address: null,
       leadId: null
+    },
+    salesProfile: {
+      serviceType: null,
+      speedPriority: null,
+      phonePreference: null,
+      callingPlan: null,
+      bundleSize: null,
+      stage: null
     },
     supportCase: {
       category: null,
@@ -679,6 +753,7 @@ function getPatchedContext(patch = {}) {
   if (patch.financing) next.financing = { ...next.financing, ...patch.financing };
   if (patch.shipping) next.shipping = { ...next.shipping, ...patch.shipping };
   if (patch.newOnboarding) next.newOnboarding = { ...next.newOnboarding, ...patch.newOnboarding };
+  if (patch.salesProfile) next.salesProfile = { ...next.salesProfile, ...patch.salesProfile };
   if (patch.supportCase) next.supportCase = { ...next.supportCase, ...patch.supportCase };
   if (patch.corporateProfile) next.corporateProfile = { ...next.corporateProfile, ...patch.corporateProfile };
   if (patch.deviceSelection) next.deviceSelection = { ...next.deviceSelection, ...patch.deviceSelection };
@@ -799,9 +874,31 @@ function goBack() {
 function renderCarouselPage() {
   const category = CATEGORY_PAGES[state.offerPageIndex];
   let filtered = offers.filter((offer) => offer.category === category);
+  if (state.context.intent && state.context.intent !== "bundle") {
+    filtered = filtered.filter((offer) => offer.category === state.context.intent);
+  }
   if (category === "mobility" && state.context.deviceSelection.osType) {
     filtered = filtered.filter((offer) => offer.osType === state.context.deviceSelection.osType);
   }
+  if (state.context.intent === "mobility" && state.context.salesProfile.phonePreference) {
+    const pref = state.context.salesProfile.phonePreference.toLowerCase();
+    filtered = filtered.filter((offer) => {
+      if (pref.includes("iphone")) return offer.osType === "ios";
+      if (pref.includes("samsung") || pref.includes("android")) return offer.osType === "android";
+      if (pref.includes("pixel")) return (offer.deviceModel || "").toLowerCase().includes("pixel");
+      return true;
+    });
+  }
+  if (state.context.intent === "home internet" && state.context.salesProfile.speedPriority) {
+    const pref = state.context.salesProfile.speedPriority.toLowerCase();
+    filtered = filtered.filter((offer) => {
+      if (pref.includes("fast")) return offer.monthlyPrice >= 95;
+      if (pref.includes("upload")) return offer.description.toLowerCase().includes("upload");
+      return true;
+    });
+  }
+
+  filtered = filtered.slice(0, 3);
 
   carousel.innerHTML = "";
   filtered.forEach((offer) => {
@@ -883,29 +980,45 @@ function resolveUserFromIdentifier(raw) {
 
 function normalizeEntryIntent(value = "") {
   const lower = String(value || "").toLowerCase();
-  if (lower.includes("product") || lower.includes("upgrade") || lower.includes("sales")) return "sales";
-  if (lower.includes("hardware")) return "hardware";
-  if (lower.includes("corporate")) return "corporate_support";
-  return "support";
+  if (
+    lower.includes("product") ||
+    lower.includes("upgrade") ||
+    lower.includes("sales") ||
+    lower.includes("mobility") ||
+    lower.includes("internet") ||
+    lower.includes("landline") ||
+    lower.includes("bundle")
+  ) return "sales";
+  return "sales";
 }
 
 function routeHelpdeskSelection(choice, { pushHistory = true } = {}) {
-  const helpdeskIntent = parseHelpdeskIntent(choice);
-  if (!helpdeskIntent) return false;
+  const serviceIntent = parseSalesIntentDeterministic(choice);
+  if (!serviceIntent) return false;
+  const pageMap = { mobility: 0, "home internet": 1, landline: 2, bundle: 0 };
+  state.offerPageIndex = pageMap[serviceIntent] ?? 0;
   const selectedEntryIntent =
-    helpdeskIntent === "sales"
-      ? "New Products / Upgrades"
-      : helpdeskIntent === "hardware"
-        ? "Hardware Support"
-        : helpdeskIntent === "corporate_support"
-          ? "Corporate Support"
-          : "Help Desk";
+    serviceIntent === "home internet"
+      ? "Internet"
+      : serviceIntent === "landline"
+        ? "Landline"
+        : serviceIntent === "bundle"
+          ? "Bundle"
+          : "Mobility";
   transitionTo(
-    FLOW_STEPS.CUSTOMER_STATUS_SELECTION,
+    FLOW_STEPS.INTENT_DISCOVERY,
     {
       selectedEntryIntent,
-      activeTask: helpdeskIntent,
-      areaCodeRequiredForTask: helpdeskIntent !== "corporate_support"
+      intent: serviceIntent,
+      activeTask: "sales",
+      salesProfile: {
+        serviceType: serviceIntent,
+        speedPriority: null,
+        phonePreference: null,
+        callingPlan: null,
+        bundleSize: null,
+        stage: null
+      }
     },
     { pushHistory }
   );
@@ -942,6 +1055,10 @@ function continueFromSelectedIntent({ pushHistory = true } = {}) {
   const intent = normalizeEntryIntent(state.context.selectedEntryIntent || state.context.activeTask || "");
   startPath(intent);
   if (intent === "sales") {
+    if (state.context.intent) {
+      transitionTo(FLOW_STEPS.OFFER_BROWSE, { activeTask: "sales" }, { pushHistory });
+      return;
+    }
     transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory });
     return;
   }
@@ -1131,7 +1248,11 @@ function generateFinancingDecisionId() {
 }
 
 function getCheckoutTotals() {
-  const serviceMonthly = state.context.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
+  const serviceMonthlyBase = state.context.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
+  const itemCount = state.context.basket.length;
+  const discountRate = itemCount >= 3 ? 0.2 : itemCount >= 2 ? 0.1 : 0;
+  const bundleDiscount = Number((serviceMonthlyBase * discountRate).toFixed(2));
+  const serviceMonthly = Number((serviceMonthlyBase - bundleDiscount).toFixed(2));
   const financingMonthly = state.context.financing.selected ? state.context.financing.monthlyPayment : 0;
   const combinedMonthly = calculateCombinedMonthly(serviceMonthly, financingMonthly);
   const installationFees = calculateInstallationFees(state.context.basket);
@@ -1140,7 +1261,7 @@ function getCheckoutTotals() {
       ? getFinancingAmount(state.context.basket)
       : state.context.financing.upfrontPayment || 0;
   const chargeToday = Number((installationFees + deviceDueToday).toFixed(2));
-  return { serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday };
+  return { serviceMonthlyBase, bundleDiscount, discountRate, serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday };
 }
 
 function runEligibilityCheck() {
@@ -1228,11 +1349,11 @@ function queueAddressTypeahead(query) {
 }
 
 function confirmOrder() {
-  const { serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday } = getCheckoutTotals();
+  const { serviceMonthlyBase, bundleDiscount, serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday } = getCheckoutTotals();
   const estimatedTaxToday = 0;
   const estimatedTaxMonthly = 0;
   const oneTimeSubtotal = chargeToday;
-  const monthlySubtotal = serviceMonthly;
+  const monthlySubtotal = serviceMonthlyBase;
   const todayTotal = Number((oneTimeSubtotal + estimatedTaxToday).toFixed(2));
   const monthlyTotal = Number((combinedMonthly + estimatedTaxMonthly).toFixed(2));
   const orderId = `ORD-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -1242,7 +1363,7 @@ function confirmOrder() {
   const displayName = state.context.authUser?.name || state.context.newOnboarding.fullName || "Valued Customer";
   const contactPhone = formatPhone(state.context.authMeta.phone || state.context.newOnboarding.phone || profile.phone || "not provided");
   const contactEmail = state.context.authMeta.email || state.context.newOnboarding.email || profile.email || "not provided";
-  const accountReference = state.context.authMeta.secureRef || state.context.newOnboarding.leadId || "N/A";
+  const accountReference = state.context.authMeta.secureRef || "N/A";
   const shippingAddress = state.context.shipping.address || profile.prefilledAddress || "Not provided";
   const billingAddress = shippingAddress || profile.prefilledAddress || "Not provided";
   const serviceAddress = shippingAddress || profile.prefilledAddress || "Not provided";
@@ -1256,8 +1377,9 @@ function confirmOrder() {
   const financingSummary = state.context.financing.selected
     ? ` Financing: ${currency(state.context.financing.financedBase)} over ${state.context.financing.termMonths} months (${currency(financingMonthly)}/month), upfront ${currency(state.context.financing.upfrontPayment)}, reference ${state.context.financing.decisionId}.`
     : "";
+  const discountSummary = bundleDiscount > 0 ? ` Bundle discount applied: ${currency(bundleDiscount)}/month.` : "";
   orderSummary.textContent =
-    `Corporate receipt ready. Order ${orderId} confirmed (${confirmationCode}). Service ${currency(serviceMonthly)}/month.${financingSummary} Installation fees ${currency(installationFees)}. Total due today ${currency(todayTotal)}. Monthly total going forward ${currency(monthlyTotal)}. Shipping to ${shippingAddress}.`;
+    `Corporate receipt ready. Order ${orderId} confirmed (${confirmationCode}). Service ${currency(serviceMonthly)}/month.${discountSummary}${financingSummary} Installation fees ${currency(installationFees)}. Total due today ${currency(todayTotal)}. Monthly total going forward ${currency(monthlyTotal)}. Shipping to ${shippingAddress}.`;
   checkoutStatus.textContent = "Status: order captured and confirmed.";
   postMessage(
     "bot",
@@ -1318,6 +1440,7 @@ function confirmOrder() {
       : null,
     charges: {
       installationFees,
+      bundleDiscount,
       oneTimeSubtotal,
       monthlySubtotal,
       estimatedTaxToday,
@@ -1328,18 +1451,23 @@ function confirmOrder() {
     disclaimer:
       "Mock confirmation for prototype use. Taxes are placeholders and final billed amounts may vary."
   };
-  const receiptWindow = window.open("", "_blank", "noopener,noreferrer,width=980,height=820");
+  const receiptWindow = window.open("about:blank", "_blank", "width=980,height=820");
   if (receiptWindow) {
     logClient("info", "receipt_window_opened", { orderId });
     receiptWindow.document.write(buildReceiptHtml(receiptPayload));
     receiptWindow.document.close();
     logClient("info", "receipt_rendered", { orderId });
+  } else {
+    postMessage("bot", "Receipt window was blocked by your browser. Please allow pop-ups and place the order again to open it.");
+    logClient("error", "receipt_window_blocked", { orderId });
   }
 
   logClient("info", "order_submission_success", {
     orderId,
     confirmationCode,
     serviceMonthly,
+    serviceMonthlyBase,
+    bundleDiscount,
     financingMonthly,
     combinedMonthly,
     installationFees,
@@ -1360,6 +1488,29 @@ function renderStep(step) {
   setStatus();
   resetChatInputHint();
   if (step !== FLOW_STEPS.SHIPPING_MANUAL_ENTRY) clearAddressTypeahead();
+  if ([FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SERVICE_CLARIFICATION, FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.DEVICE_OS_SELECTION].includes(step)) {
+    setPanelFocus("offers");
+  } else if ([FLOW_STEPS.BASKET_REVIEW, FLOW_STEPS.ELIGIBILITY_CHECK].includes(step)) {
+    setPanelFocus("basket");
+  } else if (
+    [
+      FLOW_STEPS.PAYMENT_METHOD,
+      FLOW_STEPS.PAYMENT_CONFIRM_LAST4,
+      FLOW_STEPS.PAYMENT_CVV,
+      FLOW_STEPS.PAYMENT_FINANCING_TERM,
+      FLOW_STEPS.PAYMENT_FINANCING_UPFRONT,
+      FLOW_STEPS.PAYMENT_FINANCING_APPROVAL,
+      FLOW_STEPS.PAYMENT_FINANCING_CONFIRM,
+      FLOW_STEPS.SHIPPING_SELECTION,
+      FLOW_STEPS.SHIPPING_LOOKUP,
+      FLOW_STEPS.SHIPPING_MANUAL_ENTRY,
+      FLOW_STEPS.ORDER_REVIEW
+    ].includes(step)
+  ) {
+    setPanelFocus("checkout");
+  } else {
+    setPanelFocus("all");
+  }
 
   switch (step) {
     case FLOW_STEPS.INIT_CONNECTING: {
@@ -1501,19 +1652,23 @@ function renderStep(step) {
       setChatInputHint("Phone number");
       break;
 
+    case FLOW_STEPS.NEW_ONBOARD_ADDRESS:
+      postMessage("bot", "Enter your address (including apartment/unit if applicable).");
+      setChatInputHint("Address");
+      break;
+
     case FLOW_STEPS.HELPDESK_ENTRY:
       hideAvailabilityCard();
       postMessage(
         "bot",
-        "Welcome to Bell. My name is Belinda the AI agent, how can I help you today?"
+        "Welcome to Bell. My name is Belinda the Bell chatbot. What services are you looking for today?"
       );
       showChoiceButtons(
         [
-          "Help Desk",
-          "New Products / Upgrades",
-          "Troubleshoot Existing Services",
-          "Hardware Support",
-          "Corporate Support"
+          "Mobility",
+          "Internet",
+          "Landline",
+          "Bundle"
         ],
         (choice) => {
           postMessage("user", choice);
@@ -1592,28 +1747,59 @@ function renderStep(step) {
 
     case FLOW_STEPS.INTENT_DISCOVERY:
       hideAvailabilityCard();
-      postMessage("bot", "What do you need today: mobility, home internet, landline, or bundle?");
-      showChoiceButtons(["Mobility", "Home internet", "Landline", "Bundle"], async (choice) => {
+      postMessage("bot", "Great. I’ll ask a few quick questions to match the best offer.");
+      transitionTo(FLOW_STEPS.SERVICE_CLARIFICATION, {}, { pushHistory: false });
+      break;
+
+    case FLOW_STEPS.SERVICE_CLARIFICATION: {
+      const intent = state.context.intent;
+      if (intent === "home internet") {
+        postMessage("bot", "For internet, what matters most: fastest speed, balanced value, or upload-heavy performance?");
+        showChoiceButtons(["Fastest speed", "Balanced value", "Upload-intensive"], (choice) => {
+          postMessage("user", choice);
+          applyContextPatch({ salesProfile: { speedPriority: choice } });
+          transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+        });
+        break;
+      }
+
+      if (intent === "mobility") {
+        if (!state.context.salesProfile.phonePreference) {
+          postMessage("bot", "Which phone do you prefer?");
+          showChoiceButtons(["iPhone", "Samsung Galaxy", "Google Pixel", "Other device"], (choice) => {
+            postMessage("user", choice);
+            applyContextPatch({ salesProfile: { phonePreference: choice } });
+            renderStep(FLOW_STEPS.SERVICE_CLARIFICATION);
+          });
+          break;
+        }
+        postMessage("bot", "Which calling plan do you need?");
+        showChoiceButtons(["Canada", "Canada + US", "International"], (choice) => {
+          postMessage("user", choice);
+          applyContextPatch({ salesProfile: { callingPlan: choice } });
+          transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+        });
+        break;
+      }
+
+      if (intent === "bundle") {
+        postMessage("bot", "Are you looking for a 2-service bundle or 3-service bundle?");
+        showChoiceButtons(["2 services", "3 services"], (choice) => {
+          postMessage("user", choice);
+          applyContextPatch({ salesProfile: { bundleSize: choice.startsWith("3") ? 3 : 2 } });
+          transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+        });
+        break;
+      }
+
+      postMessage("bot", "For landline, do you need local calling or international minutes?");
+      showChoiceButtons(["Local calling", "International minutes"], (choice) => {
         postMessage("user", choice);
-        const intent = parseSalesIntentDeterministic(choice) || (await detectIntent(choice));
-        if (!intent) {
-          handleUnclearInput(choice, "Please choose mobility, home internet, landline, or bundle.");
-          return;
-        }
-        const pageMap = {
-          mobility: 0,
-          "home internet": 1,
-          landline: 2,
-          bundle: 0
-        };
-        state.offerPageIndex = pageMap[intent] ?? 0;
-        if (intent === "mobility") {
-          transitionTo(FLOW_STEPS.DEVICE_OS_SELECTION, { intent, activeTask: "sales_mobility" }, { pushHistory: true });
-          return;
-        }
-        transitionTo(FLOW_STEPS.OFFER_BROWSE, { intent, deviceSelection: { osType: null, model: null } }, { pushHistory: true });
+        applyContextPatch({ salesProfile: { callingPlan: choice } });
+        transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
       });
       break;
+    }
 
     case FLOW_STEPS.DEVICE_OS_SELECTION:
       postMessage("bot", "For mobility phones, do you want iOS, Android, or other devices?");
@@ -1628,7 +1814,7 @@ function renderStep(step) {
 
     case FLOW_STEPS.OFFER_BROWSE:
       hideAvailabilityCard();
-      postMessage("bot", `Browsing offers. ${carouselPageLabel.textContent}. Use Prev/Next or add items to basket.`);
+      postMessage("bot", "Here are your top 3 exclusive matched offers. Add items to your basket, one at a time.");
       break;
 
     case FLOW_STEPS.BASKET_REVIEW:
@@ -1853,14 +2039,15 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.ORDER_REVIEW: {
-      const { serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday } = getCheckoutTotals();
+      const { serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday, bundleDiscount } = getCheckoutTotals();
       const clientType = state.context.clientType || state.context.customerType || "personal";
       const financingDetail = state.context.financing.selected
         ? ` Financing ${currency(state.context.financing.financedBase)} over ${state.context.financing.termMonths} months (${currency(financingMonthly)}/month), upfront ${currency(state.context.financing.upfrontPayment)}, ref ${state.context.financing.decisionId}.`
         : "";
+      const bundleDetail = bundleDiscount > 0 ? ` Bundle discount ${currency(bundleDiscount)}/month applied.` : "";
       postMessage(
         "bot",
-        `Corporate order review for ${clientType} client: ${state.context.basket.length} item(s), service ${currency(serviceMonthly)}/month.${financingDetail} Installation fees ${currency(installationFees)}. Total due today ${currency(chargeToday)}. Monthly total going forward ${currency(combinedMonthly)}. Shipping to ${state.context.shipping.address}.`
+        `Corporate order review for ${clientType} client: ${state.context.basket.length} item(s), service ${currency(serviceMonthly)}/month.${bundleDetail}${financingDetail} Installation fees ${currency(installationFees)}. Total due today ${currency(chargeToday)}. Monthly total going forward ${currency(combinedMonthly)}. Shipping to ${state.context.shipping.address}.`
       );
       checkoutStatus.textContent = "Status: ready to place order.";
       const paymentLine =
@@ -1885,19 +2072,11 @@ function renderStep(step) {
     case FLOW_STEPS.AUXILIARY_ASSIST:
       postMessage("bot", "Is there anything else I can help you with today?");
       showChoiceButtons(
-        ["New Products / Upgrades", "Help Desk / Troubleshooting", "Hardware Support", "No, that is all"],
+        ["Add another service", "View offers", "No, that is all"],
         (choice) => {
           postMessage("user", choice);
-          if (choice === "New Products / Upgrades") {
-            transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory: true });
-            return;
-          }
-          if (choice === "Help Desk / Troubleshooting") {
-            transitionTo(FLOW_STEPS.SUPPORT_DISCOVERY, { activeTask: "support" }, { pushHistory: true });
-            return;
-          }
-          if (choice === "Hardware Support") {
-            transitionTo(FLOW_STEPS.HARDWARE_TROUBLESHOOT, { activeTask: "hardware" }, { pushHistory: true });
+          if (choice === "Add another service" || choice === "View offers") {
+            transitionTo(FLOW_STEPS.HELPDESK_ENTRY, { activeTask: "sales" }, { pushHistory: true, enforceContract: false });
             return;
           }
           if (state.context.escalatedToAgent && state.context.agentRating == null) {
@@ -2155,7 +2334,7 @@ async function handleChatInput(message) {
       if (routeHelpdeskSelection(trimmed, { pushHistory: true })) {
         return;
       }
-      handleUnclearInput(message, "Please choose: Help Desk, New Products/Upgrades, Troubleshooting, Hardware, or Corporate Support.");
+      handleUnclearInput(message, "Please choose one service: Mobility, Internet, Landline, or Bundle.");
       return;
 
     case FLOW_STEPS.CORPORATE_DISCOVERY:
@@ -2224,16 +2403,8 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.AUXILIARY_ASSIST:
-      if (lower.includes("product") || lower.includes("upgrade") || lower.includes("sales")) {
-        transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory: true });
-        return;
-      }
-      if (lower.includes("help") || lower.includes("troubleshoot") || lower.includes("support")) {
-        transitionTo(FLOW_STEPS.SUPPORT_DISCOVERY, { activeTask: "support" }, { pushHistory: true });
-        return;
-      }
-      if (lower.includes("hardware")) {
-        transitionTo(FLOW_STEPS.HARDWARE_TROUBLESHOOT, { activeTask: "hardware" }, { pushHistory: true });
+      if (lower.includes("service") || lower.includes("offer") || lower.includes("product") || lower.includes("sales")) {
+        transitionTo(FLOW_STEPS.HELPDESK_ENTRY, { activeTask: "sales" }, { pushHistory: true, enforceContract: false });
         return;
       }
       if (lower.includes("no") || lower.includes("that's all") || lower.includes("that is all") || lower.includes("done")) {
@@ -2244,7 +2415,7 @@ async function handleChatInput(message) {
         transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true });
         return;
       }
-      handleUnclearInput(message, "Please tell me if you want products/upgrades, helpdesk support, hardware support, or no further help.");
+      handleUnclearInput(message, "Please tell me if you want another service offer or no further help.");
       return;
 
     case FLOW_STEPS.WARM_AGENT_ROUTING:
@@ -2281,16 +2452,14 @@ async function handleChatInput(message) {
         postMessage("bot", "Please enter a valid phone number.");
         return;
       }
-      const leadId = `lead_${Date.now()}`;
       transitionTo(
-        FLOW_STEPS.NEW_AREA_CODE_ENTRY,
+        FLOW_STEPS.NEW_ONBOARD_ADDRESS,
         {
-          newOnboarding: { phone: trimmed, leadId },
+          newOnboarding: { phone: trimmed, leadId: `lead_${Date.now()}` },
           customerType: "new"
         },
         { pushHistory: true }
       );
-      postMessage("bot", `New client profile created (ID: ${leadId}).`);
       const hash = await createIdentityHash(
         `${state.context.newOnboarding.fullName || ""}|${state.context.newOnboarding.email || ""}|${trimmed}|${Date.now()}`
       );
@@ -2308,12 +2477,16 @@ async function handleChatInput(message) {
         "bot",
         `Profile captured. Name: ${state.context.newOnboarding.fullName}, Email: ${state.context.newOnboarding.email}, Phone: ${formatPhone(trimmed)}. Secure reference ${secureRef}.`
       );
-      logClient("info", "new_customer_created", {
-        leadId,
-        fullName: state.context.newOnboarding.fullName,
-        email: state.context.newOnboarding.email,
-        phone: trimmed
-      });
+      logClient("info", "new_customer_created", { fullName: state.context.newOnboarding.fullName, email: state.context.newOnboarding.email, phone: trimmed });
+      return;
+
+    case FLOW_STEPS.NEW_ONBOARD_ADDRESS:
+      if (trimmed.length < 8) {
+        postMessage("bot", "Please enter a full address.");
+        return;
+      }
+      applyContextPatch({ newOnboarding: { address: trimmed } });
+      transitionTo(FLOW_STEPS.NEW_AREA_CODE_ENTRY, {}, { pushHistory: true });
       return;
 
     case FLOW_STEPS.INTENT_DISCOVERY: {
@@ -2322,15 +2495,70 @@ async function handleChatInput(message) {
         handleUnclearInput(message, "Please tell me if you want mobility, home internet, landline, or bundle.");
         return;
       }
-      const pageMap = { mobility: 0, "home internet": 1, landline: 2, bundle: 0 };
-      state.offerPageIndex = pageMap[intent] ?? 0;
-      if (intent === "mobility") {
-        transitionTo(FLOW_STEPS.DEVICE_OS_SELECTION, { intent, activeTask: "sales_mobility" }, { pushHistory: true });
-        return;
-      }
-      transitionTo(FLOW_STEPS.OFFER_BROWSE, { intent, deviceSelection: { osType: null, model: null } }, { pushHistory: true });
+      transitionTo(
+        FLOW_STEPS.SERVICE_CLARIFICATION,
+        {
+          intent,
+          activeTask: "sales",
+          salesProfile: {
+            serviceType: intent,
+            speedPriority: null,
+            phonePreference: null,
+            callingPlan: null,
+            bundleSize: null,
+            stage: null
+          }
+        },
+        { pushHistory: true }
+      );
       return;
     }
+
+    case FLOW_STEPS.SERVICE_CLARIFICATION:
+      if (state.context.intent === "home internet") {
+        if (!/(fast|balanc|upload)/i.test(trimmed)) {
+          handleUnclearInput(message, "For internet, tell me if your priority is fastest speed, balanced value, or upload-heavy performance.");
+          return;
+        }
+        applyContextPatch({ salesProfile: { speedPriority: trimmed } });
+        transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+        return;
+      }
+      if (state.context.intent === "mobility") {
+        if (!state.context.salesProfile.phonePreference) {
+          if (!/(iphone|samsung|pixel|other|android|ios)/i.test(trimmed)) {
+            handleUnclearInput(message, "Please tell me your phone preference: iPhone, Samsung, Google Pixel, or other.");
+            return;
+          }
+          applyContextPatch({ salesProfile: { phonePreference: trimmed } });
+          postMessage("bot", "Great. Do you need a Canada-only, Canada + US, or International calling plan?");
+          return;
+        }
+        if (!/(canada|us|international)/i.test(trimmed)) {
+          handleUnclearInput(message, "Please specify calling plan: Canada, Canada + US, or International.");
+          return;
+        }
+        applyContextPatch({ salesProfile: { callingPlan: trimmed } });
+        transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+        return;
+      }
+      if (state.context.intent === "bundle") {
+        if (!/(2|3)/.test(trimmed)) {
+          handleUnclearInput(message, "Please choose a 2-service or 3-service bundle.");
+          return;
+        }
+        applyContextPatch({ salesProfile: { bundleSize: trimmed.includes("3") ? 3 : 2 } });
+        transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+        return;
+      }
+      if (!/(local|international)/i.test(trimmed)) {
+        handleUnclearInput(message, "For landline, please specify local calling or international minutes.");
+        return;
+      }
+      applyContextPatch({ salesProfile: { callingPlan: trimmed } });
+      transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+      return;
+    
 
     case FLOW_STEPS.DEVICE_OS_SELECTION:
       if (lower.includes("ios")) {

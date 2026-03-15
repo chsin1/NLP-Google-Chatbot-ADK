@@ -69,9 +69,36 @@ test("canAccessOfferBrowse allows onboarded new customer", () => {
   const context = {
     authUser: null,
     customerType: "new",
-    newOnboarding: { leadId: "lead_123" }
+    areaCode: "416",
+    intent: "home internet",
+    salesProfile: { speedPriority: "Fastest speed" },
+    newOnboarding: {
+      leadId: "lead_123",
+      fullName: "Jamie Doe",
+      email: "jamie@example.com",
+      phone: "4165551000",
+      address: "123 Main St, Toronto, ON"
+    }
   };
   assert.equal(canAccessOfferBrowse(context), true);
+});
+
+test("canAccessOfferBrowse blocks when onboarding address is missing for new customer", () => {
+  const context = {
+    authUser: null,
+    customerType: "new",
+    areaCode: "416",
+    intent: "home internet",
+    salesProfile: { speedPriority: "Fastest speed" },
+    newOnboarding: {
+      leadId: "lead_123",
+      fullName: "Jamie Doe",
+      email: "jamie@example.com",
+      phone: "4165551000",
+      address: ""
+    }
+  };
+  assert.equal(canAccessOfferBrowse(context), false);
 });
 
 test("getEligibilityProfile returns synthetic profile for new customer lead", () => {

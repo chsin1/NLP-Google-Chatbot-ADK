@@ -242,6 +242,11 @@ button {
   z-index: 21;
 }
 
+.chat-widget.expanded {
+  width: min(1240px, calc(100vw - 20px));
+  max-height: calc(100vh - 40px);
+}
+
 .hidden {
   display: none;
 }

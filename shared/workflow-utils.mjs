@@ -89,6 +89,34 @@ function getFinancingAmount(basket = []) {
 }
 
 function canAccessOfferBrowse(context = {}) {
-  if (context.authUser) return true;
-  return context.customerType === "new" && Boolean(context.newOnboarding?.leadId);
+  const hasAreaCode = Boolean(context.areaCode);
+  const hasIntent = Boolean(context.intent);
+  const hasClarification = hasSalesClarification(context);
+  const hasKnownAddress = Boolean(
+    context.newOnboarding?.address ||
+      context.authUser?.prefilledAddress ||
+      context.shipping?.address
+  );
+  if (!hasAreaCode || !hasIntent || !hasClarification) return false;
+
+  if (context.authUser) return hasKnownAddress;
+
+  const onboarding = context.newOnboarding || {};
+  const hasOnboardingProfile = Boolean(
+    onboarding.fullName &&
+      onboarding.email &&
+      onboarding.phone &&
+      onboarding.address
+  );
+  return context.customerType === "new" && hasOnboardingProfile;
+}
+
+function hasSalesClarification(context = {}) {
+  const intent = String(context.intent || "");
+  const sales = context.salesProfile || {};
+  if (intent === "home internet") return Boolean(sales.speedPriority);
+  if (intent === "mobility") return Boolean(sales.phonePreference) && Boolean(sales.callingPlan);
+  if (intent === "bundle") return Boolean(sales.bundleSize);
+  if (intent === "landline") return Boolean(sales.callingPlan);
+  return false;
 }

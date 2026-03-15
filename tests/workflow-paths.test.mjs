@@ -15,12 +15,19 @@ function baseContext() {
     selectedEntryIntent: "New Products / Upgrades",
     customerType: "existing",
     areaCode: "416",
-    authUser: { id: "u1001" },
+    authUser: { id: "u1001", prefilledAddress: "100 Profile Ave, Toronto, ON" },
     intent: "mobility",
+    salesProfile: { phonePreference: "iPhone", callingPlan: "Canada + US" },
     basket: [{ financingEligible: true, devicePrice: 899 }],
     payment: { method: "visa", last4Confirmed: true, verified: true },
     financing: { planType: "smartpay", termMonths: 24, approvalStatus: "approved" },
-    newOnboarding: { leadId: "lead_123" },
+    newOnboarding: {
+      leadId: "lead_123",
+      fullName: "Jamie Doe",
+      email: "jamie@example.com",
+      phone: "4165551000",
+      address: "123 Main St, Toronto, ON"
+    },
     shipping: { address: "100 Test Ave" }
   };
 }
@@ -49,6 +56,10 @@ test("negative gating checks fail when required context is missing", () => {
   ctx.areaCode = null;
   assert.equal(canProceed("EXISTING_AUTH_MODE", ctx), false);
   assert.equal(canProceed("OFFER_BROWSE", ctx), false);
+  ctx.areaCode = "416";
+  ctx.salesProfile.callingPlan = null;
+  assert.equal(canProceed("OFFER_BROWSE", ctx), false);
+  ctx.salesProfile.callingPlan = "Canada + US";
   ctx.payment.verified = false;
   assert.equal(canProceed("SHIPPING_SELECTION", ctx), false);
   ctx.shipping.address = "";
