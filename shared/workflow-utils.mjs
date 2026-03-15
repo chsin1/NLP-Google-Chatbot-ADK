@@ -25,6 +25,8 @@ export function canProceed(step = "", context = {}) {
       return getFinancingAmount(context.basket) > 0 && Boolean(context.financing?.planType) && [24, 36].includes(context.financing?.termMonths);
     case "PAYMENT_FINANCING_CONFIRM":
       return context.financing?.approvalStatus === "approved";
+    case "VALIDATION_ADDRESS_CAPTURE":
+      return Array.isArray(context.basket) && context.basket.length > 0;
     case "OFFER_BROWSE":
       return canAccessOfferBrowse(context) && Boolean(context.areaCode);
     case "PAYMENT_METHOD":
@@ -92,21 +94,16 @@ function canAccessOfferBrowse(context = {}) {
   const hasAreaCode = Boolean(context.areaCode);
   const hasIntent = Boolean(context.intent);
   const hasClarification = hasSalesClarification(context);
-  const hasKnownAddress = Boolean(
-    context.newOnboarding?.address ||
-      context.authUser?.prefilledAddress ||
-      context.shipping?.address
-  );
   if (!hasAreaCode || !hasIntent || !hasClarification) return false;
 
-  if (context.authUser) return hasKnownAddress;
+  // Service address is validated later in checkout eligibility flow.
+  if (context.authUser) return true;
 
   const onboarding = context.newOnboarding || {};
   const hasOnboardingProfile = Boolean(
     onboarding.fullName &&
       onboarding.email &&
-      onboarding.phone &&
-      onboarding.address
+      onboarding.phone
   );
   return context.customerType === "new" && hasOnboardingProfile;
 }
@@ -115,8 +112,12 @@ function hasSalesClarification(context = {}) {
   const intent = String(context.intent || "");
   const sales = context.salesProfile || {};
   if (intent === "home internet") return Boolean(sales.speedPriority);
-  if (intent === "mobility") return Boolean(sales.phonePreference) && Boolean(sales.callingPlan);
+  if (intent === "mobility") {
+    if (!sales.byodChoice || !sales.callingPlan) return false;
+    if (sales.byodChoice === "byod") return true;
+    return Boolean(sales.phonePreference);
+  }
   if (intent === "bundle") return Boolean(sales.bundleSize);
-  if (intent === "landline") return Boolean(sales.callingPlan);
+  if (intent === "landline") return Boolean(sales.linePreference) && Boolean(sales.callingPlan);
   return false;
 }

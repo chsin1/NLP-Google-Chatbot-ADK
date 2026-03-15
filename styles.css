@@ -210,6 +210,155 @@ button {
   font-weight: 600;
 }
 
+.metrics-dashboard {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid #c9d9ea;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5fb 100%);
+}
+
+.metrics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.metrics-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.metrics-controls select {
+  border-radius: 999px;
+  border: 1px solid #b5c6d8;
+  padding: 8px 12px;
+  font: inherit;
+  background: #fff;
+  color: #25425f;
+}
+
+.metrics-head h2 {
+  margin: 0;
+  color: #0f3f79;
+}
+
+.metrics-subtitle {
+  margin: 6px 0 14px;
+  color: #435568;
+}
+
+.sla-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.sla-card {
+  border: 1px solid #c8d7e7;
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.sla-card p {
+  margin: 0;
+  color: #576b7f;
+  font-size: 0.8rem;
+}
+
+.sla-card strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 1.1rem;
+  color: #0d417b;
+}
+
+.sla-badge {
+  align-self: center;
+  justify-self: stretch;
+  border-radius: 999px;
+  padding: 11px 12px;
+  text-align: center;
+  font-weight: 700;
+  border: 1px solid #8bc9a6;
+  color: #1c7f48;
+  background: #ebfff2;
+}
+
+.sla-badge.breach {
+  border-color: #ebb6b6;
+  color: #a02727;
+  background: #fff0f0;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.metric-card {
+  border: 1px solid #c8d7e7;
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px 12px;
+  box-shadow: 0 6px 12px rgba(0, 36, 76, 0.06);
+}
+
+.metric-label {
+  margin: 0;
+  color: #516070;
+  font-size: 0.8rem;
+}
+
+.metric-value {
+  margin-top: 4px;
+  font-size: 1.24rem;
+  font-weight: 700;
+  color: #0c447f;
+}
+
+.metrics-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.metrics-panel {
+  background: #fff;
+  border: 1px solid #cbd7e5;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.metrics-panel h3 {
+  margin: 0 0 8px;
+  color: #114e8f;
+}
+
+.metrics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.metrics-table th,
+.metrics-table td {
+  text-align: left;
+  border-bottom: 1px solid #e6edf5;
+  padding: 6px 4px;
+}
+
+.metrics-table th {
+  color: #3f5165;
+  font-weight: 700;
+}
+
 .chat-launcher {
   position: fixed;
   right: 20px;
@@ -323,6 +472,23 @@ button {
   overflow: hidden;
 }
 
+.chat-body.conversation-only {
+  grid-template-columns: 1fr;
+}
+
+.chat-body.conversation-only .assistant-panels {
+  display: none;
+}
+
+.chat-body.conversation-only .chat-window {
+  min-height: 320px;
+  max-height: calc(100vh - 320px);
+}
+
+.chat-body.split-view .assistant-panels {
+  display: flex;
+}
+
 .conversation-pane {
   display: flex;
   flex-direction: column;
@@ -363,6 +529,34 @@ button {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.journey-progress {
+  padding: 6px 12px 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.journey-chip {
+  border-radius: 999px;
+  border: 1px solid #cad6e4;
+  padding: 4px 10px;
+  font-size: 0.76rem;
+  color: #607286;
+  background: #fff;
+}
+
+.journey-chip.done {
+  background: #ecf5ff;
+  border-color: #a6c4e5;
+  color: #11508f;
+}
+
+.journey-chip.active {
+  background: #0f5da1;
+  border-color: #0f5da1;
+  color: #fff;
 }
 
 .quick-actions button {
@@ -584,6 +778,17 @@ button {
   font-weight: 700;
 }
 
+.product-stock {
+  margin-top: 6px;
+  font-size: 0.79rem;
+  color: #0d6b3a;
+  font-weight: 600;
+}
+
+.product-stock.out {
+  color: #9f2f22;
+}
+
 .basket-list {
   margin: 0;
   padding: 0;
@@ -658,8 +863,23 @@ button:disabled {
   }
 
   .login-sections,
-  .workflow-strip {
+  .workflow-strip,
+  .metrics-grid,
+  .sla-summary {
     grid-template-columns: 1fr;
+  }
+
+  .metrics-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .metrics-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .metrics-controls {
+    justify-content: space-between;
   }
 
   .chat-widget {

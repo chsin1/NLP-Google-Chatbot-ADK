@@ -4,6 +4,7 @@ import {
   calculateCombinedMonthly,
   calculateFinancingMonthly,
   canAccessOfferBrowse,
+  getBundleDiscountRate,
   deriveAreaCodeFromProfile,
   formatPhone,
   getFinancingAmount,
@@ -23,6 +24,7 @@ import {
   parseSalesIntentDeterministic,
   stableContextHash
 } from "./shared/workflow-utils.mjs";
+import { composePrompt } from "./shared/conversation-style-utils.mjs";
 
 const FLOW_STEPS = {
   INIT_CONNECTING: "INIT_CONNECTING",
@@ -49,6 +51,7 @@ const FLOW_STEPS = {
   INTENT_DISCOVERY: "INTENT_DISCOVERY",
   OFFER_BROWSE: "OFFER_BROWSE",
   BASKET_REVIEW: "BASKET_REVIEW",
+  VALIDATION_ADDRESS_CAPTURE: "VALIDATION_ADDRESS_CAPTURE",
   ELIGIBILITY_CHECK: "ELIGIBILITY_CHECK",
   PAYMENT_METHOD: "PAYMENT_METHOD",
   PAYMENT_FINANCING_TERM: "PAYMENT_FINANCING_TERM",
@@ -80,7 +83,7 @@ const STEP_CONTRACT = {
   [FLOW_STEPS.SERVICE_CLARIFICATION]: {
     validInputs: ["service clarifier"],
     requiredContext: ["intent"],
-    allowedNext: [FLOW_STEPS.NEW_ONBOARD_NAME],
+    allowedNext: [FLOW_STEPS.NEW_ONBOARD_NAME, FLOW_STEPS.OFFER_BROWSE],
     fallbackTarget: FLOW_STEPS.SERVICE_CLARIFICATION
   },
   [FLOW_STEPS.CUSTOMER_STATUS_SELECTION]: {
@@ -130,10 +133,26 @@ const STEP_CONTRACT = {
     requiredContext: ["customerType", "areaCode"],
     allowedNext: [FLOW_STEPS.EXISTING_AUTH_IDENTIFIER, FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SUPPORT_DISCOVERY, FLOW_STEPS.HARDWARE_TROUBLESHOOT, FLOW_STEPS.CORPORATE_DISCOVERY],
     fallbackTarget: FLOW_STEPS.EXISTING_AUTH_MODE
+  },
+  [FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE]: {
+    validInputs: ["service address"],
+    requiredContext: ["basket"],
+    allowedNext: [FLOW_STEPS.ELIGIBILITY_CHECK],
+    fallbackTarget: FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE
   }
 };
 
 const CATEGORY_PAGES = ["mobility", "home internet", "landline"];
+const CATEGORY_LABELS = {
+  mobility: "mobility",
+  "home internet": "internet",
+  landline: "landline"
+};
+const CATEGORY_CHOICE_LABELS = {
+  mobility: "Add mobility offers",
+  "home internet": "Add internet offers",
+  landline: "Add landline offers"
+};
 
 const mockUsers = [
   {
@@ -192,8 +211,13 @@ const offers = [
     monthlyPrice: 89,
     osType: "ios",
     deviceModel: "iPhone 16",
+    offerType: "device",
+    byodEligible: false,
     financingEligible: true,
     devicePrice: 899,
+    inventoryCount: 4,
+    inStock: true,
+    alternativeOfferIds: ["mob-002", "mob-003"],
     minCreditScore: 620,
     minAge: 18,
     requiresPrimaryHolder: false
@@ -206,8 +230,13 @@ const offers = [
     monthlyPrice: 99,
     osType: "android",
     deviceModel: "Galaxy S25",
+    offerType: "device",
+    byodEligible: false,
     financingEligible: true,
     devicePrice: 1499,
+    inventoryCount: 0,
+    inStock: false,
+    alternativeOfferIds: ["mob-001", "mob-003"],
     minCreditScore: 700,
     minAge: 18,
     requiresPrimaryHolder: true
@@ -220,9 +249,71 @@ const offers = [
     monthlyPrice: 109,
     osType: "android",
     deviceModel: "Pixel 10",
+    offerType: "device",
+    byodEligible: false,
     financingEligible: true,
     devicePrice: 1199,
+    inventoryCount: 6,
+    inStock: true,
+    alternativeOfferIds: ["mob-001", "mob-002"],
     minCreditScore: 600,
+    minAge: 18,
+    requiresPrimaryHolder: false
+  },
+  {
+    id: "mob-004",
+    category: "mobility",
+    name: "Bring Your Own Phone 60",
+    description: "Bring your own device with Canada-wide calling and 60 GB data.",
+    monthlyPrice: 65,
+    osType: "other",
+    deviceModel: "BYOD",
+    offerType: "byod",
+    byodEligible: true,
+    financingEligible: false,
+    devicePrice: null,
+    inventoryCount: 999,
+    inStock: true,
+    alternativeOfferIds: [],
+    minCreditScore: 540,
+    minAge: 18,
+    requiresPrimaryHolder: false
+  },
+  {
+    id: "mob-005",
+    category: "mobility",
+    name: "Bring Your Own Phone 100",
+    description: "BYOD plan with 100 GB and Canada + US calling.",
+    monthlyPrice: 78,
+    osType: "other",
+    deviceModel: "BYOD",
+    offerType: "byod",
+    byodEligible: true,
+    financingEligible: false,
+    devicePrice: null,
+    inventoryCount: 999,
+    inStock: true,
+    alternativeOfferIds: [],
+    minCreditScore: 560,
+    minAge: 18,
+    requiresPrimaryHolder: false
+  },
+  {
+    id: "mob-006",
+    category: "mobility",
+    name: "Bring Your Own Phone 150",
+    description: "BYOD premium plan with international calling support.",
+    monthlyPrice: 92,
+    osType: "other",
+    deviceModel: "BYOD",
+    offerType: "byod",
+    byodEligible: true,
+    financingEligible: false,
+    devicePrice: null,
+    inventoryCount: 999,
+    inStock: true,
+    alternativeOfferIds: [],
+    minCreditScore: 580,
     minAge: 18,
     requiresPrimaryHolder: false
   },
@@ -268,6 +359,8 @@ const offers = [
     name: "Home Phone Basic",
     description: "Core local and Canada-wide calling with voicemail.",
     monthlyPrice: 38,
+    lineSupport: ["new_line", "keep_existing"],
+    callingProfile: "local",
     financingEligible: false,
     devicePrice: null,
     minCreditScore: 500,
@@ -280,6 +373,8 @@ const offers = [
     name: "Home Phone Plus International",
     description: "Includes international minutes with call display and voicemail.",
     monthlyPrice: 52,
+    lineSupport: ["new_line", "keep_existing"],
+    callingProfile: "international",
     financingEligible: false,
     devicePrice: null,
     minCreditScore: 560,
@@ -292,6 +387,8 @@ const offers = [
     name: "Home Phone Premium",
     description: "Enhanced calling features and expanded long-distance package.",
     monthlyPrice: 59,
+    lineSupport: ["new_line"],
+    callingProfile: "both",
     financingEligible: false,
     devicePrice: null,
     minCreditScore: 560,
@@ -306,6 +403,19 @@ const phonePrefixToUser = {
   "986": "u1003"
 };
 const alexEmail = "alex.test@gmail.com";
+
+function validateOfferCoverage() {
+  const coverage = CATEGORY_PAGES.map((category) => ({
+    category,
+    count: offers.filter((offer) => offer.category === category).length
+  }));
+  const missing = coverage.filter((item) => item.count < 3);
+  if (missing.length > 0) {
+    logClient("error", "offer_coverage_gap", { missing, coverage });
+  } else {
+    logClient("info", "offer_coverage_validated", { coverage });
+  }
+}
 
 const chatLauncher = document.getElementById("chat-launcher");
 const chatWidget = document.getElementById("chat-widget");
@@ -339,6 +449,7 @@ const carouselPageLabel = document.getElementById("carousel-page-label");
 const panelOffers = document.getElementById("panel-offers");
 const panelBasket = document.getElementById("panel-basket");
 const panelCheckout = document.getElementById("panel-checkout");
+const chatBody = document.querySelector(".chat-body");
 
 const basketList = document.getElementById("basket-list");
 const basketTotal = document.getElementById("basket-total");
@@ -349,6 +460,15 @@ const placeOrderBtn = document.getElementById("place-order-btn");
 const checkoutStatus = document.getElementById("checkout-status");
 const orderSummary = document.getElementById("order-summary");
 const sessionStatus = document.getElementById("session-status");
+const refreshMetricsBtn = document.getElementById("refresh-metrics-btn");
+const metricsGrid = document.getElementById("metrics-grid");
+const metricsMonthlyTable = document.querySelector("#metrics-monthly-table tbody");
+const metricsSessionsTable = document.querySelector("#metrics-sessions-table tbody");
+const metricsRouteTable = document.querySelector("#metrics-route-table tbody");
+const metricsSlaSummary = document.getElementById("sla-summary");
+const metricsSlaBreachTable = document.querySelector("#sla-breach-table tbody");
+const metricsRouteFilter = document.getElementById("metrics-route-filter");
+const journeyProgress = document.getElementById("journey-progress");
 
 const state = {
   chatStarted: false,
@@ -358,6 +478,8 @@ const state = {
   offerPageIndex: 0,
   timers: [],
   addressTypeaheadTimer: null,
+  metricsRefreshTimer: null,
+  metricsRouteFilter: "all",
   pendingAuthMode: null,
   context: {
     sessionId: null,
@@ -375,6 +497,20 @@ const state = {
       currentJourney: null,
       journeyStartedAt: null,
       journeyStatus: PATH_STATUS.IDLE
+    },
+    sla: {
+      chatOpenedAt: null,
+      firstReplyAt: null,
+      intentLockedAt: null,
+      offerPresentedAt: null,
+      checkoutStartedAt: null,
+      orderConfirmedAt: null,
+      breachFlags: {
+        firstReply: false,
+        intentLock: false,
+        offerTime: false,
+        checkoutTime: false
+      }
     },
     customerType: null,
     clientType: null,
@@ -414,6 +550,7 @@ const state = {
       lookupQuery: null,
       suggestions: []
     },
+    serviceAddress: null,
     newOnboarding: {
       fullName: null,
       email: null,
@@ -424,10 +561,18 @@ const state = {
     salesProfile: {
       serviceType: null,
       speedPriority: null,
+      byodChoice: null,
       phonePreference: null,
+      linePreference: null,
       callingPlan: null,
       bundleSize: null,
-      stage: null
+      stage: null,
+      awaitingOfferContinuation: false,
+      lastSelectedCategory: null,
+      crossSellOptions: []
+    },
+    sessionFlags: {
+      orderCompleted: false
     },
     supportCase: {
       category: null,
@@ -448,6 +593,27 @@ const state = {
       secureRef: null
     }
   }
+};
+
+const conversationStyle = {
+  [FLOW_STEPS.HELPDESK_ENTRY]: "consultative",
+  [FLOW_STEPS.CUSTOMER_STATUS_SELECTION]: "consultative",
+  [FLOW_STEPS.EXISTING_AUTH_MODE]: "consultative",
+  [FLOW_STEPS.NEW_ONBOARD_NAME]: "consultative",
+  [FLOW_STEPS.INTENT_DISCOVERY]: "consultative",
+  [FLOW_STEPS.SERVICE_CLARIFICATION]: "consultative",
+  [FLOW_STEPS.OFFER_BROWSE]: "consultative",
+  [FLOW_STEPS.PAYMENT_METHOD]: "consultative",
+  UNCLEAR_INPUT: "consultative"
+};
+
+const SLA_TARGETS = {
+  firstReplySeconds: 20,
+  intentLockSeconds: 90,
+  offerPresentationSeconds: 180,
+  checkoutCompletionMinutes: 10,
+  minOrderSuccessRatePercent: 75,
+  maxClarifyRetries: 2
 };
 
 function currency(amount) {
@@ -479,6 +645,341 @@ async function createIdentityHash(value) {
   }
 }
 
+const KPI_SNAPSHOT_STORE_KEY = "bell_sales_kpi_snapshots_v1";
+const KPI_SESSIONS_STORE_KEY = "bell_sales_kpi_sessions_v1";
+const DEFAULT_BUSINESS_KPIS = [
+  { key: "mean_time_to_completion", label: "Mean Time To Completion (min)", value: 12.4 },
+  { key: "customer_acquisition_value", label: "Customer Acquisition Value (CAD)", value: 145 },
+  { key: "lead_response_time", label: "Lead Response Time (sec)", value: 18.7 },
+  { key: "activity_volume", label: "Activity Volume", value: 210 },
+  { key: "reply_rate", label: "Response/Reply Rate (%)", value: 78.5 },
+  { key: "interaction_volume", label: "Interaction Volume", value: 265 },
+  { key: "qualified_conversion_rate", label: "Qualified Conversion Rate (%)", value: 62.3 },
+  { key: "customer_lifetime_value", label: "Customer Lifetime Value (CAD)", value: 980 },
+  { key: "monthly_recurring_revenue", label: "Monthly Recurring Revenue (CAD)", value: 420 },
+  { key: "pipeline_value", label: "Pipeline Value (CAD)", value: 760 }
+];
+
+function formatKpiValue(label, value) {
+  const amount = Number(value || 0);
+  if (label.includes("(CAD)")) return currency(amount);
+  if (label.includes("(%)")) return `${amount.toFixed(2)}%`;
+  if (label.includes("(min)")) return `${amount.toFixed(2)} min`;
+  if (label.includes("(sec)")) return `${amount.toFixed(2)} sec`;
+  return new Intl.NumberFormat("en-CA").format(amount);
+}
+
+function readStore(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStore(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // local storage failures should never block chat flow
+  }
+}
+
+function mergeMonthlySnapshots(existing = [], incoming = []) {
+  const map = new Map();
+  existing.forEach((row) => {
+    map.set(row.month, row);
+  });
+  incoming.forEach((row) => {
+    map.set(row.month, row);
+  });
+  return Array.from(map.values())
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .slice(-12);
+}
+
+function mergeSessionInteractions(existing = [], incoming = []) {
+  const map = new Map();
+  existing.forEach((row) => {
+    map.set(row.sessionId, row);
+  });
+  incoming.forEach((row) => {
+    const prev = map.get(row.sessionId);
+    if (!prev || new Date(row.lastEventTs || 0).getTime() >= new Date(prev.lastEventTs || 0).getTime()) {
+      map.set(row.sessionId, row);
+    }
+  });
+  return Array.from(map.values())
+    .sort((a, b) => new Date(b.lastEventTs || 0).getTime() - new Date(a.lastEventTs || 0).getTime())
+    .slice(0, 30);
+}
+
+function getDefaultMonthlySnapshots() {
+  const baseMonth = new Date();
+  const rows = [];
+  for (let i = 5; i >= 0; i -= 1) {
+    const d = new Date(Date.UTC(baseMonth.getUTCFullYear(), baseMonth.getUTCMonth() - i, 1));
+    const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    rows.push({
+      month,
+      mrrCad: 420 + (5 - i) * 18,
+      pipelineValueCad: 760 + (5 - i) * 26,
+      conversions: 100 + (5 - i) * 4,
+      meanTimeToCompletionMinutes: Number((12.6 - (5 - i) * 0.2).toFixed(2))
+    });
+  }
+  return rows;
+}
+
+function getDefaultSessionInteractions() {
+  return [
+    {
+      sessionId: "sess_mock_001",
+      route: "sales",
+      interactions: 16,
+      lastEventTs: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+      status: "Converted"
+    },
+    {
+      sessionId: "sess_mock_002",
+      route: "sales",
+      interactions: 11,
+      lastEventTs: new Date(Date.now() - 120 * 60 * 1000).toISOString(),
+      status: "In Progress"
+    }
+  ];
+}
+
+function persistDashboardSnapshots(metrics = {}) {
+  const existingMonthly = readStore(KPI_SNAPSHOT_STORE_KEY, []);
+  const existingSessions = readStore(KPI_SESSIONS_STORE_KEY, []);
+  const mergedMonthly = mergeMonthlySnapshots(existingMonthly, metrics.monthlySnapshots || []);
+  const mergedSessions = mergeSessionInteractions(existingSessions, metrics.sessionInteractions || []);
+  writeStore(KPI_SNAPSHOT_STORE_KEY, mergedMonthly);
+  writeStore(KPI_SESSIONS_STORE_KEY, mergedSessions);
+}
+
+function renderMetricsCards(kpis = []) {
+  if (!metricsGrid) return;
+  metricsGrid.innerHTML = "";
+  kpis.forEach((kpi) => {
+    const card = document.createElement("article");
+    card.className = "metric-card";
+    const label = document.createElement("p");
+    label.className = "metric-label";
+    label.textContent = kpi.label;
+    const value = document.createElement("div");
+    value.className = "metric-value";
+    value.textContent = formatKpiValue(kpi.label, kpi.value);
+    card.appendChild(label);
+    card.appendChild(value);
+    metricsGrid.appendChild(card);
+  });
+}
+
+function renderMonthlySnapshotTable(rows = []) {
+  if (!metricsMonthlyTable) return;
+  metricsMonthlyTable.innerHTML = "";
+  rows.slice(-6).reverse().forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${row.month}</td>
+      <td>${currency(Number(row.mrrCad || 0))}</td>
+      <td>${currency(Number(row.pipelineValueCad || 0))}</td>
+      <td>${new Intl.NumberFormat("en-CA").format(Number(row.conversions || 0))}</td>
+      <td>${Number(row.meanTimeToCompletionMinutes || 0).toFixed(2)} min</td>
+    `;
+    metricsMonthlyTable.appendChild(tr);
+  });
+}
+
+function renderSessionInteractionsTable(rows = []) {
+  if (!metricsSessionsTable) return;
+  const filter = state.metricsRouteFilter || "all";
+  const filteredRows = filter === "all" ? rows : rows.filter((row) => String(row.route || "").includes(filter));
+  metricsSessionsTable.innerHTML = "";
+  filteredRows.slice(0, 12).forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${row.sessionId}</td>
+      <td>${row.route || "sales"}</td>
+      <td>${new Intl.NumberFormat("en-CA").format(Number(row.interactions || 0))}</td>
+      <td>${row.lastEventTs ? new Date(row.lastEventTs).toLocaleString() : "n/a"}</td>
+      <td>${row.status || "In Progress"}</td>
+    `;
+    metricsSessionsTable.appendChild(tr);
+  });
+}
+
+function renderRouteBreakdownTable(rows = []) {
+  if (!metricsRouteTable) return;
+  const filter = state.metricsRouteFilter || "all";
+  metricsRouteTable.innerHTML = "";
+  rows
+    .filter((row) => row.route !== "unknown")
+    .filter((row) => filter === "all" || String(row.route || "").includes(filter))
+    .forEach((row) => {
+      const conversion = row.pathStarted ? ((row.orderSuccess / row.pathStarted) * 100).toFixed(1) : "0.0";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${row.route}</td>
+        <td>${row.pathStarted || 0}</td>
+        <td>${row.orderSuccess || 0}</td>
+        <td>${conversion}%</td>
+      `;
+      metricsRouteTable.appendChild(tr);
+    });
+}
+
+function renderSlaSummary(sla = {}) {
+  if (!metricsSlaSummary) return;
+  const score = Number(sla.overallHealthScore || 100).toFixed(1);
+  const breaches = Number(sla.breachCount || 0);
+  const statusClass = breaches > 0 ? "sla-badge breach" : "sla-badge pass";
+  metricsSlaSummary.innerHTML = `
+    <div class="sla-card">
+      <p>SLA Health Score</p>
+      <strong>${score}%</strong>
+    </div>
+    <div class="sla-card">
+      <p>Active Breaches</p>
+      <strong>${breaches}</strong>
+    </div>
+    <div class="${statusClass}">
+      ${breaches > 0 ? "Action Required" : "On Target"}
+    </div>
+  `;
+}
+
+function renderSlaBreachSeries(rows = []) {
+  if (!metricsSlaBreachTable) return;
+  metricsSlaBreachTable.innerHTML = "";
+  const series = rows.length
+    ? rows
+    : getDefaultMonthlySnapshots().map((row) => ({ month: row.month, breaches: 0 }));
+  series.slice(-6).reverse().forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${row.month}</td>
+      <td>${row.breaches}</td>
+    `;
+    metricsSlaBreachTable.appendChild(tr);
+  });
+}
+
+function stepToJourneyStage(step) {
+  if (
+    [
+      FLOW_STEPS.HELPDESK_ENTRY,
+      FLOW_STEPS.CUSTOMER_STATUS_SELECTION,
+      FLOW_STEPS.EXISTING_AREA_CODE_CHECK,
+      FLOW_STEPS.EXISTING_AUTH_MODE,
+      FLOW_STEPS.EXISTING_AUTH_IDENTIFIER,
+      FLOW_STEPS.NEW_ONBOARD_NAME,
+      FLOW_STEPS.NEW_ONBOARD_EMAIL,
+      FLOW_STEPS.NEW_ONBOARD_PHONE,
+      FLOW_STEPS.NEW_ONBOARD_ADDRESS,
+      FLOW_STEPS.NEW_AREA_CODE_ENTRY,
+      FLOW_STEPS.INTENT_DISCOVERY,
+      FLOW_STEPS.SERVICE_CLARIFICATION
+    ].includes(step)
+  ) return 0;
+  if (step === FLOW_STEPS.OFFER_BROWSE) return 1;
+  if ([FLOW_STEPS.BASKET_REVIEW, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, FLOW_STEPS.ELIGIBILITY_CHECK].includes(step)) return 2;
+  if (
+    [
+      FLOW_STEPS.PAYMENT_METHOD,
+      FLOW_STEPS.PAYMENT_CONFIRM_LAST4,
+      FLOW_STEPS.PAYMENT_CVV,
+      FLOW_STEPS.PAYMENT_FINANCING_TERM,
+      FLOW_STEPS.PAYMENT_FINANCING_UPFRONT,
+      FLOW_STEPS.PAYMENT_FINANCING_APPROVAL,
+      FLOW_STEPS.PAYMENT_FINANCING_CONFIRM
+    ].includes(step)
+  ) return 3;
+  if (
+    [FLOW_STEPS.SHIPPING_SELECTION, FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.SHIPPING_LOOKUP].includes(step)
+  ) return 4;
+  if ([FLOW_STEPS.ORDER_REVIEW, FLOW_STEPS.ORDER_CONFIRMED, FLOW_STEPS.AUXILIARY_ASSIST].includes(step)) return 5;
+  return -1;
+}
+
+function updateJourneyProgress(step) {
+  if (!journeyProgress) return;
+  const labels = ["Discovery", "Offers", "Basket", "Payment", "Shipping", "Confirm"];
+  const active = stepToJourneyStage(step);
+  journeyProgress.innerHTML = labels
+    .map((label, idx) => {
+      const cls = idx === active ? "journey-chip active" : idx < active ? "journey-chip done" : "journey-chip";
+      return `<span class="${cls}">${label}</span>`;
+    })
+    .join("");
+}
+
+function renderMetricsDashboard(metrics = {}, { fromCache = false } = {}) {
+  const kpiList = metrics.businessKpis?.length ? metrics.businessKpis : DEFAULT_BUSINESS_KPIS;
+  const monthlyRows = (metrics.monthlySnapshots && metrics.monthlySnapshots.length)
+    ? metrics.monthlySnapshots
+    : readStore(KPI_SNAPSHOT_STORE_KEY, []).length
+      ? readStore(KPI_SNAPSHOT_STORE_KEY, [])
+      : getDefaultMonthlySnapshots();
+  const sessionRows = (metrics.sessionInteractions && metrics.sessionInteractions.length)
+    ? metrics.sessionInteractions
+    : readStore(KPI_SESSIONS_STORE_KEY, []).length
+      ? readStore(KPI_SESSIONS_STORE_KEY, [])
+      : getDefaultSessionInteractions();
+  const routeRows = metrics.routeBreakdown || [];
+  const sla = metrics.sla || { overallHealthScore: 100, breachCount: 0, monthlyBreachSeries: [] };
+  renderMetricsCards(kpiList);
+  renderMonthlySnapshotTable(monthlyRows);
+  renderSessionInteractionsTable(sessionRows);
+  renderRouteBreakdownTable(routeRows);
+  renderSlaSummary(sla);
+  renderSlaBreachSeries(sla.monthlyBreachSeries || []);
+  if (refreshMetricsBtn) {
+    refreshMetricsBtn.textContent = fromCache ? "Showing Cached KPI Data" : "Refresh KPI Data";
+  }
+}
+
+async function refreshMetricsDashboard({ silent = false } = {}) {
+  try {
+    if (refreshMetricsBtn) {
+      refreshMetricsBtn.disabled = true;
+      refreshMetricsBtn.textContent = "Refreshing...";
+    }
+    const response = await fetch("/api/metrics?days=30");
+    if (!response.ok) throw new Error("metrics unavailable");
+    const metrics = await response.json();
+    persistDashboardSnapshots(metrics);
+    renderMetricsDashboard(metrics, { fromCache: false });
+  } catch {
+    renderMetricsDashboard({}, { fromCache: true });
+    if (!silent) {
+      postMessage("bot", "I could not refresh KPI analytics right now. Showing the latest cached values.");
+    }
+  } finally {
+    if (refreshMetricsBtn) {
+      refreshMetricsBtn.disabled = false;
+      if (refreshMetricsBtn.textContent !== "Showing Cached KPI Data") {
+        refreshMetricsBtn.textContent = "Refresh KPI Data";
+      }
+    }
+  }
+}
+
+function queueMetricsDashboardRefresh(delayMs = 1200) {
+  if (state.metricsRefreshTimer) {
+    clearTimeout(state.metricsRefreshTimer);
+  }
+  state.metricsRefreshTimer = setTimeout(() => {
+    state.metricsRefreshTimer = null;
+    refreshMetricsDashboard({ silent: true });
+  }, delayMs);
+}
+
 function clearAddressTypeahead() {
   if (!addressTypeahead) return;
   addressTypeahead.innerHTML = "";
@@ -496,6 +997,10 @@ function clearTimers() {
   state.timers.forEach((timerId) => clearTimeout(timerId));
   state.timers = [];
   resetAddressTypeaheadTimer();
+  if (state.metricsRefreshTimer) {
+    clearTimeout(state.metricsRefreshTimer);
+    state.metricsRefreshTimer = null;
+  }
 }
 
 function postMessage(role, text, { force = false } = {}) {
@@ -505,6 +1010,93 @@ function postMessage(role, text, { force = false } = {}) {
   el.textContent = text;
   chatWindow.appendChild(el);
   chatWindow.scrollTop = chatWindow.scrollHeight;
+  if (role === "bot") {
+    trackSlaFirstReply();
+  }
+}
+
+function stepPrompt(step, fallbackPrompt, tokens = {}) {
+  const variant = conversationStyle[step] || "default";
+  const text = composePrompt(step, state.context, variant, {
+    fallbackPrompt,
+    ...tokens
+  });
+  postMessage("bot", text || fallbackPrompt);
+}
+
+function logSlaBreachOnce(key, eventName, details = {}) {
+  const flags = state.context.sla?.breachFlags || {};
+  if (flags[key]) return;
+  applyContextPatch({
+    sla: {
+      breachFlags: {
+        ...flags,
+        [key]: true
+      }
+    }
+  });
+  logClient("error", eventName, details);
+}
+
+function trackSlaFirstReply() {
+  const sla = state.context.sla || {};
+  if (!sla.chatOpenedAt || sla.firstReplyAt) return;
+  const firstReplyAt = Date.now();
+  applyContextPatch({ sla: { firstReplyAt } });
+  const elapsedSec = (firstReplyAt - sla.chatOpenedAt) / 1000;
+  if (elapsedSec > SLA_TARGETS.firstReplySeconds) {
+    logSlaBreachOnce("firstReply", "sla_first_reply_breach", {
+      actualSeconds: Number(elapsedSec.toFixed(2)),
+      targetSeconds: SLA_TARGETS.firstReplySeconds
+    });
+  }
+}
+
+function trackSlaTransition(nextStep) {
+  const now = Date.now();
+  const sla = state.context.sla || {};
+  const chatOpenedAt = sla.chatOpenedAt;
+  if (!chatOpenedAt) return;
+
+  if (nextStep === FLOW_STEPS.SERVICE_CLARIFICATION && !sla.intentLockedAt) {
+    const actualSec = (now - chatOpenedAt) / 1000;
+    applyContextPatch({ sla: { intentLockedAt: now } });
+    if (actualSec > SLA_TARGETS.intentLockSeconds) {
+      logSlaBreachOnce("intentLock", "sla_intent_lock_breach", {
+        actualSeconds: Number(actualSec.toFixed(2)),
+        targetSeconds: SLA_TARGETS.intentLockSeconds
+      });
+    }
+  }
+
+  if (nextStep === FLOW_STEPS.OFFER_BROWSE && !sla.offerPresentedAt) {
+    const actualSec = (now - chatOpenedAt) / 1000;
+    applyContextPatch({ sla: { offerPresentedAt: now } });
+    if (actualSec > SLA_TARGETS.offerPresentationSeconds) {
+      logSlaBreachOnce("offerTime", "sla_offer_time_breach", {
+        actualSeconds: Number(actualSec.toFixed(2)),
+        targetSeconds: SLA_TARGETS.offerPresentationSeconds
+      });
+    }
+  }
+
+  if (nextStep === FLOW_STEPS.PAYMENT_METHOD && !sla.checkoutStartedAt) {
+    applyContextPatch({ sla: { checkoutStartedAt: now } });
+  }
+}
+
+function trackSlaCheckoutCompletion() {
+  const sla = state.context.sla || {};
+  if (!sla.checkoutStartedAt) return;
+  const now = Date.now();
+  applyContextPatch({ sla: { orderConfirmedAt: now } });
+  const actualMin = (now - sla.checkoutStartedAt) / 60000;
+  if (actualMin > SLA_TARGETS.checkoutCompletionMinutes) {
+    logSlaBreachOnce("checkoutTime", "sla_checkout_time_breach", {
+      actualMinutes: Number(actualMin.toFixed(2)),
+      targetMinutes: SLA_TARGETS.checkoutCompletionMinutes
+    });
+  }
 }
 
 async function logClient(level, event, details = {}) {
@@ -521,6 +1113,7 @@ async function logClient(level, event, details = {}) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ level, event, details: enrichedDetails })
     });
+    queueMetricsDashboardRefresh();
   } catch {
     // never block UX for logging failures
   }
@@ -565,14 +1158,19 @@ function showLoginSections() {
   loginSections.classList.remove("hidden");
 }
 
-function setPanelFocus(mode = "all") {
-  const showOffers = mode === "offers" || mode === "all";
-  const showBasket = mode === "basket" || mode === "all";
-  const showCheckout = mode === "checkout" || mode === "all";
+function setPanelFocus(mode = "conversation") {
+  const showOffers = mode === "offers" || mode === "offers_basket";
+  const showBasket = mode === "basket" || mode === "offers_basket";
+  const showCheckout = mode === "checkout";
+  const splitView = showOffers || showBasket || showCheckout;
   panelOffers.classList.toggle("hidden", !showOffers);
   panelBasket.classList.toggle("hidden", !showBasket);
   panelCheckout.classList.toggle("hidden", !showCheckout);
-  chatWidget.classList.toggle("expanded", mode !== "all");
+  chatWidget.classList.toggle("expanded", splitView);
+  if (chatBody) {
+    chatBody.classList.toggle("split-view", splitView);
+    chatBody.classList.toggle("conversation-only", !splitView);
+  }
 }
 
 function setStatus() {
@@ -635,6 +1233,20 @@ function resetSessionState() {
       journeyStartedAt: null,
       journeyStatus: PATH_STATUS.IDLE
     },
+    sla: {
+      chatOpenedAt: null,
+      firstReplyAt: null,
+      intentLockedAt: null,
+      offerPresentedAt: null,
+      checkoutStartedAt: null,
+      orderConfirmedAt: null,
+      breachFlags: {
+        firstReply: false,
+        intentLock: false,
+        offerTime: false,
+        checkoutTime: false
+      }
+    },
     customerType: null,
     clientType: null,
     authUser: null,
@@ -673,6 +1285,7 @@ function resetSessionState() {
       lookupQuery: null,
       suggestions: []
     },
+    serviceAddress: null,
     newOnboarding: {
       fullName: null,
       email: null,
@@ -683,10 +1296,18 @@ function resetSessionState() {
     salesProfile: {
       serviceType: null,
       speedPriority: null,
+      byodChoice: null,
       phonePreference: null,
+      linePreference: null,
       callingPlan: null,
       bundleSize: null,
-      stage: null
+      stage: null,
+      awaitingOfferContinuation: false,
+      lastSelectedCategory: null,
+      crossSellOptions: []
+    },
+    sessionFlags: {
+      orderCompleted: false
     },
     supportCase: {
       category: null,
@@ -719,6 +1340,7 @@ function resetSessionState() {
   renderBasket();
   renderCarouselPage();
   resetCheckoutPanel();
+  setPanelFocus("conversation");
   setStatus();
 }
 
@@ -739,6 +1361,8 @@ function getPatchedContext(patch = {}) {
   if (patch.selectedEntryIntent !== undefined) next.selectedEntryIntent = patch.selectedEntryIntent;
   if (patch.loopGuard) next.loopGuard = { ...next.loopGuard, ...patch.loopGuard };
   if (patch.pathMeta) next.pathMeta = { ...next.pathMeta, ...patch.pathMeta };
+  if (patch.sla) next.sla = { ...next.sla, ...patch.sla };
+  if (patch.sessionFlags) next.sessionFlags = { ...next.sessionFlags, ...patch.sessionFlags };
   if (patch.customerType !== undefined) next.customerType = patch.customerType;
   if (patch.clientType !== undefined) next.clientType = patch.clientType;
   if (patch.authUser !== undefined) next.authUser = patch.authUser;
@@ -749,6 +1373,7 @@ function getPatchedContext(patch = {}) {
   if (patch.agentRating !== undefined) next.agentRating = patch.agentRating;
   if (patch.agentFeedback !== undefined) next.agentFeedback = patch.agentFeedback;
   if (patch.basket !== undefined) next.basket = patch.basket;
+  if (patch.serviceAddress !== undefined) next.serviceAddress = patch.serviceAddress;
   if (patch.payment) next.payment = { ...next.payment, ...patch.payment };
   if (patch.financing) next.financing = { ...next.financing, ...patch.financing };
   if (patch.shipping) next.shipping = { ...next.shipping, ...patch.shipping };
@@ -840,6 +1465,7 @@ function transitionTo(nextStep, patchContext = {}, { pushHistory = true, enforce
   }
   const prev = state.flowStep;
   state.flowStep = nextStep;
+  trackSlaTransition(nextStep);
   logClient("info", "flow_transition", { from: prev, to: nextStep, patchContext });
   renderStep(nextStep);
 }
@@ -872,15 +1498,17 @@ function goBack() {
 }
 
 function renderCarouselPage() {
+  state.offerPageIndex = Math.max(0, Math.min(state.offerPageIndex, CATEGORY_PAGES.length - 1));
   const category = CATEGORY_PAGES[state.offerPageIndex];
-  let filtered = offers.filter((offer) => offer.category === category);
-  if (state.context.intent && state.context.intent !== "bundle") {
+  const categoryOffers = offers.filter((offer) => offer.category === category);
+  let filtered = [...categoryOffers];
+  if (state.context.intent && state.context.intent !== "bundle" && state.context.salesProfile.stage !== "cross_sell") {
     filtered = filtered.filter((offer) => offer.category === state.context.intent);
   }
   if (category === "mobility" && state.context.deviceSelection.osType) {
     filtered = filtered.filter((offer) => offer.osType === state.context.deviceSelection.osType);
   }
-  if (state.context.intent === "mobility" && state.context.salesProfile.phonePreference) {
+  if (category === "mobility" && state.context.salesProfile.phonePreference) {
     const pref = state.context.salesProfile.phonePreference.toLowerCase();
     filtered = filtered.filter((offer) => {
       if (pref.includes("iphone")) return offer.osType === "ios";
@@ -889,7 +1517,7 @@ function renderCarouselPage() {
       return true;
     });
   }
-  if (state.context.intent === "home internet" && state.context.salesProfile.speedPriority) {
+  if (category === "home internet" && state.context.salesProfile.speedPriority) {
     const pref = state.context.salesProfile.speedPriority.toLowerCase();
     filtered = filtered.filter((offer) => {
       if (pref.includes("fast")) return offer.monthlyPrice >= 95;
@@ -897,31 +1525,59 @@ function renderCarouselPage() {
       return true;
     });
   }
+  if (category === "mobility" && state.context.salesProfile.byodChoice) {
+    const isByod = state.context.salesProfile.byodChoice === "byod";
+    filtered = filtered.filter((offer) => Boolean(offer.byodEligible) === isByod);
+  }
+  if (category === "landline" && state.context.salesProfile.linePreference) {
+    filtered = filtered.filter((offer) => {
+      const lineSupport = Array.isArray(offer.lineSupport) ? offer.lineSupport : ["new_line"];
+      return lineSupport.includes(state.context.salesProfile.linePreference);
+    });
+  }
+  if (category === "landline" && state.context.salesProfile.callingPlan) {
+    const wantsInternational = /international/i.test(state.context.salesProfile.callingPlan);
+    filtered = filtered.filter((offer) => {
+      if (!offer.callingProfile) return true;
+      if (wantsInternational) return offer.callingProfile === "international" || offer.callingProfile === "both";
+      return offer.callingProfile === "local" || offer.callingProfile === "both";
+    });
+  }
 
+  if (filtered.length < 3) {
+    const seen = new Set(filtered.map((offer) => offer.id));
+    const topUp = categoryOffers.filter((offer) => !seen.has(offer.id));
+    filtered = [...filtered, ...topUp];
+  }
   filtered = filtered.slice(0, 3);
 
   carousel.innerHTML = "";
   filtered.forEach((offer) => {
     const card = document.createElement("article");
     card.className = "product-card";
+    const deviceStockState =
+      offer.category === "mobility" && offer.offerType === "device"
+        ? (getOfferStockState(offer) ? "In stock" : "Out of stock - alternatives available")
+        : "";
+    const deviceStockClass =
+      offer.category === "mobility" && offer.offerType === "device" && !getOfferStockState(offer)
+        ? " out"
+        : "";
     card.innerHTML = `
       <div class="product-category">${offer.category}</div>
       <div class="product-name">${offer.name}</div>
       <div class="product-meta">${offer.description}</div>
+      ${deviceStockState ? `<div class="product-stock${deviceStockClass}">${deviceStockState}</div>` : ""}
       <div class="product-price">${currency(offer.monthlyPrice)}/month</div>
     `;
 
     const addBtn = document.createElement("button");
-    addBtn.textContent = "Add to basket";
+    addBtn.textContent =
+      offer.category === "mobility" && offer.offerType === "device" && !getOfferStockState(offer)
+        ? "See alternatives"
+        : "Add to basket";
     addBtn.addEventListener("click", () => {
-      const basket = [...state.context.basket, offer];
-      applyContextPatch({ basket });
-      renderBasket();
-      postMessage("bot", `Added ${offer.name} to your basket.`);
-      logClient("info", "basket_item_added", { offerId: offer.id, basketSize: basket.length });
-      if (offer.category === "mobility") {
-        logClient("info", "device_offer_selected", { offerId: offer.id, osType: offer.osType, deviceModel: offer.deviceModel });
-      }
+      addOfferToBasket(offer);
     });
 
     card.appendChild(addBtn);
@@ -933,6 +1589,255 @@ function renderCarouselPage() {
   carouselNextBtn.disabled = state.offerPageIndex === CATEGORY_PAGES.length - 1;
 }
 
+function getOfferById(id) {
+  return offers.find((offer) => offer.id === id) || null;
+}
+
+function getOfferStockState(offer) {
+  if (!offer) return false;
+  if (typeof offer.inStock === "boolean") return offer.inStock;
+  if (typeof offer.inventoryCount === "number") return offer.inventoryCount > 0;
+  return true;
+}
+
+function getInStockAlternatives(offer, limit = 3) {
+  const alternatives = [];
+  const seen = new Set();
+  (offer.alternativeOfferIds || []).forEach((id) => {
+    const alt = getOfferById(id);
+    if (!alt || seen.has(alt.id)) return;
+    if (alt.category !== offer.category) return;
+    if (!getOfferStockState(alt)) return;
+    alternatives.push(alt);
+    seen.add(alt.id);
+  });
+
+  if (alternatives.length < limit) {
+    offers
+      .filter((item) => item.category === offer.category && item.id !== offer.id && !seen.has(item.id))
+      .filter((item) => getOfferStockState(item))
+      .forEach((item) => {
+        if (alternatives.length >= limit) return;
+        alternatives.push(item);
+        seen.add(item.id);
+      });
+  }
+
+  return alternatives.slice(0, limit);
+}
+
+function presentStockAlternatives(offer) {
+  const alternatives = getInStockAlternatives(offer, 3);
+  if (alternatives.length === 0) {
+    postMessage("bot", `${offer.name} is currently out of stock. Please choose another mobility offer.`);
+    showChoiceButtons(["Show mobility offers"], (choice) => {
+      postMessage("user", choice);
+      routeToCrossSellCategory("mobility");
+    });
+    return;
+  }
+
+  postMessage("bot", `${offer.name} is currently out of stock. Here are similar in-stock options:`);
+  const labels = alternatives.map((alt) => `Switch to ${alt.name}`).concat(["Show mobility offers"]);
+  showChoiceButtons(labels, (choice) => {
+    postMessage("user", choice);
+    if (choice === "Show mobility offers") {
+      routeToCrossSellCategory("mobility");
+      return;
+    }
+    const selected = alternatives.find((alt) => choice === `Switch to ${alt.name}`);
+    if (!selected) return;
+    logClient("info", "stock_alternative_selected", { fromOfferId: offer.id, toOfferId: selected.id });
+    addOfferToBasket(selected, { fromAlternative: true });
+  });
+}
+
+function addOfferToBasket(offer, { fromAlternative = false } = {}) {
+  if (offer.category === "mobility" && offer.financingEligible) {
+    const inStock = getOfferStockState(offer);
+    if (!inStock) {
+      logClient("info", "stock_check_failed", {
+        offerId: offer.id,
+        inventoryCount: offer.inventoryCount ?? null
+      });
+      presentStockAlternatives(offer);
+      return;
+    }
+    logClient("info", "stock_check_passed", {
+      offerId: offer.id,
+      inventoryCount: offer.inventoryCount ?? null
+    });
+  }
+
+  const basket = [...state.context.basket, offer];
+  applyContextPatch({ basket });
+  renderBasket();
+  setPanelFocus("offers_basket");
+  postMessage("bot", `Added ${offer.name} to your basket.`);
+  logClient("info", "basket_item_added", { offerId: offer.id, basketSize: basket.length, fromAlternative });
+  const { bundleDiscount, discountRate } = getCheckoutTotals();
+  if (bundleDiscount > 0) {
+    postMessage(
+      "bot",
+      `Bundle discount now applied: ${Math.round(discountRate * 100)}% off monthly service charges.`
+    );
+  }
+  if (offer.category === "mobility") {
+    logClient("info", "device_offer_selected", { offerId: offer.id, osType: offer.osType, deviceModel: offer.deviceModel });
+  }
+  promptOfferContinuation(offer);
+}
+
+function getRemainingCrossSellCategories(selectedCategory = null) {
+  const selected = new Set((state.context.basket || []).map((item) => item.category));
+  if (selectedCategory) selected.add(selectedCategory);
+  const remaining = CATEGORY_PAGES.filter((category) => !selected.has(category));
+  if (remaining.length > 0) return remaining;
+  return CATEGORY_PAGES.filter((category) => category !== selectedCategory);
+}
+
+function presentCrossSellChoices() {
+  const options =
+    state.context.salesProfile.crossSellOptions?.length > 0
+      ? state.context.salesProfile.crossSellOptions
+      : getRemainingCrossSellCategories(state.context.salesProfile.lastSelectedCategory);
+  if (!options.length) {
+    postMessage("bot", "You already have all major service categories in your basket. Continue when you are ready.");
+    showChoiceButtons(["That is all, continue"], (choice) => {
+      postMessage("user", choice);
+      handleOfferContinuationChoice(choice);
+    });
+    return;
+  }
+  const optionText = options.map((category) => CATEGORY_LABELS[category]).join(" or ");
+  const labels = ["That is all, continue", ...options.map((category) => CATEGORY_CHOICE_LABELS[category])];
+  postMessage("bot", `Sure, I can add more. Do you want ${optionText} offers next?`);
+  showChoiceButtons(labels, (choice) => {
+    postMessage("user", choice);
+    handleOfferContinuationChoice(choice);
+  });
+}
+
+function routeToCrossSellCategory(category) {
+  const remainingOptions = getRemainingCrossSellCategories(category);
+  if (category === "mobility" && !state.context.salesProfile.byodChoice) {
+    postMessage("bot", "Before I show mobility offers, are you bringing your own phone?");
+    showChoiceButtons(["Yes, bring my own phone", "No, I need a new phone"], (choice) => {
+      postMessage("user", choice);
+      const byodChoice = choice.startsWith("Yes") ? "byod" : "new_device";
+      const phonePreference = byodChoice === "byod" ? "BYOD" : null;
+      applyContextPatch({ salesProfile: { byodChoice, phonePreference } });
+      routeToCrossSellCategory("mobility");
+    });
+    return true;
+  }
+  if (category === "landline" && !state.context.salesProfile.linePreference) {
+    postMessage("bot", "Before I show landline offers, do you need a new line or do you want to keep your existing number?");
+    showChoiceButtons(["New line", "Keep existing number"], (choice) => {
+      postMessage("user", choice);
+      const linePreference = choice.startsWith("Keep") ? "keep_existing" : "new_line";
+      applyContextPatch({ salesProfile: { linePreference } });
+      routeToCrossSellCategory("landline");
+    });
+    return true;
+  }
+  if (category === "landline" && !state.context.salesProfile.callingPlan) {
+    postMessage("bot", "For landline, do you prefer local calling or international minutes?");
+    showChoiceButtons(["Local calling", "International minutes"], (choice) => {
+      postMessage("user", choice);
+      applyContextPatch({ salesProfile: { callingPlan: choice } });
+      routeToCrossSellCategory("landline");
+    });
+    return true;
+  }
+  applyContextPatch({
+    salesProfile: {
+      stage: "cross_sell",
+      awaitingOfferContinuation: false,
+      lastSelectedCategory: category,
+      crossSellOptions: remainingOptions
+    }
+  });
+  if (category === "home internet") {
+    state.offerPageIndex = 1;
+    renderCarouselPage();
+    postMessage("bot", "Showing internet offers. Add any option you want.");
+    return true;
+  }
+  if (category === "landline") {
+    state.offerPageIndex = 2;
+    renderCarouselPage();
+    postMessage("bot", "Showing landline offers. Add any option you want.");
+    return true;
+  }
+  if (category === "mobility") {
+    state.offerPageIndex = 0;
+    renderCarouselPage();
+    postMessage("bot", "Showing mobility offers. Add any option you want.");
+    return true;
+  }
+  return false;
+}
+
+function handleOfferContinuationChoice(choice) {
+  const normalized = String(choice || "").trim().toLowerCase();
+  if (
+    normalized === "yes" ||
+    normalized.includes("that is all") ||
+    normalized.includes("that's all") ||
+    normalized.includes("continue") ||
+    normalized.includes("checkout") ||
+    normalized.includes("proceed")
+  ) {
+    applyContextPatch({
+      salesProfile: {
+        awaitingOfferContinuation: false,
+        lastSelectedCategory: null,
+        crossSellOptions: []
+      }
+    });
+    transitionTo(FLOW_STEPS.BASKET_REVIEW, {}, { pushHistory: true });
+    return true;
+  }
+  if (normalized.includes("add mobility") || normalized.includes("mobility")) {
+    return routeToCrossSellCategory("mobility");
+  }
+  if (normalized.includes("add internet") || normalized.includes("home internet") || normalized.includes("internet")) {
+    return routeToCrossSellCategory("home internet");
+  }
+  if (normalized.includes("add landline") || normalized.includes("landline") || normalized.includes("home phone")) {
+    return routeToCrossSellCategory("landline");
+  }
+  return false;
+}
+
+function promptOfferContinuation(selectedOffer) {
+  const selectedCategory = selectedOffer?.category || "";
+  const remainingOptions = getRemainingCrossSellCategories(selectedCategory);
+  const prompt =
+    remainingOptions.length > 0
+      ? `Great choice. Is that everything for now, or would you like to add ${remainingOptions
+          .map((category) => CATEGORY_LABELS[category])
+          .join(" or ")} as well?`
+      : "Great choice. Is that everything for now?";
+  const choices = ["That is all, continue", ...remainingOptions.map((category) => CATEGORY_CHOICE_LABELS[category])];
+
+  applyContextPatch({
+    salesProfile: {
+      awaitingOfferContinuation: true,
+      lastSelectedCategory: selectedCategory,
+      crossSellOptions: remainingOptions
+    }
+  });
+  postMessage("bot", prompt);
+  showChoiceButtons(choices, (choice) => {
+    postMessage("user", choice);
+    if (!handleOfferContinuationChoice(choice)) {
+      presentCrossSellChoices();
+    }
+  });
+}
+
 function renderBasket() {
   basketList.innerHTML = "";
   state.context.basket.forEach((item, idx) => {
@@ -942,8 +1847,12 @@ function renderBasket() {
     basketList.appendChild(li);
   });
 
-  const total = state.context.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
-  basketTotal.textContent = `Total: ${currency(total)}/month`;
+  const { serviceMonthlyBase, bundleDiscount, serviceMonthly, discountRate } = getCheckoutTotals();
+  if (bundleDiscount > 0) {
+    basketTotal.textContent = `Subtotal: ${currency(serviceMonthlyBase)}/month | Discount: ${currency(bundleDiscount)} (${Math.round(discountRate * 100)}%) | Total: ${currency(serviceMonthly)}/month`;
+  } else {
+    basketTotal.textContent = `Total: ${currency(serviceMonthlyBase)}/month`;
+  }
   validateBtn.disabled = !canAccessOfferBrowse(state.context) || state.context.basket.length === 0;
 }
 
@@ -960,9 +1869,35 @@ async function detectIntent(message) {
     });
     if (!response.ok) throw new Error("intent endpoint failed");
     const payload = await response.json();
-    return payload.intent || null;
+    if (payload.mode) {
+      logClient("info", "llm_mode", {
+        mode: payload.mode,
+        confidence: Number(payload.confidence || 0),
+        intent: payload.intent || null
+      });
+    }
+    if (payload.fallbackUsed) {
+      logClient("info", "llm_fallback_used", {
+        mode: payload.mode,
+        confidence: Number(payload.confidence || 0)
+      });
+    }
+    return {
+      intent: payload.intent || detectIntentFallback(message),
+      confidence: Number(payload.confidence || 0),
+      entities: payload.entities || {},
+      mode: payload.mode || "unknown",
+      fallbackUsed: Boolean(payload.fallbackUsed)
+    };
   } catch {
-    return null;
+    logClient("info", "llm_fallback_used", { mode: "network_error" });
+    return {
+      intent: detectIntentFallback(message),
+      confidence: 0.55,
+      entities: {},
+      mode: "network_error",
+      fallbackUsed: true
+    };
   }
 }
 
@@ -1011,13 +1946,21 @@ function routeHelpdeskSelection(choice, { pushHistory = true } = {}) {
       selectedEntryIntent,
       intent: serviceIntent,
       activeTask: "sales",
+      sessionFlags: {
+        orderCompleted: false
+      },
       salesProfile: {
         serviceType: serviceIntent,
         speedPriority: null,
+        byodChoice: null,
         phonePreference: null,
+        linePreference: null,
         callingPlan: null,
         bundleSize: null,
-        stage: null
+        stage: null,
+        awaitingOfferContinuation: false,
+        lastSelectedCategory: null,
+        crossSellOptions: []
       }
     },
     { pushHistory }
@@ -1055,8 +1998,12 @@ function continueFromSelectedIntent({ pushHistory = true } = {}) {
   const intent = normalizeEntryIntent(state.context.selectedEntryIntent || state.context.activeTask || "");
   startPath(intent);
   if (intent === "sales") {
-    if (state.context.intent) {
+    if (state.context.intent && canAccessOfferBrowse(state.context)) {
       transitionTo(FLOW_STEPS.OFFER_BROWSE, { activeTask: "sales" }, { pushHistory });
+      return;
+    }
+    if (state.context.intent) {
+      transitionTo(FLOW_STEPS.SERVICE_CLARIFICATION, { activeTask: "sales" }, { pushHistory, enforceContract: false });
       return;
     }
     transitionTo(FLOW_STEPS.INTENT_DISCOVERY, { activeTask: "sales" }, { pushHistory });
@@ -1074,6 +2021,28 @@ function continueFromSelectedIntent({ pushHistory = true } = {}) {
   transitionTo(FLOW_STEPS.SUPPORT_DISCOVERY, { activeTask: "support" }, { pushHistory });
 }
 
+function routeAfterSalesClarification({ pushHistory = true } = {}) {
+  if (canAccessOfferBrowse(state.context)) {
+    transitionTo(
+      FLOW_STEPS.OFFER_BROWSE,
+      {
+        activeTask: "sales",
+        sessionFlags: { orderCompleted: false }
+      },
+      { pushHistory, enforceContract: false }
+    );
+    return;
+  }
+  transitionTo(
+    FLOW_STEPS.NEW_ONBOARD_NAME,
+    {
+      customerType: "new",
+      sessionFlags: { orderCompleted: false }
+    },
+    { pushHistory }
+  );
+}
+
 async function finalizeExistingAuthentication(user, mode, rawIdentifier = "") {
   const contact = inferAuthContact(user, rawIdentifier);
   user.authenticated = true;
@@ -1085,6 +2054,7 @@ async function finalizeExistingAuthentication(user, mode, rawIdentifier = "") {
     authUser: user,
     areaCode: state.context.areaCode || derivedAreaCode,
     areaCodeSource: state.context.areaCode ? state.context.areaCodeSource || "user_input" : (derivedAreaCode ? "profile" : null),
+    serviceAddress: state.context.serviceAddress || user.prefilledAddress || null,
     authMeta: {
       mode,
       phone: contact.phone,
@@ -1250,7 +2220,7 @@ function generateFinancingDecisionId() {
 function getCheckoutTotals() {
   const serviceMonthlyBase = state.context.basket.reduce((sum, item) => sum + item.monthlyPrice, 0);
   const itemCount = state.context.basket.length;
-  const discountRate = itemCount >= 3 ? 0.2 : itemCount >= 2 ? 0.1 : 0;
+  const discountRate = getBundleDiscountRate(itemCount);
   const bundleDiscount = Number((serviceMonthlyBase * discountRate).toFixed(2));
   const serviceMonthly = Number((serviceMonthlyBase - bundleDiscount).toFixed(2));
   const financingMonthly = state.context.financing.selected ? state.context.financing.monthlyPayment : 0;
@@ -1264,12 +2234,32 @@ function getCheckoutTotals() {
   return { serviceMonthlyBase, bundleDiscount, discountRate, serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday };
 }
 
+function resolveServiceAddress(context = state.context) {
+  return (
+    context.serviceAddress ||
+    context.newOnboarding?.address ||
+    context.authUser?.prefilledAddress ||
+    context.shipping?.address ||
+    null
+  );
+}
+
 function runEligibilityCheck() {
   const user = getEligibilityProfile(state.context);
   if (!user) {
     postMessage("bot", "Please complete authentication or onboarding first.");
     logClient("error", "eligibility_without_auth");
     return;
+  }
+
+  const resolvedServiceAddress = resolveServiceAddress(state.context);
+  if (!resolvedServiceAddress) {
+    logClient("info", "validation_address_requested", { reason: "missing_service_address" });
+    transitionTo(FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, {}, { pushHistory: true });
+    return;
+  }
+  if (!state.context.serviceAddress) {
+    applyContextPatch({ serviceAddress: resolvedServiceAddress });
   }
 
   const failures = [];
@@ -1289,6 +2279,19 @@ function runEligibilityCheck() {
 
   checkoutStatus.textContent = "Status: eligible. Payment selection required before order placement.";
   orderSummary.textContent = `Eligible basket with ${state.context.basket.length} item(s). Ready for payment selection.`;
+  const { bundleDiscount, discountRate } = getCheckoutTotals();
+  if (bundleDiscount > 0) {
+    postMessage(
+      "bot",
+      `You qualify for ${Math.round(discountRate * 100)}% off monthly services. Estimated savings: ${currency(bundleDiscount)}/month.`
+    );
+    logClient("info", "bundle_discount_presented", { discountRate, savingsMonthly: bundleDiscount });
+  } else {
+    postMessage(
+      "bot",
+      "You currently have no bundle discount. Add one more service for 10% off monthly services."
+    );
+  }
   logClient("info", "eligibility_approved", { basketItems: state.context.basket.length });
   transitionTo(FLOW_STEPS.PAYMENT_METHOD, {}, { pushHistory: true });
 }
@@ -1327,7 +2330,7 @@ function renderAddressTypeaheadSuggestions(suggestions = []) {
 }
 
 function queueAddressTypeahead(query) {
-  if (state.flowStep !== FLOW_STEPS.SHIPPING_MANUAL_ENTRY) {
+  if (![FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE].includes(state.flowStep)) {
     clearAddressTypeahead();
     return;
   }
@@ -1349,6 +2352,7 @@ function queueAddressTypeahead(query) {
 }
 
 function confirmOrder() {
+  trackSlaCheckoutCompletion();
   const { serviceMonthlyBase, bundleDiscount, serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday } = getCheckoutTotals();
   const estimatedTaxToday = 0;
   const estimatedTaxMonthly = 0;
@@ -1365,8 +2369,8 @@ function confirmOrder() {
   const contactEmail = state.context.authMeta.email || state.context.newOnboarding.email || profile.email || "not provided";
   const accountReference = state.context.authMeta.secureRef || "N/A";
   const shippingAddress = state.context.shipping.address || profile.prefilledAddress || "Not provided";
-  const billingAddress = shippingAddress || profile.prefilledAddress || "Not provided";
-  const serviceAddress = shippingAddress || profile.prefilledAddress || "Not provided";
+  const serviceAddress = state.context.serviceAddress || shippingAddress || profile.prefilledAddress || "Not provided";
+  const billingAddress = serviceAddress || shippingAddress || profile.prefilledAddress || "Not provided";
   const paymentMethodLabel = mapPaymentMethodLabel(state.context.payment.method, state.context.authUser);
   const maskedPaymentAccount = getMaskedPaymentAccount(
     state.context.payment.method,
@@ -1476,8 +2480,49 @@ function confirmOrder() {
   });
   finishPath(PATH_STATUS.COMPLETED, { outcome: "order_confirmed", orderId });
 
-  applyContextPatch({ basket: [] });
+  applyContextPatch({
+    basket: [],
+    payment: {
+      method: null,
+      expectedLast4: null,
+      last4Confirmed: false,
+      cvvValidated: false,
+      verified: false,
+      token: null
+    },
+    financing: {
+      selected: false,
+      planType: null,
+      termMonths: null,
+      deferredRatio: 0,
+      upfrontPayment: 0,
+      approvalStatus: null,
+      approvedAmount: 0,
+      financedBase: 0,
+      deferredAmount: 0,
+      monthlyPayment: 0,
+      decisionId: null,
+      eligibleDeviceItems: []
+    },
+    shipping: {
+      mode: null,
+      address: null,
+      lookupQuery: null,
+      suggestions: []
+    },
+    salesProfile: {
+      byodChoice: null,
+      linePreference: null,
+      awaitingOfferContinuation: false,
+      lastSelectedCategory: null,
+      crossSellOptions: []
+    },
+    sessionFlags: {
+      orderCompleted: true
+    }
+  });
   renderBasket();
+  resetCheckoutPanel();
   transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "order_complete" }, { pushHistory: true });
 }
 
@@ -1485,12 +2530,19 @@ function renderStep(step) {
   clearQuickActions();
   renderBasket();
   renderCarouselPage();
+  updateJourneyProgress(step);
   setStatus();
   resetChatInputHint();
-  if (step !== FLOW_STEPS.SHIPPING_MANUAL_ENTRY) clearAddressTypeahead();
+  if (![FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE].includes(step)) clearAddressTypeahead();
   if ([FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SERVICE_CLARIFICATION, FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.DEVICE_OS_SELECTION].includes(step)) {
-    setPanelFocus("offers");
-  } else if ([FLOW_STEPS.BASKET_REVIEW, FLOW_STEPS.ELIGIBILITY_CHECK].includes(step)) {
+    if (step === FLOW_STEPS.OFFER_BROWSE && state.context.basket.length > 0) {
+      setPanelFocus("offers_basket");
+    } else if (step === FLOW_STEPS.OFFER_BROWSE) {
+      setPanelFocus("offers");
+    } else {
+      setPanelFocus("conversation");
+    }
+  } else if ([FLOW_STEPS.BASKET_REVIEW, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, FLOW_STEPS.ELIGIBILITY_CHECK].includes(step)) {
     setPanelFocus("basket");
   } else if (
     [
@@ -1509,7 +2561,7 @@ function renderStep(step) {
   ) {
     setPanelFocus("checkout");
   } else {
-    setPanelFocus("all");
+    setPanelFocus("conversation");
   }
 
   switch (step) {
@@ -1528,7 +2580,7 @@ function renderStep(step) {
 
     case FLOW_STEPS.CUSTOMER_STATUS_SELECTION:
       hideAvailabilityCard();
-      postMessage("bot", "Before we continue, are you a new client or an existing Bell client?");
+      stepPrompt(FLOW_STEPS.CUSTOMER_STATUS_SELECTION, "Quick check before I personalize this for you: are you new to Bell, or already a Bell client?");
       showChoiceButtons(["New client", "Existing Bell client"], (choice) => {
         postMessage("user", choice);
         if (choice === "Existing Bell client") {
@@ -1605,7 +2657,7 @@ function renderStep(step) {
 
     case FLOW_STEPS.EXISTING_AUTH_MODE:
       hideAvailabilityCard();
-      postMessage("bot", "Please authenticate as an existing customer.");
+      stepPrompt(FLOW_STEPS.EXISTING_AUTH_MODE, "Great, let’s quickly verify your account so I can show the right offers.");
       if (state.pendingAuthMode === "auto") {
         const user = mockUsers.find((u) => u.id === "u1001");
         state.pendingAuthMode = null;
@@ -1638,7 +2690,7 @@ function renderStep(step) {
 
     case FLOW_STEPS.NEW_ONBOARD_NAME:
       hideAvailabilityCard();
-      postMessage("bot", "Welcome. Let us create your new client profile. Enter your full name.");
+      stepPrompt(FLOW_STEPS.NEW_ONBOARD_NAME, "Perfect, I can set up your profile in under a minute. What is your full name?");
       setChatInputHint("Full name");
       break;
 
@@ -1659,9 +2711,9 @@ function renderStep(step) {
 
     case FLOW_STEPS.HELPDESK_ENTRY:
       hideAvailabilityCard();
-      postMessage(
-        "bot",
-        "Welcome to Bell. My name is Belinda the Bell chatbot. What services are you looking for today?"
+      stepPrompt(
+        FLOW_STEPS.HELPDESK_ENTRY,
+        "Welcome to Bell. My name is Belinda, your Bell AI assistant. What service are you shopping for today?"
       );
       showChoiceButtons(
         [
@@ -1747,25 +2799,40 @@ function renderStep(step) {
 
     case FLOW_STEPS.INTENT_DISCOVERY:
       hideAvailabilityCard();
-      postMessage("bot", "Great. I’ll ask a few quick questions to match the best offer.");
+      stepPrompt(FLOW_STEPS.INTENT_DISCOVERY, "Great choice. I’ll ask one or two quick questions so I can match the best plan for you.");
       transitionTo(FLOW_STEPS.SERVICE_CLARIFICATION, {}, { pushHistory: false });
       break;
 
     case FLOW_STEPS.SERVICE_CLARIFICATION: {
       const intent = state.context.intent;
       if (intent === "home internet") {
-        postMessage("bot", "For internet, what matters most: fastest speed, balanced value, or upload-heavy performance?");
+        if (state.context.salesProfile.speedPriority) {
+          routeAfterSalesClarification({ pushHistory: true });
+          break;
+        }
+        postMessage("bot", "For internet, what matters most to you right now: top speed, balanced value, or strong upload performance?");
         showChoiceButtons(["Fastest speed", "Balanced value", "Upload-intensive"], (choice) => {
           postMessage("user", choice);
           applyContextPatch({ salesProfile: { speedPriority: choice } });
-          transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+          routeAfterSalesClarification({ pushHistory: true });
         });
         break;
       }
 
       if (intent === "mobility") {
-        if (!state.context.salesProfile.phonePreference) {
-          postMessage("bot", "Which phone do you prefer?");
+        if (!state.context.salesProfile.byodChoice) {
+          postMessage("bot", "Are you bringing your own phone to Bell?");
+          showChoiceButtons(["Yes, bring my own phone", "No, I need a new phone"], (choice) => {
+            postMessage("user", choice);
+            const byodChoice = choice.startsWith("Yes") ? "byod" : "new_device";
+            const phonePreference = byodChoice === "byod" ? "BYOD" : null;
+            applyContextPatch({ salesProfile: { byodChoice, phonePreference } });
+            renderStep(FLOW_STEPS.SERVICE_CLARIFICATION);
+          });
+          break;
+        }
+        if (state.context.salesProfile.byodChoice === "new_device" && !state.context.salesProfile.phonePreference) {
+          postMessage("bot", "Nice, let’s pick your phone first. Which device family do you prefer?");
           showChoiceButtons(["iPhone", "Samsung Galaxy", "Google Pixel", "Other device"], (choice) => {
             postMessage("user", choice);
             applyContextPatch({ salesProfile: { phonePreference: choice } });
@@ -1773,30 +2840,53 @@ function renderStep(step) {
           });
           break;
         }
-        postMessage("bot", "Which calling plan do you need?");
+        if (state.context.salesProfile.callingPlan) {
+          routeAfterSalesClarification({ pushHistory: true });
+          break;
+        }
+        postMessage("bot", "And for calling, which coverage fits you best?");
         showChoiceButtons(["Canada", "Canada + US", "International"], (choice) => {
           postMessage("user", choice);
           applyContextPatch({ salesProfile: { callingPlan: choice } });
-          transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+          routeAfterSalesClarification({ pushHistory: true });
         });
         break;
       }
 
       if (intent === "bundle") {
-        postMessage("bot", "Are you looking for a 2-service bundle or 3-service bundle?");
+        if (state.context.salesProfile.bundleSize) {
+          routeAfterSalesClarification({ pushHistory: true });
+          break;
+        }
+        postMessage("bot", "Would you like a 2-service bundle or a 3-service bundle?");
         showChoiceButtons(["2 services", "3 services"], (choice) => {
           postMessage("user", choice);
           applyContextPatch({ salesProfile: { bundleSize: choice.startsWith("3") ? 3 : 2 } });
-          transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+          routeAfterSalesClarification({ pushHistory: true });
         });
         break;
       }
 
-      postMessage("bot", "For landline, do you need local calling or international minutes?");
+      if (!state.context.salesProfile.linePreference) {
+        postMessage("bot", "For landline setup, do you need a new line or do you want to keep your existing number?");
+        showChoiceButtons(["New line", "Keep existing number"], (choice) => {
+          postMessage("user", choice);
+          applyContextPatch({
+            salesProfile: { linePreference: choice.startsWith("Keep") ? "keep_existing" : "new_line" }
+          });
+          renderStep(FLOW_STEPS.SERVICE_CLARIFICATION);
+        });
+        break;
+      }
+      if (state.context.salesProfile.callingPlan) {
+        routeAfterSalesClarification({ pushHistory: true });
+        break;
+      }
+      postMessage("bot", "For home phone, do you need local calling or international minutes?");
       showChoiceButtons(["Local calling", "International minutes"], (choice) => {
         postMessage("user", choice);
         applyContextPatch({ salesProfile: { callingPlan: choice } });
-        transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+        routeAfterSalesClarification({ pushHistory: true });
       });
       break;
     }
@@ -1814,13 +2904,45 @@ function renderStep(step) {
 
     case FLOW_STEPS.OFFER_BROWSE:
       hideAvailabilityCard();
-      postMessage("bot", "Here are your top 3 exclusive matched offers. Add items to your basket, one at a time.");
+      stepPrompt(
+        FLOW_STEPS.OFFER_BROWSE,
+        "I found your top 3 matched offers. Take a look and I’ll help you build the best bundle."
+      );
       break;
 
     case FLOW_STEPS.BASKET_REVIEW:
-      postMessage("bot", "Reviewing basket and running eligibility checks.");
+      postMessage("bot", "Great, reviewing your basket now and running eligibility checks.");
       transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: false });
       break;
+
+    case FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE: {
+      const profileAddress = state.context.authUser?.prefilledAddress || null;
+      const onboardingAddress = state.context.newOnboarding?.address || null;
+      postMessage("bot", "Before I run validation, what service address should I use?");
+      setChatInputHint("Service address");
+      const options = [];
+      if (profileAddress) options.push("Use profile address");
+      if (onboardingAddress) options.push("Use onboarding address");
+      options.push("Enter a new address");
+      showChoiceButtons(options, (choice) => {
+        postMessage("user", choice);
+        if (choice === "Use profile address" && profileAddress) {
+          applyContextPatch({ serviceAddress: profileAddress });
+          postMessage("bot", `Using profile service address: ${profileAddress}.`);
+          transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
+          return;
+        }
+        if (choice === "Use onboarding address" && onboardingAddress) {
+          applyContextPatch({ serviceAddress: onboardingAddress });
+          postMessage("bot", `Using onboarding service address: ${onboardingAddress}.`);
+          transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
+          return;
+        }
+        postMessage("bot", "Please enter your full service address.");
+        setChatInputHint("Service address");
+      });
+      break;
+    }
 
     case FLOW_STEPS.ELIGIBILITY_CHECK:
       runEligibilityCheck();
@@ -1830,11 +2952,11 @@ function renderStep(step) {
       tokenizeBtn.disabled = false;
       const paymentProfile = getEligibilityProfile(state.context);
       const supportsExisting = Boolean(paymentProfile?.savedCardLast4);
-      postMessage(
-        "bot",
+      stepPrompt(
+        FLOW_STEPS.PAYMENT_METHOD,
         supportsExisting
-          ? "Select payment method: Visa, MasterCard, Amex, Existing Payment, or Bell Smart Financing."
-          : "Select payment method: Visa, MasterCard, Amex, or Bell Smart Financing."
+          ? "How would you like to pay today: Visa, MasterCard, Amex, your existing saved card, or Bell Smart Financing?"
+          : "How would you like to pay today: Visa, MasterCard, Amex, or Bell Smart Financing?"
       );
       renderPaymentChoices(paymentProfile, (method, label) => {
         postMessage("user", label);
@@ -2192,7 +3314,7 @@ function handleUnclearInput(message, fallbackPrompt) {
     }
   });
   if (loopState.stuck) {
-    postMessage("bot", "I may be repeating myself. Choose one option so I can recover quickly.");
+    postMessage("bot", "Thanks for your patience. Let me reset this smoothly with one of these options.");
     showChoiceButtons(["Continue", "Go back", "Restart", "Agent assist"], (choice) => {
       postMessage("user", choice);
       if (choice === "Continue") {
@@ -2217,13 +3339,21 @@ function handleUnclearInput(message, fallbackPrompt) {
   const outcome = getRetryOutcome(state.context.clarifyRetries, 3);
   applyContextPatch({ clarifyRetries: outcome.nextRetries });
   logClient("info", "clarify_retry_incremented", { retries: outcome.nextRetries, message });
+  if (outcome.nextRetries > SLA_TARGETS.maxClarifyRetries) {
+    logClient("error", "sla_clarification_retry_breach", {
+      retries: outcome.nextRetries,
+      targetRetries: SLA_TARGETS.maxClarifyRetries
+    });
+  }
   if (outcome.escalate) {
     applyContextPatch({ escalatedToAgent: true });
     logClient("info", "warm_agent_routed", { reason: "unclear_retries", retries: outcome.nextRetries });
     transitionTo(FLOW_STEPS.WARM_AGENT_ROUTING, { activeTask: "clarification_support" }, { pushHistory: true });
     return;
   }
-  postMessage("bot", `${fallbackPrompt} I can clarify this for you.`);
+  stepPrompt("UNCLEAR_INPUT", `${fallbackPrompt} If helpful, I can guide this step for you.`, {
+    fallbackPrompt: `${fallbackPrompt} If helpful, I can guide this step for you.`
+  });
 }
 
 async function handleChatInput(message) {
@@ -2485,28 +3615,80 @@ async function handleChatInput(message) {
         postMessage("bot", "Please enter a full address.");
         return;
       }
-      applyContextPatch({ newOnboarding: { address: trimmed } });
+      applyContextPatch({ newOnboarding: { address: trimmed }, serviceAddress: trimmed });
       transitionTo(FLOW_STEPS.NEW_AREA_CODE_ENTRY, {}, { pushHistory: true });
       return;
 
+    case FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE: {
+      const profileAddress = state.context.authUser?.prefilledAddress || null;
+      const onboardingAddress = state.context.newOnboarding?.address || null;
+      if (lower.includes("profile") && profileAddress) {
+        applyContextPatch({ serviceAddress: profileAddress });
+        postMessage("bot", `Using profile service address: ${profileAddress}.`);
+        transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
+        return;
+      }
+      if ((lower.includes("onboarding") || lower.includes("signup")) && onboardingAddress) {
+        applyContextPatch({ serviceAddress: onboardingAddress });
+        postMessage("bot", `Using onboarding service address: ${onboardingAddress}.`);
+        transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
+        return;
+      }
+      if (trimmed.length < 8) {
+        handleUnclearInput(message, "Please enter a full service address (street, city, province).");
+        return;
+      }
+      applyContextPatch({ serviceAddress: trimmed });
+      postMessage("bot", `Thanks. I will validate service at: ${trimmed}.`);
+      transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
+      return;
+    }
+
     case FLOW_STEPS.INTENT_DISCOVERY: {
-      const intent = parseSalesIntentDeterministic(trimmed) || (await detectIntent(trimmed));
+      const deterministicIntent = parseSalesIntentDeterministic(trimmed);
+      const detected = deterministicIntent
+        ? { intent: deterministicIntent, confidence: 1, entities: {}, mode: "deterministic", fallbackUsed: false }
+        : await detectIntent(trimmed);
+      if (deterministicIntent) {
+        logClient("info", "llm_mode", {
+          mode: "deterministic",
+          confidence: 1,
+          intent: deterministicIntent
+        });
+      }
+      const intent = detected?.intent;
       if (!intent) {
         handleUnclearInput(message, "Please tell me if you want mobility, home internet, landline, or bundle.");
         return;
       }
+      if (intent === "human_handoff") {
+        applyContextPatch({ escalatedToAgent: true });
+        logClient("info", "warm_agent_routed", { reason: "human_handoff_intent" });
+        transitionTo(FLOW_STEPS.WARM_AGENT_ROUTING, { activeTask: "sales_guidance" }, { pushHistory: true });
+        return;
+      }
+
+      const entities = detected?.entities || {};
       transitionTo(
         FLOW_STEPS.SERVICE_CLARIFICATION,
         {
           intent,
           activeTask: "sales",
+          sessionFlags: {
+            orderCompleted: false
+          },
           salesProfile: {
             serviceType: intent,
-            speedPriority: null,
-            phonePreference: null,
-            callingPlan: null,
+            speedPriority: entities.speedPriority || null,
+            byodChoice: null,
+            phonePreference: entities.devicePreference || null,
+            linePreference: null,
+            callingPlan: entities.callingRegion || null,
             bundleSize: null,
-            stage: null
+            stage: null,
+            awaitingOfferContinuation: false,
+            lastSelectedCategory: null,
+            crossSellOptions: []
           }
         },
         { pushHistory: true }
@@ -2521,11 +3703,25 @@ async function handleChatInput(message) {
           return;
         }
         applyContextPatch({ salesProfile: { speedPriority: trimmed } });
-        transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+        routeAfterSalesClarification({ pushHistory: true });
         return;
       }
       if (state.context.intent === "mobility") {
-        if (!state.context.salesProfile.phonePreference) {
+        if (!state.context.salesProfile.byodChoice) {
+          if (/(yes|bring|own|byod)/i.test(trimmed)) {
+            applyContextPatch({ salesProfile: { byodChoice: "byod", phonePreference: "BYOD" } });
+            postMessage("bot", "Great. Do you need a Canada-only, Canada + US, or International calling plan?");
+            return;
+          }
+          if (/(no|new phone|need phone|device)/i.test(trimmed)) {
+            applyContextPatch({ salesProfile: { byodChoice: "new_device" } });
+            postMessage("bot", "Perfect. Which device family do you prefer: iPhone, Samsung Galaxy, Google Pixel, or other?");
+            return;
+          }
+          handleUnclearInput(message, "Please tell me if you are bringing your own phone (yes) or need a new phone (no).");
+          return;
+        }
+        if (state.context.salesProfile.byodChoice === "new_device" && !state.context.salesProfile.phonePreference) {
           if (!/(iphone|samsung|pixel|other|android|ios)/i.test(trimmed)) {
             handleUnclearInput(message, "Please tell me your phone preference: iPhone, Samsung, Google Pixel, or other.");
             return;
@@ -2539,7 +3735,7 @@ async function handleChatInput(message) {
           return;
         }
         applyContextPatch({ salesProfile: { callingPlan: trimmed } });
-        transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+        routeAfterSalesClarification({ pushHistory: true });
         return;
       }
       if (state.context.intent === "bundle") {
@@ -2548,7 +3744,21 @@ async function handleChatInput(message) {
           return;
         }
         applyContextPatch({ salesProfile: { bundleSize: trimmed.includes("3") ? 3 : 2 } });
-        transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+        routeAfterSalesClarification({ pushHistory: true });
+        return;
+      }
+      if (!state.context.salesProfile.linePreference) {
+        if (/(new|new line)/i.test(trimmed)) {
+          applyContextPatch({ salesProfile: { linePreference: "new_line" } });
+          postMessage("bot", "Thanks. For landline calling, do you need local calling or international minutes?");
+          return;
+        }
+        if (/(keep|existing|port)/i.test(trimmed)) {
+          applyContextPatch({ salesProfile: { linePreference: "keep_existing" } });
+          postMessage("bot", "Thanks. For landline calling, do you need local calling or international minutes?");
+          return;
+        }
+        handleUnclearInput(message, "For landline, please choose new line or keep existing number.");
         return;
       }
       if (!/(local|international)/i.test(trimmed)) {
@@ -2556,7 +3766,7 @@ async function handleChatInput(message) {
         return;
       }
       applyContextPatch({ salesProfile: { callingPlan: trimmed } });
-      transitionTo(FLOW_STEPS.NEW_ONBOARD_NAME, { customerType: "new" }, { pushHistory: true });
+      routeAfterSalesClarification({ pushHistory: true });
       return;
     
 
@@ -2583,6 +3793,41 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.OFFER_BROWSE:
+      if (state.context.salesProfile.awaitingOfferContinuation) {
+        if (handleOfferContinuationChoice(trimmed)) {
+          return;
+        }
+        if (lower === "no" || lower.includes("more") || lower.includes("another")) {
+          presentCrossSellChoices();
+          return;
+        }
+        const optionText = (state.context.salesProfile.crossSellOptions || [])
+          .map((category) => CATEGORY_LABELS[category])
+          .join(", ");
+        postMessage(
+          "bot",
+          optionText
+            ? `You can say 'that is all' to continue, or ask for ${optionText} offers.`
+            : "You can say 'that is all' to continue, or ask to see other offers."
+        );
+        return;
+      }
+      if ((lower.includes("that is all") || lower.includes("that is it") || lower.includes("continue")) && state.context.basket.length > 0) {
+        transitionTo(FLOW_STEPS.BASKET_REVIEW, {}, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("add mobility")) {
+        routeToCrossSellCategory("mobility");
+        return;
+      }
+      if (lower.includes("add internet") || lower.includes("home internet")) {
+        routeToCrossSellCategory("home internet");
+        return;
+      }
+      if (lower.includes("add landline") || lower.includes("add home phone")) {
+        routeToCrossSellCategory("landline");
+        return;
+      }
       if (lower.includes("checkout")) {
         if (state.context.basket.length === 0) {
           postMessage("bot", "Please add at least one item to your basket first.");
@@ -2903,6 +4148,22 @@ function closeChatWidget() {
 function startConversation({ skipConnecting = false } = {}) {
   if (state.chatStarted) return;
   state.chatStarted = true;
+  applyContextPatch({
+    sla: {
+      chatOpenedAt: Date.now(),
+      firstReplyAt: null,
+      intentLockedAt: null,
+      offerPresentedAt: null,
+      checkoutStartedAt: null,
+      orderConfirmedAt: null,
+      breachFlags: {
+        firstReply: false,
+        intentLock: false,
+        offerTime: false,
+        checkoutTime: false
+      }
+    }
+  });
   if (skipConnecting) {
     transitionTo(FLOW_STEPS.HELPDESK_ENTRY, {}, { pushHistory: false });
     return;
@@ -2955,13 +4216,21 @@ function runTopLoginFlow(mode) {
   postMessage("bot", "Login selected. I will guide you through existing-client verification.");
 }
 
-chatLauncher.addEventListener("click", toggleChatWidget);
+chatLauncher.addEventListener("click", () => {
+  const opening = chatWidget.classList.contains("hidden");
+  toggleChatWidget();
+  logClient("info", opening ? "chat_widget_opened" : "chat_widget_minimized");
+});
 openChatHeader.addEventListener("click", () => runTopLoginFlow("auto"));
 openChatOffers.addEventListener("click", () => {
   openChatWidget();
   startConversation();
+  logClient("info", "chat_offer_cta_clicked");
 });
-closeChat.addEventListener("click", closeChatWidget);
+closeChat.addEventListener("click", () => {
+  closeChatWidget();
+  logClient("info", "chat_widget_minimized");
+});
 
 autoLoginBtn.addEventListener("click", () => runTopLoginFlow("auto"));
 manualLoginBtn.addEventListener("click", () => runTopLoginFlow("manual"));
@@ -3021,12 +4290,17 @@ placeOrderBtn.addEventListener("click", () => {
     hasShipping: Boolean(state.context.shipping.address),
     basketItems: state.context.basket.length
   });
+  logClient("error", "sla_order_success_breach", {
+    reason: "order_blocked_before_confirmation",
+    targetRatePercent: SLA_TARGETS.minOrderSuccessRatePercent
+  });
 });
 
 carouselPrevBtn.addEventListener("click", () => {
   if (state.offerPageIndex === 0) return;
   state.offerPageIndex -= 1;
   renderCarouselPage();
+  logClient("info", "carousel_page_changed", { direction: "prev", pageIndex: state.offerPageIndex });
   if (state.flowStep === FLOW_STEPS.OFFER_BROWSE) {
     postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
   }
@@ -3036,6 +4310,7 @@ carouselNextBtn.addEventListener("click", () => {
   if (state.offerPageIndex >= CATEGORY_PAGES.length - 1) return;
   state.offerPageIndex += 1;
   renderCarouselPage();
+  logClient("info", "carousel_page_changed", { direction: "next", pageIndex: state.offerPageIndex });
   if (state.flowStep === FLOW_STEPS.OFFER_BROWSE) {
     postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
   }
@@ -3061,6 +4336,20 @@ endChatBtn.addEventListener("click", () => {
   chatMenu.classList.add("hidden");
   endChat();
 });
+
+if (refreshMetricsBtn) {
+  refreshMetricsBtn.addEventListener("click", () => {
+    logClient("info", "metrics_refresh_clicked");
+    refreshMetricsDashboard({ silent: true });
+  });
+}
+
+if (metricsRouteFilter) {
+  metricsRouteFilter.addEventListener("change", () => {
+    state.metricsRouteFilter = metricsRouteFilter.value || "all";
+    refreshMetricsDashboard({ silent: true });
+  });
+}
 
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -3100,6 +4389,10 @@ window.addEventListener("unhandledrejection", (event) => {
 function boot() {
   resetSessionState();
   closeChatWidget();
+  validateOfferCoverage();
+  updateJourneyProgress(FLOW_STEPS.INIT_CONNECTING);
+  refreshMetricsDashboard({ silent: true });
+  setInterval(() => refreshMetricsDashboard({ silent: true }), 60000);
 }
 
 boot();

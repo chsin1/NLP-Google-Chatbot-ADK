@@ -17,7 +17,7 @@ function baseContext() {
     areaCode: "416",
     authUser: { id: "u1001", prefilledAddress: "100 Profile Ave, Toronto, ON" },
     intent: "mobility",
-    salesProfile: { phonePreference: "iPhone", callingPlan: "Canada + US" },
+    salesProfile: { byodChoice: "new_device", phonePreference: "iPhone", callingPlan: "Canada + US" },
     basket: [{ financingEligible: true, devicePrice: 899 }],
     payment: { method: "visa", last4Confirmed: true, verified: true },
     financing: { planType: "smartpay", termMonths: 24, approvalStatus: "approved" },
@@ -43,6 +43,7 @@ test("forward path canProceed coverage for existing + checkout", () => {
   assert.equal(canProceed("EXISTING_AREA_CODE_CHECK", ctx), true);
   assert.equal(canProceed("EXISTING_AUTH_MODE", ctx), true);
   assert.equal(canProceed("OFFER_BROWSE", ctx), true);
+  assert.equal(canProceed("VALIDATION_ADDRESS_CAPTURE", ctx), true);
   assert.equal(canProceed("PAYMENT_METHOD", ctx), true);
   assert.equal(canProceed("PAYMENT_CONFIRM_LAST4", ctx), true);
   assert.equal(canProceed("PAYMENT_CVV", ctx), true);
@@ -71,6 +72,7 @@ test("deterministic parser detects helpdesk routes and sales intent", () => {
   assert.equal(parseHelpdeskIntent("Corporate support please"), "corporate_support");
   assert.equal(parseHelpdeskIntent("help desk and troubleshooting"), "support");
   assert.equal(parseSalesIntentDeterministic("Need home internet"), "home internet");
+  assert.equal(parseSalesIntentDeterministic("Add internet offers"), "home internet");
   assert.equal(parseSalesIntentDeterministic("show me bundles"), "bundle");
   assert.equal(parseSalesIntentDeterministic("nonsense input"), null);
 });

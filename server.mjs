@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { classifyIntentFallback, rankAddressSuggestions } from "./shared/flow-utils.mjs";
+import { classifyIntentFallbackDetailed, extractIntentEntities, rankAddressSuggestions } from "./shared/flow-utils.mjs";
 import { buildMetrics, parseJsonLines } from "./shared/metrics-utils.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,8 +25,16 @@ const staticTypes = {
 };
 
 async function classifyIntentLLM(message = "") {
+  const entities = extractIntentEntities(message);
   if (!process.env.OPENAI_API_KEY) {
-    return classifyIntentFallback(message);
+    const fallback = classifyIntentFallbackDetailed(message);
+    return {
+      intent: fallback.intent,
+      confidence: fallback.confidence,
+      entities,
+      mode: "template_fallback",
+      fallbackUsed: true
+    };
   }
 
   try {
@@ -50,18 +58,45 @@ async function classifyIntentLLM(message = "") {
     });
 
     if (!response.ok) {
-      return classifyIntentFallback(message);
+      const fallback = classifyIntentFallbackDetailed(message);
+      return {
+        intent: fallback.intent,
+        confidence: fallback.confidence,
+        entities,
+        mode: "llm_error_fallback",
+        fallbackUsed: true
+      };
     }
 
     const data = await response.json();
     const output = (data.output_text || "").trim().toLowerCase();
     if (["mobility", "home internet", "landline", "bundle", "human_handoff"].includes(output)) {
-      return output;
+      return {
+        intent: output,
+        confidence: 0.9,
+        entities,
+        mode: "llm",
+        fallbackUsed: false
+      };
     }
 
-    return classifyIntentFallback(output || message);
+    const fallback = classifyIntentFallbackDetailed(output || message);
+    return {
+      intent: fallback.intent,
+      confidence: fallback.confidence,
+      entities,
+      mode: "llm_parse_fallback",
+      fallbackUsed: true
+    };
   } catch {
-    return classifyIntentFallback(message);
+    const fallback = classifyIntentFallbackDetailed(message);
+    return {
+      intent: fallback.intent,
+      confidence: fallback.confidence,
+      entities,
+      mode: "llm_exception_fallback",
+      fallbackUsed: true
+    };
   }
 }
 
@@ -130,8 +165,8 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/intent") {
     try {
       const parsed = await collectRequestBody(req);
-      const intent = await classifyIntentLLM(parsed.message || "");
-      json(res, 200, { intent });
+      const result = await classifyIntentLLM(parsed.message || "");
+      json(res, 200, result);
     } catch {
       json(res, 400, { error: "Invalid JSON body" });
     }

@@ -8,12 +8,41 @@ export const mockAddresses = [
 ];
 
 export function classifyIntentFallback(message = "") {
+  return classifyIntentFallbackDetailed(message).intent;
+}
+
+export function classifyIntentFallbackDetailed(message = "") {
   const text = String(message).toLowerCase();
-  if (/(human|agent|representative|person)/.test(text)) return "human_handoff";
-  if (/(bundle|pack)/.test(text)) return "bundle";
-  if (/(internet|fibe|wifi|home net)/.test(text)) return "home internet";
-  if (/(landline|home phone|phone line)/.test(text)) return "landline";
-  return "mobility";
+  if (/(human|agent|representative|person)/.test(text)) return { intent: "human_handoff", confidence: 0.93 };
+  if (/(bundle|pack)/.test(text)) return { intent: "bundle", confidence: 0.9 };
+  if (/(internet|fibe|wifi|home net)/.test(text)) return { intent: "home internet", confidence: 0.9 };
+  if (/(landline|home phone|phone line)/.test(text)) return { intent: "landline", confidence: 0.88 };
+  return { intent: "mobility", confidence: 0.68 };
+}
+
+export function extractIntentEntities(message = "") {
+  const text = String(message || "").toLowerCase();
+  const entities = {
+    speedPriority: null,
+    devicePreference: null,
+    callingRegion: null,
+    wantsHuman: /(human|agent|representative|person)/.test(text)
+  };
+
+  if (/(fast|speed|gigabit|fastest)/.test(text)) entities.speedPriority = "Fastest speed";
+  else if (/(balance|value|budget)/.test(text)) entities.speedPriority = "Balanced value";
+  else if (/(upload|creator|work from home|upload-heavy)/.test(text)) entities.speedPriority = "Upload-intensive";
+
+  if (/(iphone|ios|apple)/.test(text)) entities.devicePreference = "iPhone";
+  else if (/(samsung|galaxy|android)/.test(text)) entities.devicePreference = "Samsung Galaxy";
+  else if (/(pixel|google phone)/.test(text)) entities.devicePreference = "Google Pixel";
+  else if (/(other|bring my own)/.test(text)) entities.devicePreference = "Other device";
+
+  if (/(canada\s*\+\s*us|us|usa|north america)/.test(text)) entities.callingRegion = "Canada + US";
+  else if (/(international|global|overseas)/.test(text)) entities.callingRegion = "International";
+  else if (/(canada|local)/.test(text)) entities.callingRegion = "Canada";
+
+  return entities;
 }
 
 export function rankAddressSuggestions(query = "", areaCode = "") {

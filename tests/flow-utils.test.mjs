@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyIntentFallback, rankAddressSuggestions } from "../shared/flow-utils.mjs";
+import {
+  classifyIntentFallback,
+  classifyIntentFallbackDetailed,
+  extractIntentEntities,
+  rankAddressSuggestions
+} from "../shared/flow-utils.mjs";
 
 test("classifyIntentFallback maps representative keywords", () => {
   assert.equal(classifyIntentFallback("I need internet for my condo"), "home internet");
@@ -11,6 +16,19 @@ test("classifyIntentFallback maps representative keywords", () => {
 
 test("classifyIntentFallback defaults to mobility", () => {
   assert.equal(classifyIntentFallback("Need a new phone plan"), "mobility");
+});
+
+test("classifyIntentFallbackDetailed includes confidence", () => {
+  const result = classifyIntentFallbackDetailed("I need high speed internet");
+  assert.equal(result.intent, "home internet");
+  assert.ok(result.confidence >= 0.8);
+});
+
+test("extractIntentEntities parses speed/device/calling clues", () => {
+  const entities = extractIntentEntities("Need fastest wifi with iPhone and Canada + US calling");
+  assert.equal(entities.speedPriority, "Fastest speed");
+  assert.equal(entities.devicePreference, "iPhone");
+  assert.equal(entities.callingRegion, "Canada + US");
 });
 
 test("rankAddressSuggestions filters by area code and ranking", () => {

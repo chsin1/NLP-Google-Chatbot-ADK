@@ -73,6 +73,84 @@
         <div class="wf-pill">TV</div>
         <div class="wf-pill">Streaming</div>
       </section>
+
+      <section class="metrics-dashboard" id="metrics-dashboard">
+        <div class="metrics-head">
+          <h2>Sales Performance Dashboard</h2>
+          <div class="metrics-controls">
+            <select id="metrics-route-filter" aria-label="Route filter">
+              <option value="all">All routes</option>
+              <option value="sales">Sales</option>
+              <option value="support">Support</option>
+              <option value="corporate">Corporate</option>
+            </select>
+            <button id="refresh-metrics-btn" type="button" class="secondary">Refresh KPI Data</button>
+          </div>
+        </div>
+        <p class="metrics-subtitle">
+          Live KPI monitoring for chatbot-led sales sessions, conversion, and revenue pipeline.
+        </p>
+        <div id="sla-summary" class="sla-summary"></div>
+        <div class="metrics-grid" id="metrics-grid"></div>
+        <div class="metrics-panels">
+          <article class="metrics-panel">
+            <h3>SLA Breach Trend</h3>
+            <table class="metrics-table" id="sla-breach-table">
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Breaches</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </article>
+          <article class="metrics-panel">
+            <h3>Monthly KPI Snapshot</h3>
+            <table class="metrics-table" id="metrics-monthly-table">
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>MRR</th>
+                  <th>Pipeline</th>
+                  <th>Conversions</th>
+                  <th>MTTC</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </article>
+          <article class="metrics-panel">
+            <h3>Route Conversion Summary</h3>
+            <table class="metrics-table" id="metrics-route-table">
+              <thead>
+                <tr>
+                  <th>Route</th>
+                  <th>Journeys</th>
+                  <th>Orders</th>
+                  <th>Conversion</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </article>
+          <article class="metrics-panel">
+            <h3>Recent Sessions & Interactions</h3>
+            <table class="metrics-table" id="metrics-sessions-table">
+              <thead>
+                <tr>
+                  <th>Session</th>
+                  <th>Route</th>
+                  <th>Events</th>
+                  <th>Last Event</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </article>
+        </div>
+      </section>
     </main>
 
     <button id="chat-launcher" class="chat-launcher" aria-label="Open chat">Chat</button>
@@ -91,9 +169,10 @@
         </div>
       </header>
 
-      <div class="chat-body">
+      <div class="chat-body conversation-only">
         <section class="conversation-pane">
           <div id="chat-window" class="chat-window"></div>
+          <div id="journey-progress" class="journey-progress"></div>
           <div id="quick-actions" class="quick-actions"></div>
           <section id="availability-card" class="availability-card hidden">
             <div class="availability-head">
@@ -135,7 +214,7 @@
         </section>
 
         <section class="assistant-panels">
-          <div id="panel-offers" class="panel-card">
+          <div id="panel-offers" class="panel-card hidden">
             <h3>Product Carousel</h3>
             <div class="carousel-controls">
               <button id="carousel-prev-btn" type="button">Prev</button>
@@ -145,14 +224,14 @@
             <div id="carousel" class="carousel"></div>
           </div>
 
-          <div id="panel-basket" class="panel-card">
+          <div id="panel-basket" class="panel-card hidden">
             <h3>Basket</h3>
             <ul id="basket-list" class="basket-list"></ul>
             <div class="basket-total" id="basket-total">Total: CAD $0.00/month</div>
             <button id="validate-btn" disabled>Run Eligibility & Credit Checks</button>
           </div>
 
-          <div id="panel-checkout" class="panel-card">
+          <div id="panel-checkout" class="panel-card hidden">
             <h3>Checkout & Order</h3>
             <div class="small" id="checkout-status">Status: waiting for eligibility approval.</div>
             <div id="order-summary" class="order-summary">No order created yet.</div>

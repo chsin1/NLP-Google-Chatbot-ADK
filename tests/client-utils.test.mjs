@@ -5,6 +5,7 @@ import {
   calculateCombinedMonthly,
   calculateFinancingMonthly,
   calculateInstallationFees,
+  getBundleDiscountRate,
   canAccessOfferBrowse,
   deriveAreaCodeFromProfile,
   formatPhone,
@@ -83,7 +84,7 @@ test("canAccessOfferBrowse allows onboarded new customer", () => {
   assert.equal(canAccessOfferBrowse(context), true);
 });
 
-test("canAccessOfferBrowse blocks when onboarding address is missing for new customer", () => {
+test("canAccessOfferBrowse allows onboarding progression without address", () => {
   const context = {
     authUser: null,
     customerType: "new",
@@ -98,7 +99,35 @@ test("canAccessOfferBrowse blocks when onboarding address is missing for new cus
       address: ""
     }
   };
+  assert.equal(canAccessOfferBrowse(context), true);
+});
+
+test("canAccessOfferBrowse requires mobility byod choice before browsing", () => {
+  const context = {
+    authUser: sampleUser,
+    customerType: "existing",
+    areaCode: "416",
+    intent: "mobility",
+    salesProfile: { phonePreference: "iPhone", callingPlan: "Canada + US", byodChoice: null },
+    serviceAddress: "210 - 100 Galt Ave, Toronto, ON"
+  };
   assert.equal(canAccessOfferBrowse(context), false);
+  context.salesProfile.byodChoice = "new_device";
+  assert.equal(canAccessOfferBrowse(context), true);
+});
+
+test("canAccessOfferBrowse requires landline line preference", () => {
+  const context = {
+    authUser: sampleUser,
+    customerType: "existing",
+    areaCode: "416",
+    intent: "landline",
+    salesProfile: { linePreference: null, callingPlan: "Local calling" },
+    serviceAddress: "210 - 100 Galt Ave, Toronto, ON"
+  };
+  assert.equal(canAccessOfferBrowse(context), false);
+  context.salesProfile.linePreference = "new_line";
+  assert.equal(canAccessOfferBrowse(context), true);
 });
 
 test("getEligibilityProfile returns synthetic profile for new customer lead", () => {
@@ -151,6 +180,13 @@ test("calculateInstallationFees applies internet and landline setup costs once e
     ]),
     75
   );
+});
+
+test("getBundleDiscountRate returns expected tiers", () => {
+  assert.equal(getBundleDiscountRate(1), 0);
+  assert.equal(getBundleDiscountRate(2), 0.1);
+  assert.equal(getBundleDiscountRate(3), 0.2);
+  assert.equal(getBundleDiscountRate(5), 0.2);
 });
 
 test("calculateFinancingBreakdown handles upfront and deferred ratio", () => {
