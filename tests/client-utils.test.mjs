@@ -9,6 +9,11 @@ import {
   canAccessOfferBrowse,
   deriveAreaCodeFromProfile,
   formatPhone,
+  isValidAddress,
+  isValidCanadianAreaCode,
+  isValidCanadianPhone,
+  isValidEmail,
+  normalizeCanadianPhone,
   getFinancingAmount,
   getFinancingEligibleItems,
   getEligibilityProfile,
@@ -57,6 +62,40 @@ test("deriveAreaCodeFromProfile uses explicit phone when provided", () => {
 test("deriveAreaCodeFromProfile falls back to profile phone", () => {
   assert.equal(deriveAreaCodeFromProfile(sampleUser, ""), "416");
   assert.equal(deriveAreaCodeFromProfile(null, ""), null);
+});
+
+test("normalizeCanadianPhone handles +1 and punctuation", () => {
+  assert.equal(normalizeCanadianPhone("+1 (416) 551-1192"), "4165511192");
+  assert.equal(normalizeCanadianPhone("(647) 555-1122"), "6475551122");
+  assert.equal(normalizeCanadianPhone("555-1122"), "");
+});
+
+test("isValidCanadianAreaCode validates known Canadian NPAs", () => {
+  assert.equal(isValidCanadianAreaCode("416"), true);
+  assert.equal(isValidCanadianAreaCode("647"), true);
+  assert.equal(isValidCanadianAreaCode("999"), false);
+});
+
+test("isValidCanadianPhone validates 10-digit Canadian numbers", () => {
+  assert.equal(isValidCanadianPhone("4165511192"), true);
+  assert.equal(isValidCanadianPhone("(647) 555-1122"), true);
+  assert.equal(isValidCanadianPhone("+1 986 555 3333"), true);
+  assert.equal(isValidCanadianPhone("123456789"), false);
+  assert.equal(isValidCanadianPhone("9995551234"), false);
+});
+
+test("isValidEmail validates standard format", () => {
+  assert.equal(isValidEmail("alex.test@gmail.com"), true);
+  assert.equal(isValidEmail("a+b.c@test-domain.ca"), true);
+  assert.equal(isValidEmail("invalid-email"), false);
+  assert.equal(isValidEmail("missing@domain"), false);
+});
+
+test("isValidAddress requires basic street and locality structure", () => {
+  assert.equal(isValidAddress("210 - 100 Galt Ave, Toronto, ON"), true);
+  assert.equal(isValidAddress("123 Main St, Ottawa"), true);
+  assert.equal(isValidAddress("Toronto"), false);
+  assert.equal(isValidAddress("No numbers here, Toronto"), false);
 });
 
 test("getExpectedLast4 supports card variants", () => {

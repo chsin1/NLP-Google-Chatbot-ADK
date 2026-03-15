@@ -1,3 +1,50 @@
+const CANADIAN_AREA_CODES = new Set([
+  "204", "226", "236", "249", "250", "263", "289", "306", "343", "354",
+  "365", "367", "368", "382", "403", "416", "418", "431", "437", "438",
+  "450", "468", "474", "506", "514", "519", "548", "579", "581", "584",
+  "587", "604", "613", "639", "647", "672", "683", "705", "709", "742",
+  "753", "778", "780", "782", "807", "819", "825", "867", "873", "879",
+  "902", "905", "942", "986"
+]);
+
+export function normalizeCanadianPhone(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("1")) return digits.slice(1);
+  if (digits.length === 10) return digits;
+  return "";
+}
+
+export function isValidCanadianAreaCode(areaCode) {
+  const normalized = String(areaCode || "").trim();
+  return /^\d{3}$/.test(normalized) && CANADIAN_AREA_CODES.has(normalized);
+}
+
+export function isValidCanadianPhone(raw) {
+  const normalized = normalizeCanadianPhone(raw);
+  if (!normalized) return false;
+  return isValidCanadianAreaCode(normalized.slice(0, 3));
+}
+
+export function isValidEmail(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return false;
+  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/i.test(value);
+}
+
+export function isValidCanadianPostalCode(raw) {
+  const value = String(raw || "").trim().toUpperCase();
+  return /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z][ -]?\d[ABCEGHJ-NPRSTV-Z]\d$/.test(value);
+}
+
+export function isValidAddress(raw) {
+  const value = String(raw || "").trim();
+  if (value.length < 10) return false;
+  if (!/\d+/.test(value)) return false;
+  // Basic structure check for street + locality tokens.
+  const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+  return parts.length >= 2;
+}
+
 export function formatPhone(value) {
   const digits = String(value || "").replace(/\D/g, "").slice(0, 10);
   if (digits.length !== 10) return value || "not provided";

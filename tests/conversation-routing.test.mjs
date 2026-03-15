@@ -33,7 +33,7 @@ test("buildReceiptHtml includes full corporate receipt sections", () => {
       displayName: "Alex Carter",
       contactPhone: "(416)-551-1192",
       contactEmail: "alex.test@gmail.com",
-      accountReference: "REF-001"
+      accountStatus: "Account on file"
     },
     addresses: {
       billingAddress: "100 Billing Ave, Toronto, ON",
@@ -61,6 +61,7 @@ test("buildReceiptHtml includes full corporate receipt sections", () => {
       todayTotal: 225,
       monthlyTotal: 112.46
     },
+    promotions: [{ title: "Spring Savings", description: "Seasonal spring offer for qualifying services." }],
     financing: { amountFinanced: 899, upfrontPayment: 100, termMonths: 24, monthlyPayment: 37.46, decisionId: "FIN-123" },
     disclaimer: "Mock confirmation for prototype use."
   });
@@ -74,6 +75,8 @@ test("buildReceiptHtml includes full corporate receipt sections", () => {
   assert.match(html, /Service Address/);
   assert.match(html, /Payment Confirmation/);
   assert.match(html, /\*\*\*\* 2781/);
+  assert.match(html, /Promotions Applied/);
+  assert.match(html, /Spring Savings/);
   assert.match(html, /Bell Smart Financing/);
   assert.match(html, /Total Due Today:/);
   assert.match(html, /Monthly Total Going Forward:/);

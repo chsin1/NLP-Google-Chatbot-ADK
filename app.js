@@ -7,6 +7,11 @@ import {
   getBundleDiscountRate,
   deriveAreaCodeFromProfile,
   formatPhone,
+  isValidAddress,
+  isValidCanadianAreaCode,
+  isValidCanadianPhone,
+  isValidEmail,
+  normalizeCanadianPhone,
   getFinancingAmount,
   getFinancingEligibleItems,
   getEligibilityProfile,
@@ -397,6 +402,64 @@ const offers = [
   }
 ];
 
+const promotions = [
+  {
+    id: "promo-new-customer",
+    title: "New Customer Discount",
+    description: "Welcome savings for new Bell customers on monthly services.",
+    applicableCategories: ["mobility", "home internet", "landline"],
+    eligibility: { customerType: "new" },
+    benefitType: "percent",
+    benefitValue: 0.12,
+    priority: 90,
+    stackable: false
+  },
+  {
+    id: "promo-spring",
+    title: "Spring Savings",
+    description: "Seasonal spring offer for qualifying services.",
+    applicableCategories: ["mobility", "home internet", "landline"],
+    eligibility: { season: "spring" },
+    benefitType: "fixed_credit",
+    benefitValue: 15,
+    priority: 60,
+    stackable: false
+  },
+  {
+    id: "promo-returning",
+    title: "Returning Client Recognition",
+    description: "I see you're a returning client. Here's a loyalty offer.",
+    applicableCategories: ["mobility", "home internet", "landline"],
+    eligibility: { customerType: "existing", returningClient: true },
+    benefitType: "percent",
+    benefitValue: 0.08,
+    priority: 80,
+    stackable: false
+  },
+  {
+    id: "promo-mobility-launch",
+    title: "Mobility Device Launch Credit",
+    description: "Device launch bonus credit on eligible mobility plans.",
+    applicableCategories: ["mobility"],
+    eligibility: {},
+    benefitType: "fixed_credit",
+    benefitValue: 20,
+    priority: 70,
+    stackable: false
+  },
+  {
+    id: "promo-internet-speed",
+    title: "Internet Speed Upgrade Bonus",
+    description: "Extra speed bonus for top-tier internet plan selection.",
+    applicableCategories: ["home internet"],
+    eligibility: {},
+    benefitType: "feature_bonus",
+    benefitValue: 1,
+    priority: 50,
+    stackable: false
+  }
+];
+
 const phonePrefixToUser = {
   "416": "u1001",
   "647": "u1002",
@@ -574,6 +637,15 @@ const state = {
     sessionFlags: {
       orderCompleted: false
     },
+    discountNotice: {
+      lastTierAnnounced: 0
+    },
+    promoState: {
+      candidates: [],
+      appliedPromo: null,
+      lastAnnouncementKey: null
+    },
+    addressCaptureRetries: 0,
     supportCase: {
       category: null,
       resolved: false
@@ -1181,9 +1253,8 @@ function setStatus() {
   }
   if (state.context.authUser) {
     const phone = formatPhone(state.context.authMeta.phone || state.context.authUser.phone);
-    const ref = state.context.authMeta.secureRef || "pending";
     sessionStatus.textContent =
-      `Session: Authenticated as ${state.context.authUser.name} - Phone: ${phone} | Secure Ref: ${ref}` +
+      `Session: Authenticated as ${state.context.authUser.name} - Phone: ${phone}` +
       (state.context.areaCode ? ` | Area Code: ${state.context.areaCode}` : "");
     hideLoginSections();
     return;
@@ -1191,9 +1262,8 @@ function setStatus() {
 
   const onboarding = state.context.newOnboarding;
   if (onboarding.fullName || onboarding.email || onboarding.phone) {
-    const ref = state.context.authMeta.secureRef || "pending";
     sessionStatus.textContent =
-      `Session: New Client - Name: ${onboarding.fullName || "pending"} | Email: ${onboarding.email || "pending"} | Phone: ${formatPhone(onboarding.phone)} | Secure Ref: ${ref}` +
+      `Session: New Client - Name: ${onboarding.fullName || "pending"} | Email: ${onboarding.email || "pending"} | Phone: ${formatPhone(onboarding.phone)}` +
       (state.context.areaCode ? ` | Area Code: ${state.context.areaCode}` : "");
     hideLoginSections();
     return;
@@ -1309,6 +1379,15 @@ function resetSessionState() {
     sessionFlags: {
       orderCompleted: false
     },
+    discountNotice: {
+      lastTierAnnounced: 0
+    },
+    promoState: {
+      candidates: [],
+      appliedPromo: null,
+      lastAnnouncementKey: null
+    },
+    addressCaptureRetries: 0,
     supportCase: {
       category: null,
       resolved: false
@@ -1363,6 +1442,8 @@ function getPatchedContext(patch = {}) {
   if (patch.pathMeta) next.pathMeta = { ...next.pathMeta, ...patch.pathMeta };
   if (patch.sla) next.sla = { ...next.sla, ...patch.sla };
   if (patch.sessionFlags) next.sessionFlags = { ...next.sessionFlags, ...patch.sessionFlags };
+  if (patch.discountNotice) next.discountNotice = { ...next.discountNotice, ...patch.discountNotice };
+  if (patch.promoState) next.promoState = { ...next.promoState, ...patch.promoState };
   if (patch.customerType !== undefined) next.customerType = patch.customerType;
   if (patch.clientType !== undefined) next.clientType = patch.clientType;
   if (patch.authUser !== undefined) next.authUser = patch.authUser;
@@ -1372,6 +1453,7 @@ function getPatchedContext(patch = {}) {
   if (patch.escalatedToAgent !== undefined) next.escalatedToAgent = patch.escalatedToAgent;
   if (patch.agentRating !== undefined) next.agentRating = patch.agentRating;
   if (patch.agentFeedback !== undefined) next.agentFeedback = patch.agentFeedback;
+  if (patch.addressCaptureRetries !== undefined) next.addressCaptureRetries = patch.addressCaptureRetries;
   if (patch.basket !== undefined) next.basket = patch.basket;
   if (patch.serviceAddress !== undefined) next.serviceAddress = patch.serviceAddress;
   if (patch.payment) next.payment = { ...next.payment, ...patch.payment };
@@ -1669,19 +1751,15 @@ function addOfferToBasket(offer, { fromAlternative = false } = {}) {
     });
   }
 
+  const previousCount = state.context.basket.length;
   const basket = [...state.context.basket, offer];
   applyContextPatch({ basket });
   renderBasket();
   setPanelFocus("offers_basket");
   postMessage("bot", `Added ${offer.name} to your basket.`);
   logClient("info", "basket_item_added", { offerId: offer.id, basketSize: basket.length, fromAlternative });
-  const { bundleDiscount, discountRate } = getCheckoutTotals();
-  if (bundleDiscount > 0) {
-    postMessage(
-      "bot",
-      `Bundle discount now applied: ${Math.round(discountRate * 100)}% off monthly service charges.`
-    );
-  }
+  announceDiscountQualification(previousCount, basket.length);
+  refreshPromoState({ announce: true, basketOrIntent: basket });
   if (offer.category === "mobility") {
     logClient("info", "device_offer_selected", { offerId: offer.id, osType: offer.osType, deviceModel: offer.deviceModel });
   }
@@ -1961,6 +2039,11 @@ function routeHelpdeskSelection(choice, { pushHistory = true } = {}) {
         awaitingOfferContinuation: false,
         lastSelectedCategory: null,
         crossSellOptions: []
+      },
+      promoState: {
+        candidates: [],
+        appliedPromo: null,
+        lastAnnouncementKey: null
       }
     },
     { pushHistory }
@@ -2066,7 +2149,7 @@ async function finalizeExistingAuthentication(user, mode, rawIdentifier = "") {
   const contactLabel = contact.phone ? `Phone: ${formatPhone(contact.phone)}` : `Email: ${maskEmail(contact.email)}`;
   postMessage(
     "bot",
-    `Authentication successful. ${user.name} verified. ${contactLabel}. Secure session reference ${secureRef}.`
+    `Authentication successful. ${user.name} verified. ${contactLabel}.`
   );
   continueFromSelectedIntent({ pushHistory: true });
   logClient("info", "auth_success", { mode, userId: user.id, secureRef });
@@ -2234,6 +2317,124 @@ function getCheckoutTotals() {
   return { serviceMonthlyBase, bundleDiscount, discountRate, serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday };
 }
 
+function getCurrentSeason(now = new Date()) {
+  const month = now.getMonth() + 1;
+  if (month >= 3 && month <= 5) return "spring";
+  if (month >= 6 && month <= 8) return "summer";
+  if (month >= 9 && month <= 11) return "fall";
+  return "winter";
+}
+
+function toDiscountTierPercent(itemCount) {
+  const rate = getBundleDiscountRate(itemCount);
+  return Math.round(rate * 100);
+}
+
+function formatPromotionBenefit(promo) {
+  if (!promo) return "";
+  if (promo.benefitType === "percent") return `${Math.round(Number(promo.benefitValue || 0) * 100)}% off`;
+  if (promo.benefitType === "fixed_credit") return `${currency(Number(promo.benefitValue || 0))} credit`;
+  return "bonus feature";
+}
+
+function getPromoTargetCategories(context = state.context, basketOrIntent = null) {
+  if (Array.isArray(basketOrIntent)) {
+    const fromBasket = [...new Set(basketOrIntent.map((item) => item.category).filter(Boolean))];
+    if (fromBasket.length > 0) return fromBasket;
+  }
+  if (typeof basketOrIntent === "string" && basketOrIntent) return [basketOrIntent];
+  const fromContextBasket = [...new Set((context.basket || []).map((item) => item.category).filter(Boolean))];
+  if (fromContextBasket.length > 0) return fromContextBasket;
+  if (context.intent) return [context.intent];
+  return [];
+}
+
+function getEligiblePromos(context = state.context, basketOrIntent = null) {
+  const targetCategories = getPromoTargetCategories(context, basketOrIntent);
+  const season = getCurrentSeason();
+  const returningClient = Boolean(context.authUser || context.customerType === "existing");
+  const customerType = context.customerType || (context.authUser ? "existing" : null);
+  const eligible = promotions
+    .filter((promo) => {
+      if (!promo.applicableCategories?.some((category) => targetCategories.includes(category))) return false;
+      if (promo.eligibility?.customerType && promo.eligibility.customerType !== customerType) return false;
+      if (promo.eligibility?.returningClient && !returningClient) return false;
+      if (promo.eligibility?.season && promo.eligibility.season !== season) return false;
+      return true;
+    })
+    .sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0))
+    .slice(0, 5);
+  return eligible;
+}
+
+function selectBestPromo(candidates = []) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  return candidates[0];
+}
+
+function renderPromoMessage(candidates = [], appliedPromo = null) {
+  if (!candidates.length) return;
+  const candidateLine = candidates
+    .map((promo) => `${promo.title} (${formatPromotionBenefit(promo)})`)
+    .join(" | ");
+  postMessage("bot", `Here are your matched exclusive offers: ${candidateLine}.`);
+  if (appliedPromo) {
+    postMessage(
+      "bot",
+      `Applied best offer: ${appliedPromo.title} (${formatPromotionBenefit(appliedPromo)}).`
+    );
+  }
+}
+
+function refreshPromoState({ announce = false, basketOrIntent = null, force = false } = {}) {
+  const candidates = getEligiblePromos(state.context, basketOrIntent);
+  const appliedPromo = selectBestPromo(candidates);
+  const basketSignature = (state.context.basket || []).map((item) => item.id).sort().join(",");
+  const announcementKey = `${state.context.intent || "none"}|${basketSignature}|${appliedPromo?.id || "none"}`;
+  applyContextPatch({
+    promoState: {
+      candidates,
+      appliedPromo
+    }
+  });
+  logClient("info", "promo_candidates_presented", {
+    count: candidates.length,
+    candidateIds: candidates.map((promo) => promo.id),
+    appliedPromoId: appliedPromo?.id || null
+  });
+  if (appliedPromo) {
+    logClient("info", "promo_applied", {
+      promoId: appliedPromo.id,
+      benefitType: appliedPromo.benefitType,
+      benefitValue: appliedPromo.benefitValue
+    });
+  }
+  if (announce && (force || state.context.promoState.lastAnnouncementKey !== announcementKey)) {
+    renderPromoMessage(candidates, appliedPromo);
+    applyContextPatch({ promoState: { lastAnnouncementKey: announcementKey } });
+  }
+}
+
+function announceDiscountQualification(previousCount, currentCount) {
+  const previousTier = toDiscountTierPercent(previousCount);
+  const currentTier = toDiscountTierPercent(currentCount);
+  if (currentTier <= previousTier || currentTier === 0) return;
+
+  const { bundleDiscount } = getCheckoutTotals();
+  const wasTier = Number(state.context.discountNotice?.lastTierAnnounced || 0);
+  if (currentTier <= wasTier) return;
+  postMessage(
+    "bot",
+    `Great news. You now qualify for ${currentTier}% off monthly services. Estimated savings: ${currency(bundleDiscount)}/month.`
+  );
+  logClient("info", currentTier >= 20 ? "bundle_discount_upgraded" : "bundle_discount_qualified", {
+    previousTier,
+    currentTier,
+    savingsMonthly: bundleDiscount
+  });
+  applyContextPatch({ discountNotice: { lastTierAnnounced: currentTier } });
+}
+
 function resolveServiceAddress(context = state.context) {
   return (
     context.serviceAddress ||
@@ -2255,7 +2456,8 @@ function runEligibilityCheck() {
   const resolvedServiceAddress = resolveServiceAddress(state.context);
   if (!resolvedServiceAddress) {
     logClient("info", "validation_address_requested", { reason: "missing_service_address" });
-    transitionTo(FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, {}, { pushHistory: true });
+    logClient("info", "address_capture_prompted", { source: "eligibility_check" });
+    transitionTo(FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, { addressCaptureRetries: 0 }, { pushHistory: true });
     return;
   }
   if (!state.context.serviceAddress) {
@@ -2280,17 +2482,24 @@ function runEligibilityCheck() {
   checkoutStatus.textContent = "Status: eligible. Payment selection required before order placement.";
   orderSummary.textContent = `Eligible basket with ${state.context.basket.length} item(s). Ready for payment selection.`;
   const { bundleDiscount, discountRate } = getCheckoutTotals();
+  const discountTier = toDiscountTierPercent(state.context.basket.length);
+  const lastTierAnnounced = Number(state.context.discountNotice?.lastTierAnnounced || 0);
   if (bundleDiscount > 0) {
-    postMessage(
-      "bot",
-      `You qualify for ${Math.round(discountRate * 100)}% off monthly services. Estimated savings: ${currency(bundleDiscount)}/month.`
-    );
-    logClient("info", "bundle_discount_presented", { discountRate, savingsMonthly: bundleDiscount });
+    if (lastTierAnnounced < discountTier) {
+      postMessage(
+        "bot",
+        `You qualify for ${Math.round(discountRate * 100)}% off monthly services. Estimated savings: ${currency(bundleDiscount)}/month.`
+      );
+      logClient("info", "bundle_discount_presented", { discountRate, savingsMonthly: bundleDiscount });
+      applyContextPatch({ discountNotice: { lastTierAnnounced: discountTier } });
+    }
   } else {
-    postMessage(
-      "bot",
-      "You currently have no bundle discount. Add one more service for 10% off monthly services."
-    );
+    if (lastTierAnnounced === 0) {
+      postMessage(
+        "bot",
+        "You currently have no bundle discount. Add one more service for 10% off monthly services."
+      );
+    }
   }
   logClient("info", "eligibility_approved", { basketItems: state.context.basket.length });
   transitionTo(FLOW_STEPS.PAYMENT_METHOD, {}, { pushHistory: true });
@@ -2367,11 +2576,12 @@ function confirmOrder() {
   const displayName = state.context.authUser?.name || state.context.newOnboarding.fullName || "Valued Customer";
   const contactPhone = formatPhone(state.context.authMeta.phone || state.context.newOnboarding.phone || profile.phone || "not provided");
   const contactEmail = state.context.authMeta.email || state.context.newOnboarding.email || profile.email || "not provided";
-  const accountReference = state.context.authMeta.secureRef || "N/A";
+  const accountStatus = "Account on file";
   const shippingAddress = state.context.shipping.address || profile.prefilledAddress || "Not provided";
   const serviceAddress = state.context.serviceAddress || shippingAddress || profile.prefilledAddress || "Not provided";
   const billingAddress = serviceAddress || shippingAddress || profile.prefilledAddress || "Not provided";
   const paymentMethodLabel = mapPaymentMethodLabel(state.context.payment.method, state.context.authUser);
+  const appliedPromo = state.context.promoState?.appliedPromo || null;
   const maskedPaymentAccount = getMaskedPaymentAccount(
     state.context.payment.method,
     state.context.payment.expectedLast4,
@@ -2382,8 +2592,9 @@ function confirmOrder() {
     ? ` Financing: ${currency(state.context.financing.financedBase)} over ${state.context.financing.termMonths} months (${currency(financingMonthly)}/month), upfront ${currency(state.context.financing.upfrontPayment)}, reference ${state.context.financing.decisionId}.`
     : "";
   const discountSummary = bundleDiscount > 0 ? ` Bundle discount applied: ${currency(bundleDiscount)}/month.` : "";
+  const promoSummary = appliedPromo ? ` Promotion applied: ${appliedPromo.title} (${formatPromotionBenefit(appliedPromo)}).` : "";
   orderSummary.textContent =
-    `Corporate receipt ready. Order ${orderId} confirmed (${confirmationCode}). Service ${currency(serviceMonthly)}/month.${discountSummary}${financingSummary} Installation fees ${currency(installationFees)}. Total due today ${currency(todayTotal)}. Monthly total going forward ${currency(monthlyTotal)}. Shipping to ${shippingAddress}.`;
+    `Corporate receipt ready. Order ${orderId} confirmed (${confirmationCode}). Service ${currency(serviceMonthly)}/month.${discountSummary}${promoSummary}${financingSummary} Installation fees ${currency(installationFees)}. Total due today ${currency(todayTotal)}. Monthly total going forward ${currency(monthlyTotal)}. Shipping to ${shippingAddress}.`;
   checkoutStatus.textContent = "Status: order captured and confirmed.";
   postMessage(
     "bot",
@@ -2407,7 +2618,7 @@ function confirmOrder() {
       displayName,
       contactPhone,
       contactEmail,
-      accountReference
+      accountStatus
     },
     addresses: {
       billingAddress,
@@ -2452,6 +2663,14 @@ function confirmOrder() {
       todayTotal,
       monthlyTotal
     },
+    promotions: appliedPromo
+      ? [
+          {
+            title: appliedPromo.title,
+            description: `${appliedPromo.description} (${formatPromotionBenefit(appliedPromo)})`
+          }
+        ]
+      : [],
     disclaimer:
       "Mock confirmation for prototype use. Taxes are placeholders and final billed amounts may vary."
   };
@@ -2519,7 +2738,16 @@ function confirmOrder() {
     },
     sessionFlags: {
       orderCompleted: true
-    }
+    },
+    discountNotice: {
+      lastTierAnnounced: 0
+    },
+    promoState: {
+      candidates: [],
+      appliedPromo: null,
+      lastAnnouncementKey: null
+    },
+    addressCaptureRetries: 0
   });
   renderBasket();
   resetCheckoutPanel();
@@ -2904,6 +3132,7 @@ function renderStep(step) {
 
     case FLOW_STEPS.OFFER_BROWSE:
       hideAvailabilityCard();
+      refreshPromoState({ announce: true });
       stepPrompt(
         FLOW_STEPS.OFFER_BROWSE,
         "I found your top 3 matched offers. Take a look and I’ll help you build the best bundle."
@@ -2911,6 +3140,12 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.BASKET_REVIEW:
+      if (!resolveServiceAddress(state.context)) {
+        postMessage("bot", "Before I run validation, I need your service address.");
+        logClient("info", "address_capture_prompted", { source: "basket_review" });
+        transitionTo(FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, { addressCaptureRetries: 0 }, { pushHistory: false });
+        break;
+      }
       postMessage("bot", "Great, reviewing your basket now and running eligibility checks.");
       transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: false });
       break;
@@ -2918,6 +3153,7 @@ function renderStep(step) {
     case FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE: {
       const profileAddress = state.context.authUser?.prefilledAddress || null;
       const onboardingAddress = state.context.newOnboarding?.address || null;
+      logClient("info", "address_capture_prompted", { source: "validation_step" });
       postMessage("bot", "Before I run validation, what service address should I use?");
       setChatInputHint("Service address");
       const options = [];
@@ -2927,13 +3163,13 @@ function renderStep(step) {
       showChoiceButtons(options, (choice) => {
         postMessage("user", choice);
         if (choice === "Use profile address" && profileAddress) {
-          applyContextPatch({ serviceAddress: profileAddress });
+          applyContextPatch({ serviceAddress: profileAddress, addressCaptureRetries: 0 });
           postMessage("bot", `Using profile service address: ${profileAddress}.`);
           transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
           return;
         }
         if (choice === "Use onboarding address" && onboardingAddress) {
-          applyContextPatch({ serviceAddress: onboardingAddress });
+          applyContextPatch({ serviceAddress: onboardingAddress, addressCaptureRetries: 0 });
           postMessage("bot", `Using onboarding service address: ${onboardingAddress}.`);
           transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
           return;
@@ -3163,13 +3399,17 @@ function renderStep(step) {
     case FLOW_STEPS.ORDER_REVIEW: {
       const { serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday, bundleDiscount } = getCheckoutTotals();
       const clientType = state.context.clientType || state.context.customerType || "personal";
+      const appliedPromo = state.context.promoState?.appliedPromo || null;
       const financingDetail = state.context.financing.selected
         ? ` Financing ${currency(state.context.financing.financedBase)} over ${state.context.financing.termMonths} months (${currency(financingMonthly)}/month), upfront ${currency(state.context.financing.upfrontPayment)}, ref ${state.context.financing.decisionId}.`
         : "";
       const bundleDetail = bundleDiscount > 0 ? ` Bundle discount ${currency(bundleDiscount)}/month applied.` : "";
+      const promoDetail = appliedPromo
+        ? ` Promo applied: ${appliedPromo.title} (${formatPromotionBenefit(appliedPromo)}).`
+        : "";
       postMessage(
         "bot",
-        `Corporate order review for ${clientType} client: ${state.context.basket.length} item(s), service ${currency(serviceMonthly)}/month.${bundleDetail}${financingDetail} Installation fees ${currency(installationFees)}. Total due today ${currency(chargeToday)}. Monthly total going forward ${currency(combinedMonthly)}. Shipping to ${state.context.shipping.address}.`
+        `Corporate order review for ${clientType} client: ${state.context.basket.length} item(s), service ${currency(serviceMonthly)}/month.${bundleDetail}${promoDetail}${financingDetail} Installation fees ${currency(installationFees)}. Total due today ${currency(chargeToday)}. Monthly total going forward ${currency(combinedMonthly)}. Shipping to ${state.context.shipping.address}.`
       );
       checkoutStatus.textContent = "Status: ready to place order.";
       const paymentLine =
@@ -3181,7 +3421,10 @@ function renderStep(step) {
       const financingLine = state.context.financing.selected
         ? ` Device amount financed: ${currency(state.context.financing.financedBase)}. Term: ${state.context.financing.termMonths}. Financing monthly: ${currency(financingMonthly)}. Upfront: ${currency(state.context.financing.upfrontPayment)}. Decision reference: ${state.context.financing.decisionId}.`
         : "";
-      orderSummary.textContent = `${paymentLine}${financingLine} Service monthly: ${currency(serviceMonthly)}. Installation fees: ${currency(installationFees)}. Total due today: ${currency(chargeToday)}. Monthly total going forward: ${currency(combinedMonthly)}. Shipping: ${state.context.shipping.address}.`;
+      const promoLine = appliedPromo
+        ? ` Promotion: ${appliedPromo.title} (${formatPromotionBenefit(appliedPromo)}).`
+        : "";
+      orderSummary.textContent = `${paymentLine}${promoLine}${financingLine} Service monthly: ${currency(serviceMonthly)}. Installation fees: ${currency(installationFees)}. Total due today: ${currency(chargeToday)}. Monthly total going forward: ${currency(combinedMonthly)}. Shipping: ${state.context.shipping.address}.`;
       placeOrderBtn.disabled = false;
       logClient("info", "order_submission_attempt", { basketItems: state.context.basket.length, serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday });
       break;
@@ -3395,8 +3638,9 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.EXISTING_AREA_CODE_CHECK:
-      if (!/^\d{3}$/.test(trimmed)) {
-        handleUnclearInput(message, "Please enter a valid 3-digit area code.");
+      if (!/^\d{3}$/.test(trimmed) || !isValidCanadianAreaCode(trimmed)) {
+        logClient("error", "validation_area_code_failed", { value: trimmed, step: FLOW_STEPS.EXISTING_AREA_CODE_CHECK });
+        handleUnclearInput(message, "Please enter a valid 3-digit Canadian area code (for example: 416, 647, or 986).");
         return;
       }
       transitionTo(
@@ -3410,9 +3654,9 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.NEW_AREA_CODE_ENTRY:
-      if (!/^\d{3}$/.test(trimmed)) {
-        handleUnclearInput(message, "Please enter a valid 3-digit area code.");
-        logClient("error", "invalid_area_code", { value: trimmed, viaChatInput: true });
+      if (!/^\d{3}$/.test(trimmed) || !isValidCanadianAreaCode(trimmed)) {
+        handleUnclearInput(message, "Please enter a valid 3-digit Canadian area code (for example: 416, 647, or 986).");
+        logClient("error", "validation_area_code_failed", { value: trimmed, viaChatInput: true, step: FLOW_STEPS.NEW_AREA_CODE_ENTRY });
         return;
       }
       if (state.context.customerType === "new") {
@@ -3434,15 +3678,27 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.EXISTING_AUTH_IDENTIFIER: {
-      authIdentifierInput.value = trimmed;
-      logClient("info", "auth_attempt", { identifier: trimmed, viaChatInput: true });
-      const user = resolveUserFromIdentifier(trimmed);
+      const looksLikeEmail = trimmed.includes("@");
+      const normalizedIdentifier = looksLikeEmail ? trimmed.toLowerCase() : normalizeCanadianPhone(trimmed);
+      if (looksLikeEmail && !isValidEmail(normalizedIdentifier)) {
+        logClient("error", "validation_email_failed", { value: trimmed, step: FLOW_STEPS.EXISTING_AUTH_IDENTIFIER });
+        postMessage("bot", "Please enter a valid email format (example: name@example.com).");
+        return;
+      }
+      if (!looksLikeEmail && !isValidCanadianPhone(trimmed)) {
+        logClient("error", "validation_phone_failed", { value: trimmed, step: FLOW_STEPS.EXISTING_AUTH_IDENTIFIER });
+        postMessage("bot", "Please enter a valid 10-digit Canadian phone number.");
+        return;
+      }
+      authIdentifierInput.value = normalizedIdentifier;
+      logClient("info", "auth_attempt", { identifier: normalizedIdentifier, viaChatInput: true });
+      const user = resolveUserFromIdentifier(normalizedIdentifier);
       if (!user) {
         postMessage("bot", "Authentication failed. Use phone starting 416/647/986 or alex.test@gmail.com.");
         logClient("error", "auth_failure", { identifier: trimmed, viaChatInput: true });
         return;
       }
-      finalizeExistingAuthentication(user, "manual", trimmed);
+      finalizeExistingAuthentication(user, "manual", normalizedIdentifier);
       return;
     }
 
@@ -3570,34 +3826,37 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.NEW_ONBOARD_EMAIL:
-      if (!trimmed.includes("@")) {
-        postMessage("bot", "Please enter a valid email address.");
+      if (!isValidEmail(trimmed)) {
+        logClient("error", "validation_email_failed", { value: trimmed, step: FLOW_STEPS.NEW_ONBOARD_EMAIL });
+        postMessage("bot", "Please enter a valid email address (example: name@example.com).");
         return;
       }
-      transitionTo(FLOW_STEPS.NEW_ONBOARD_PHONE, { newOnboarding: { email: trimmed } }, { pushHistory: true });
+      transitionTo(FLOW_STEPS.NEW_ONBOARD_PHONE, { newOnboarding: { email: trimmed.toLowerCase() } }, { pushHistory: true });
       return;
 
     case FLOW_STEPS.NEW_ONBOARD_PHONE:
-      if (trimmed.replace(/\D/g, "").length < 10) {
-        postMessage("bot", "Please enter a valid phone number.");
+      if (!isValidCanadianPhone(trimmed)) {
+        logClient("error", "validation_phone_failed", { value: trimmed, step: FLOW_STEPS.NEW_ONBOARD_PHONE });
+        postMessage("bot", "Please enter a valid 10-digit Canadian phone number (example: 4165511192).");
         return;
       }
+      const normalizedPhone = normalizeCanadianPhone(trimmed);
       transitionTo(
         FLOW_STEPS.NEW_ONBOARD_ADDRESS,
         {
-          newOnboarding: { phone: trimmed, leadId: `lead_${Date.now()}` },
+          newOnboarding: { phone: normalizedPhone, leadId: `lead_${Date.now()}` },
           customerType: "new"
         },
         { pushHistory: true }
       );
       const hash = await createIdentityHash(
-        `${state.context.newOnboarding.fullName || ""}|${state.context.newOnboarding.email || ""}|${trimmed}|${Date.now()}`
+        `${state.context.newOnboarding.fullName || ""}|${state.context.newOnboarding.email || ""}|${normalizedPhone}|${Date.now()}`
       );
       const secureRef = `${generateSecureRef()}-${hash}`;
       applyContextPatch({
         authMeta: {
           mode: "new-client",
-          phone: trimmed,
+          phone: normalizedPhone,
           email: state.context.newOnboarding.email,
           secureRef
         }
@@ -3605,14 +3864,15 @@ async function handleChatInput(message) {
       setStatus();
       postMessage(
         "bot",
-        `Profile captured. Name: ${state.context.newOnboarding.fullName}, Email: ${state.context.newOnboarding.email}, Phone: ${formatPhone(trimmed)}. Secure reference ${secureRef}.`
+        `Profile captured. Name: ${state.context.newOnboarding.fullName}, Email: ${state.context.newOnboarding.email}, Phone: ${formatPhone(normalizedPhone)}.`
       );
-      logClient("info", "new_customer_created", { fullName: state.context.newOnboarding.fullName, email: state.context.newOnboarding.email, phone: trimmed });
+      logClient("info", "new_customer_created", { fullName: state.context.newOnboarding.fullName, email: state.context.newOnboarding.email, phone: normalizedPhone });
       return;
 
     case FLOW_STEPS.NEW_ONBOARD_ADDRESS:
-      if (trimmed.length < 8) {
-        postMessage("bot", "Please enter a full address.");
+      if (!isValidAddress(trimmed)) {
+        logClient("error", "validation_address_failed", { value: trimmed, step: FLOW_STEPS.NEW_ONBOARD_ADDRESS });
+        postMessage("bot", "Please enter a full address (example: 210 - 100 Galt Ave, Toronto, ON).");
         return;
       }
       applyContextPatch({ newOnboarding: { address: trimmed }, serviceAddress: trimmed });
@@ -3623,22 +3883,48 @@ async function handleChatInput(message) {
       const profileAddress = state.context.authUser?.prefilledAddress || null;
       const onboardingAddress = state.context.newOnboarding?.address || null;
       if (lower.includes("profile") && profileAddress) {
-        applyContextPatch({ serviceAddress: profileAddress });
+        applyContextPatch({ serviceAddress: profileAddress, addressCaptureRetries: 0 });
         postMessage("bot", `Using profile service address: ${profileAddress}.`);
         transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
         return;
       }
       if ((lower.includes("onboarding") || lower.includes("signup")) && onboardingAddress) {
-        applyContextPatch({ serviceAddress: onboardingAddress });
+        applyContextPatch({ serviceAddress: onboardingAddress, addressCaptureRetries: 0 });
         postMessage("bot", `Using onboarding service address: ${onboardingAddress}.`);
         transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
         return;
       }
-      if (trimmed.length < 8) {
-        handleUnclearInput(message, "Please enter a full service address (street, city, province).");
+      if (!isValidAddress(trimmed)) {
+        const retries = Number(state.context.addressCaptureRetries || 0) + 1;
+        applyContextPatch({ addressCaptureRetries: retries });
+        logClient("error", "validation_address_failed", { value: trimmed, retries, step: FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE });
+        if (retries >= 3) {
+          postMessage("bot", "I still need a valid service address. You can select an address on file or enter one manually (example: 210 - 100 Galt Ave, Toronto, ON).");
+          const options = [];
+          if (profileAddress) options.push("Use profile address");
+          if (onboardingAddress) options.push("Use onboarding address");
+          options.push("Enter a new address");
+          showChoiceButtons(options, (choice) => {
+            postMessage("user", choice);
+            if (choice === "Use profile address" && profileAddress) {
+              applyContextPatch({ serviceAddress: profileAddress, addressCaptureRetries: 0 });
+              transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
+              return;
+            }
+            if (choice === "Use onboarding address" && onboardingAddress) {
+              applyContextPatch({ serviceAddress: onboardingAddress, addressCaptureRetries: 0 });
+              transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
+              return;
+            }
+            postMessage("bot", "Please type your full service address.");
+            setChatInputHint("Service address");
+          });
+          return;
+        }
+        postMessage("bot", "Please enter a full service address (street, city, province).");
         return;
       }
-      applyContextPatch({ serviceAddress: trimmed });
+      applyContextPatch({ serviceAddress: trimmed, addressCaptureRetries: 0 });
       postMessage("bot", `Thanks. I will validate service at: ${trimmed}.`);
       transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
       return;
@@ -3689,6 +3975,11 @@ async function handleChatInput(message) {
             awaitingOfferContinuation: false,
             lastSelectedCategory: null,
             crossSellOptions: []
+          },
+          promoState: {
+            candidates: [],
+            appliedPromo: null,
+            lastAnnouncementKey: null
           }
         },
         { pushHistory: true }

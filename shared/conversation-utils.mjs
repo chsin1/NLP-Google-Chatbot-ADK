@@ -53,7 +53,7 @@ function normalizeLegacyPayload(payload = {}) {
       displayName: payload.displayName || "Valued Customer",
       contactPhone: payload.contactPhone || "not provided",
       contactEmail: payload.contactEmail || "not provided",
-      accountReference: payload.accountReference || "N/A"
+      accountStatus: payload.accountStatus || "Account on file"
     },
     addresses: {
       billingAddress: payload.billingAddress || payload.shippingAddress || "Not provided",
@@ -97,6 +97,7 @@ function normalizeLegacyPayload(payload = {}) {
       todayTotal: Number(payload.chargeToday || 0),
       monthlyTotal: Number(payload.combinedMonthly || 0)
     },
+    promotions: payload.promotions || [],
     disclaimer: "Mock confirmation for prototype use."
   };
 }
@@ -112,6 +113,7 @@ export function buildReceiptHtml(payload = {}) {
     lineItems = [],
     recurring = {},
     financing = null,
+    promotions = [],
     charges = {},
     disclaimer = "Mock confirmation for prototype use."
   } = normalized;
@@ -140,6 +142,15 @@ export function buildReceiptHtml(payload = {}) {
         <p><strong>Term:</strong> ${esc(financing.termMonths)} months</p>
         <p><strong>Monthly financing payment:</strong> ${fmtMoney(financing.monthlyPayment || 0, currency)}</p>
         <p>Decision reference: ${esc(financing.decisionId || "N/A")}</p>
+      </div>`
+    : "";
+
+  const promotionsBlock = promotions.length
+    ? `<div class="section">
+        <h3>Promotions Applied</h3>
+        ${promotions
+          .map((promo) => `<p><strong>${esc(promo.title || "Promotion")}:</strong> ${esc(promo.description || "Offer applied.")}</p>`)
+          .join("")}
       </div>`
     : "";
 
@@ -184,7 +195,7 @@ export function buildReceiptHtml(payload = {}) {
     <p><strong>Name:</strong> ${esc(customer.displayName || "Valued Customer")}</p>
     <p><strong>Phone:</strong> ${esc(customer.contactPhone || "not provided")}</p>
     <p><strong>Email:</strong> ${esc(customer.contactEmail || "not provided")}</p>
-    <p><strong>Account Reference:</strong> ${esc(customer.accountReference || "N/A")}</p>
+    <p><strong>Account Status:</strong> ${esc(customer.accountStatus || "Account on file")}</p>
   </div>
   <div class="section">
     <h3>Addresses</h3>
@@ -208,6 +219,7 @@ export function buildReceiptHtml(payload = {}) {
     <p><strong>Verification:</strong> ${esc(payment.verificationStatus || "Verified")}</p>
     <p><strong>Total Due Today:</strong> ${fmtMoney(payment.chargeToday || 0, currency)}</p>
   </div>
+  ${promotionsBlock}
   ${financingBlock}
   <div class="section">
     <h3>Charges Summary</h3>
