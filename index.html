@@ -27,12 +27,32 @@
           <a href="#">Promotions</a>
           <a href="#">Support</a>
         </nav>
-        <button class="header-login" id="open-chat-header">Log in</button>
+        <div class="brand-tools">
+          <div id="llm-status-site" class="llm-status llm-offline llm-status-site">
+            <span id="llm-status-dot-site" class="dot"></span>
+            <span id="llm-status-text-site">ChatGPT: Not configured</span>
+          </div>
+          <div class="theme-switcher theme-switcher-site" id="theme-switcher-site" role="group" aria-label="Site theme mode">
+            <label><input type="radio" data-theme-input="1" name="site-theme" value="system" checked />System</label>
+            <label><input type="radio" data-theme-input="1" name="site-theme" value="light" />Light</label>
+            <label><input type="radio" data-theme-input="1" name="site-theme" value="dark" />Dark</label>
+          </div>
+          <button class="header-login" id="open-chat-header">Log in</button>
+        </div>
       </div>
       <div class="promo-row">Order online and discover area-specific offers in chat.</div>
     </header>
 
     <main class="landing">
+      <section class="appearance-bar" aria-label="Website appearance controls">
+        <span class="appearance-label">Website appearance</span>
+        <div class="theme-switcher theme-switcher-landing" id="theme-switcher-landing" role="group" aria-label="Landing theme mode">
+          <label><input type="radio" data-theme-input="1" name="landing-theme" value="system" checked />System</label>
+          <label><input type="radio" data-theme-input="1" name="landing-theme" value="light" />Light</label>
+          <label><input type="radio" data-theme-input="1" name="landing-theme" value="dark" />Dark</label>
+        </div>
+      </section>
+
       <section class="hero">
         <div class="hero-copy">
           <h1>Type in your area code.<br />Arrive at great offers.</h1>
@@ -160,16 +180,6 @@
     <section id="chat-widget" class="chat-widget hidden" aria-live="polite">
       <header class="chat-topbar">
         <div class="chat-brand">Chatting with Bell</div>
-        <div id="llm-status" class="llm-status llm-offline">
-          <span id="llm-status-dot" class="dot"></span>
-          <span id="llm-status-text">ChatGPT: Not configured</span>
-        </div>
-        <div class="theme-switcher" id="theme-switcher" role="group" aria-label="Theme mode">
-          <label><input type="radio" name="chat-theme" value="system" checked />System</label>
-          <label><input type="radio" name="chat-theme" value="light" />Light</label>
-          <label><input type="radio" name="chat-theme" value="dark" />Dark</label>
-        </div>
-        <button id="install-app-btn" class="install-app-btn hidden" type="button">Install App</button>
         <div id="language-switcher" class="language-switcher" role="group" aria-label="Conversation language">
           <label><input type="radio" name="chat-language" value="en" checked />EN</label>
           <label><input type="radio" name="chat-language" value="fr" />FR</label>
@@ -261,6 +271,11 @@
             <div id="order-summary" class="order-summary">No order created yet.</div>
             <button id="tokenize-btn" disabled>Choose Payment Method</button>
             <button id="place-order-btn" disabled>Place Order & Confirm</button>
+          </div>
+
+          <div id="panel-booking" class="panel-card hidden">
+            <h3>Installation Calendar</h3>
+            <div id="booking-calendar-content" class="booking-calendar-content"></div>
           </div>
         </section>
       </div>

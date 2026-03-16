@@ -134,11 +134,15 @@ Deterministic business logic in `app.js`, `shared/*.mjs`, and server endpoints r
 
 - Sales-first guided flow with explicit step contracts
 - Existing/new customer onboarding and authentication variants
+- Mid-conversation language switching (EN/FR/ES/ZH) for future prompts and option labels
 - Address lookup (`mock|google|hybrid`) and typeahead support
 - Guided Quote Builder (budget/speed/device-cost weighting + side-by-side ranked options)
+- Quote preference hard-lock to `100` total points across budget/speed/device cost
 - Offer carousel, bundle discount logic, and cross-sell prompts
+- Brand-scoped mobility offers (iPhone/Samsung/Pixel filtering)
 - Guided card entry (brand detection + Luhn + CVC + postal validation)
 - Mock financing path with approval/decline flow
+- Mon-Thu booking calendar with Friday meeting-request fallback
 - Corporate-style printable receipt
 - Chat end/refresh session lifecycle controls
 - KPI + SLA dashboard data via `/api/metrics`
@@ -155,6 +159,8 @@ Deterministic business logic in `app.js`, `shared/*.mjs`, and server endpoints r
 - Metrics and SLA aggregation with monthly snapshots and session rollups
 - Validation utilities for Canadian phone/email/postal/card checks
 - Structured tests across routing, metrics, utils, LLM integration
+- Checkout continuity hardening for internet, mobility, and landline paths
+- Calendar booking UI with weekday availability controls
 
 ### In Progress / Next
 
@@ -257,7 +263,7 @@ PORT=3001 node server.mjs
 Run all tests:
 
 ```bash
-node --test tests/*.test.mjs
+node --test tests/*.mjs
 ```
 
 Key suites:
@@ -354,7 +360,7 @@ node server.mjs
 
 ### Card validation fails
 
-- Use digits-only card number input
+- Use 16-digit card number input (guided 4x4 entry UI is supported)
 - Use brand-appropriate CVC length (3 for Visa/MC, 4 for Amex)
 - Enter Canadian postal code format (for example `M5V 2T6`)
 
@@ -368,6 +374,12 @@ node server.mjs
 - Added guided payment validation path
 - Expanded KPI/SLA metrics and monthly snapshots
 - Hardened receipt format and test coverage
+- Added sales flow stabilization v2:
+  - i18n parser normalization for EN/FR/ES/ZH
+  - quote builder 100-point consistency
+  - mobility brand-locked offer filtering
+  - basket-based checkout continuation for mobility/landline
+  - Mon-Thu booking calendar with Friday meeting fallback
 
 ---
 

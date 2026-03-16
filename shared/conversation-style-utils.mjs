@@ -2,7 +2,7 @@ const PROMPT_LIBRARY = {
   GREETING_CONVERSATIONAL: {
     consultative:
       "Hi, I’m Belinda, Bell’s automated AI agent. I’m not a human representative, and I can help you compare plans quickly.",
-    default: "Hi, I’m Belinda, your automated Bell assistant."
+    default: "Hi, I’m Belinda, your automated AI powered Bell assistant."
   },
   HELPDESK_ENTRY: {
     consultative:

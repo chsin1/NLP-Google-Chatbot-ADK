@@ -71,7 +71,6 @@ const FLOW_STEPS = {
   CORPORATE_DISCOVERY: "CORPORATE_DISCOVERY",
   SUPPORT_DISCOVERY: "SUPPORT_DISCOVERY",
   HARDWARE_TROUBLESHOOT: "HARDWARE_TROUBLESHOOT",
-  DEVICE_OS_SELECTION: "DEVICE_OS_SELECTION",
   WARM_AGENT_ROUTING: "WARM_AGENT_ROUTING",
   AGENT_ASSIST_CLARIFY: "AGENT_ASSIST_CLARIFY",
   AUXILIARY_ASSIST: "AUXILIARY_ASSIST",
@@ -177,37 +176,37 @@ const STEP_CONTRACT = {
   },
   [FLOW_STEPS.CHECKOUT_INTENT_PROMPT]: {
     validInputs: ["checkout", "add mobility", "add internet", "add landline", "not now"],
-    requiredContext: ["selectedPlanId"],
-    allowedNext: [FLOW_STEPS.PAYMENT_CARD_NUMBER, FLOW_STEPS.PAYMENT_CARD_ENTRY, FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.ORDER_CONFIRMED],
+    requiredContext: ["basket"],
+    allowedNext: [FLOW_STEPS.PAYMENT_CARD_NUMBER, FLOW_STEPS.PAYMENT_CARD_ENTRY, FLOW_STEPS.PAYMENT_METHOD, FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.ORDER_CONFIRMED],
     fallbackTarget: FLOW_STEPS.CHECKOUT_INTENT_PROMPT
   },
   [FLOW_STEPS.PAYMENT_CARD_ENTRY]: {
     validInputs: ["card details"],
-    requiredContext: ["selectedPlanId"],
+    requiredContext: ["basket"],
     allowedNext: [FLOW_STEPS.PAYMENT_CARD_NUMBER, FLOW_STEPS.SHIPPING_SELECTION],
     fallbackTarget: FLOW_STEPS.PAYMENT_CARD_ENTRY
   },
   [FLOW_STEPS.PAYMENT_CARD_NUMBER]: {
     validInputs: ["card number"],
-    requiredContext: ["selectedPlanId"],
+    requiredContext: ["basket"],
     allowedNext: [FLOW_STEPS.PAYMENT_CARD_CVC],
     fallbackTarget: FLOW_STEPS.PAYMENT_CARD_NUMBER
   },
   [FLOW_STEPS.PAYMENT_CARD_CVC]: {
     validInputs: ["card cvc"],
-    requiredContext: ["selectedPlanId"],
+    requiredContext: ["basket"],
     allowedNext: [FLOW_STEPS.PAYMENT_CARD_POSTAL],
     fallbackTarget: FLOW_STEPS.PAYMENT_CARD_CVC
   },
   [FLOW_STEPS.PAYMENT_CARD_POSTAL]: {
     validInputs: ["postal code"],
-    requiredContext: ["selectedPlanId"],
+    requiredContext: ["basket"],
     allowedNext: [FLOW_STEPS.PAYMENT_CARD_CONFIRM],
     fallbackTarget: FLOW_STEPS.PAYMENT_CARD_POSTAL
   },
   [FLOW_STEPS.PAYMENT_CARD_CONFIRM]: {
     validInputs: ["confirm payment", "start over"],
-    requiredContext: ["selectedPlanId"],
+    requiredContext: ["basket"],
     allowedNext: [FLOW_STEPS.SHIPPING_SELECTION],
     fallbackTarget: FLOW_STEPS.PAYMENT_CARD_CONFIRM
   },
@@ -458,6 +457,7 @@ const offers = [
     monthlyPrice: 89,
     osType: "ios",
     deviceModel: "iPhone 16",
+    deviceBrand: "iphone",
     offerType: "device",
     byodEligible: false,
     financingEligible: true,
@@ -477,6 +477,7 @@ const offers = [
     monthlyPrice: 99,
     osType: "android",
     deviceModel: "Galaxy S25",
+    deviceBrand: "samsung",
     offerType: "device",
     byodEligible: false,
     financingEligible: true,
@@ -496,6 +497,7 @@ const offers = [
     monthlyPrice: 100,
     osType: "android",
     deviceModel: "Pixel 10",
+    deviceBrand: "pixel",
     offerType: "device",
     byodEligible: false,
     financingEligible: true,
@@ -515,6 +517,7 @@ const offers = [
     monthlyPrice: 65,
     osType: "other",
     deviceModel: "BYOD",
+    deviceBrand: "other",
     offerType: "byod",
     byodEligible: true,
     financingEligible: false,
@@ -534,6 +537,7 @@ const offers = [
     monthlyPrice: 78,
     osType: "other",
     deviceModel: "BYOD",
+    deviceBrand: "other",
     offerType: "byod",
     byodEligible: true,
     financingEligible: false,
@@ -553,6 +557,7 @@ const offers = [
     monthlyPrice: 92,
     osType: "other",
     deviceModel: "BYOD",
+    deviceBrand: "other",
     offerType: "byod",
     byodEligible: true,
     financingEligible: false,
@@ -732,10 +737,15 @@ const chatWidget = document.getElementById("chat-widget");
 const closeChat = document.getElementById("close-chat");
 const llmStatusChip = document.getElementById("llm-status");
 const llmStatusText = document.getElementById("llm-status-text");
+const llmStatusChipSite = document.getElementById("llm-status-site");
+const llmStatusTextSite = document.getElementById("llm-status-text-site");
+const llmStatusTargets = [
+  [llmStatusChip, llmStatusText],
+  [llmStatusChipSite, llmStatusTextSite]
+].filter(([chip, text]) => chip && text);
 const languageSwitcher = document.getElementById("language-switcher");
 const languageInputs = Array.from(document.querySelectorAll("input[name='chat-language']"));
-const themeSwitcher = document.getElementById("theme-switcher");
-const themeInputs = Array.from(document.querySelectorAll("input[name='chat-theme']"));
+const themeInputs = Array.from(document.querySelectorAll("input[data-theme-input='1']"));
 const installAppBtn = document.getElementById("install-app-btn");
 const openChatHeader = document.getElementById("open-chat-header");
 const openChatOffers = document.getElementById("open-chat-offers");
@@ -768,7 +778,9 @@ const panelOffers = document.getElementById("panel-offers");
 const panelBasket = document.getElementById("panel-basket");
 const panelCheckout = document.getElementById("panel-checkout");
 const panelQuote = document.getElementById("panel-quote");
+const panelBooking = document.getElementById("panel-booking");
 const quoteBuilderContent = document.getElementById("quote-builder-content");
+const bookingCalendarContent = document.getElementById("booking-calendar-content");
 const chatBody = document.querySelector(".chat-body");
 
 const basketList = document.getElementById("basket-list");
@@ -837,6 +849,10 @@ const state = {
     },
     customerType: null,
     clientType: null,
+    i18n: {
+      uiLanguage: "en",
+      parserLanguage: "en"
+    },
     authUser: null,
     intent: null,
     selectedService: null,
@@ -892,8 +908,14 @@ const state = {
     },
     booking: {
       slots: [],
+      calendarMonth: null,
       selectedSlot: null,
-      confirmed: false
+      confirmed: false,
+      meetingRequest: null,
+      awaitingMeetingRequest: false
+    },
+    checkout: {
+      primaryPlanId: null
     },
     reminders: {
       permission: "default",
@@ -936,8 +958,8 @@ const state = {
     quoteBuilder: {
       preferences: {
         budget: 55,
-        speed: 65,
-        deviceCost: 35
+        speed: 25,
+        deviceCost: 20
       },
       lastPreview: [],
       lastPreviewAt: null,
@@ -955,6 +977,7 @@ const state = {
       serviceType: null,
       speedPriority: null,
       byodChoice: null,
+      phoneBrand: null,
       phonePreference: null,
       linePreference: null,
       callingPlan: null,
@@ -1139,6 +1162,21 @@ function applyTheme(mode = "system", { persist = true } = {}) {
     writeStore(CHAT_THEME_STORE_KEY, { mode: normalized });
   }
   logClient("info", "theme_changed", { mode: normalized, resolved });
+}
+
+function watchSystemThemeChanges() {
+  if (!window.matchMedia) return;
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const handleChange = () => {
+    if (resolveThemeMode(state.context.theme) === "system") {
+      applyTheme("system", { persist: false });
+    }
+  };
+  if (typeof media.addEventListener === "function") {
+    media.addEventListener("change", handleChange);
+  } else if (typeof media.addListener === "function") {
+    media.addListener(handleChange);
+  }
 }
 
 function clearOfflineDraft() {
@@ -1506,22 +1544,30 @@ function queueMetricsDashboardRefresh(delayMs = 1200) {
 }
 
 function updateLlmStatusUi(status = {}) {
-  if (!llmStatusChip || !llmStatusText) return;
-  llmStatusChip.classList.remove("llm-online", "llm-degraded", "llm-offline");
+  if (llmStatusTargets.length === 0) return;
   const configured = Boolean(status.configured);
   const connected = Boolean(status.connected);
   if (connected) {
-    llmStatusChip.classList.add("llm-online");
-    llmStatusText.textContent = `ChatGPT: Connected${status.model ? ` (${status.model})` : ""}`;
+    llmStatusTargets.forEach(([chip, text]) => {
+      chip.classList.remove("llm-online", "llm-degraded", "llm-offline");
+      chip.classList.add("llm-online");
+      text.textContent = `ChatGPT: Connected${status.model ? ` (${status.model})` : ""}`;
+    });
     return;
   }
   if (configured) {
-    llmStatusChip.classList.add("llm-degraded");
-    llmStatusText.textContent = "ChatGPT: Degraded";
+    llmStatusTargets.forEach(([chip, text]) => {
+      chip.classList.remove("llm-online", "llm-degraded", "llm-offline");
+      chip.classList.add("llm-degraded");
+      text.textContent = "ChatGPT: Degraded";
+    });
     return;
   }
-  llmStatusChip.classList.add("llm-offline");
-  llmStatusText.textContent = "ChatGPT: Not configured";
+  llmStatusTargets.forEach(([chip, text]) => {
+    chip.classList.remove("llm-online", "llm-degraded", "llm-offline");
+    chip.classList.add("llm-offline");
+    text.textContent = "ChatGPT: Not configured";
+  });
 }
 
 async function refreshLlmStatus({ silent = true } = {}) {
@@ -1759,20 +1805,67 @@ async function scheduleBrowserReminder(slot) {
 function getQuoteDefaultsFromPreference(preference = "") {
   const pref = String(preference || "").toLowerCase();
   if (pref.includes("speed")) {
-    return { budget: 35, speed: 90, deviceCost: 25 };
+    return { budget: 15, speed: 65, deviceCost: 20 };
   }
   if (pref.includes("performance") || pref.includes("upload")) {
-    return { budget: 45, speed: 80, deviceCost: 30 };
+    return { budget: 20, speed: 55, deviceCost: 25 };
   }
-  return { budget: 85, speed: 40, deviceCost: 35 };
+  return { budget: 55, speed: 25, deviceCost: 20 };
 }
 
-function normalizeQuotePreferences(preferences = {}) {
-  return {
+function normalizeQuotePreferences(preferences = {}, changedKey = null) {
+  const keys = ["budget", "speed", "deviceCost"];
+  const next = {
     budget: Math.max(0, Math.min(100, Number(preferences.budget ?? 55))),
-    speed: Math.max(0, Math.min(100, Number(preferences.speed ?? 65))),
-    deviceCost: Math.max(0, Math.min(100, Number(preferences.deviceCost ?? 35)))
+    speed: Math.max(0, Math.min(100, Number(preferences.speed ?? 25))),
+    deviceCost: Math.max(0, Math.min(100, Number(preferences.deviceCost ?? 20)))
   };
+
+  if (changedKey && keys.includes(changedKey)) {
+    const fixed = Math.round(next[changedKey]);
+    const remaining = Math.max(0, 100 - fixed);
+    const otherKeys = keys.filter((key) => key !== changedKey);
+    const otherTotal = otherKeys.reduce((sum, key) => sum + Number(next[key] || 0), 0);
+    if (otherTotal <= 0) {
+      const even = Math.floor(remaining / otherKeys.length);
+      otherKeys.forEach((key, idx) => {
+        next[key] = idx === otherKeys.length - 1 ? remaining - even * idx : even;
+      });
+    } else {
+      let assigned = 0;
+      otherKeys.forEach((key, idx) => {
+        if (idx === otherKeys.length - 1) {
+          next[key] = remaining - assigned;
+          return;
+        }
+        const ratio = Number(next[key] || 0) / otherTotal;
+        const value = Math.round(remaining * ratio);
+        next[key] = value;
+        assigned += value;
+      });
+    }
+    next[changedKey] = fixed;
+  }
+
+  const total = keys.reduce((sum, key) => sum + Number(next[key] || 0), 0);
+  if (total !== 100) {
+    let running = 0;
+    keys.forEach((key, idx) => {
+      if (idx === keys.length - 1) {
+        next[key] = Math.max(0, 100 - running);
+        return;
+      }
+      const value = Math.max(0, Math.min(100, Math.round(Number(next[key] || 0))));
+      next[key] = value;
+      running += value;
+    });
+  } else {
+    keys.forEach((key) => {
+      next[key] = Math.round(Number(next[key] || 0));
+    });
+  }
+
+  return next;
 }
 
 function getOfferInstallationFee(category = "") {
@@ -1846,6 +1939,7 @@ function loadQuoteBuilderSnapshot() {
 async function generateQuotePreview({ announce = true } = {}) {
   const serviceType = state.context.intent || "home internet";
   const preferences = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || {});
+  const preferenceTotal = Number(preferences.budget || 0) + Number(preferences.speed || 0) + Number(preferences.deviceCost || 0);
   const previousPreview = Array.isArray(state.context.quoteBuilder?.lastPreview) ? state.context.quoteBuilder.lastPreview : [];
   const previousTop = previousPreview[0] || null;
   try {
@@ -1979,7 +2073,10 @@ function applyQuotedPlan(offerId) {
     postMessage("bot", "I couldn't match that quote to a plan. Please generate the quote again.");
     return;
   }
-  applyContextPatch({ selectedPlanId: selectedPlan.id });
+  applyContextPatch({
+    selectedPlanId: selectedPlan.id,
+    checkout: { primaryPlanId: selectedPlan.id }
+  });
   postMessage("user", `Apply quote for ${selectedPlan.name}`);
   postMessage("bot", `Perfect. I selected ${selectedPlan.name} at ${currency(selectedPlan.monthlyPrice)}/month.`);
   logClient("info", "quote_plan_applied", { offerId: selectedPlan.id });
@@ -2044,6 +2141,7 @@ function renderQuoteBuilderPanel() {
       <label>Device cost focus <span>${Math.round(preferences.deviceCost)}</span>
         <input type="range" min="0" max="100" value="${preferences.deviceCost}" data-quote-slider="deviceCost" />
       </label>
+      <div class="quote-total ${preferenceTotal === 100 ? "ok" : "warn"}">Total: ${preferenceTotal}/100</div>
     </div>
     <div class="quote-builder-actions">
       <button type="button" id="quote-generate-btn">Generate quote</button>
@@ -2064,17 +2162,23 @@ function renderQuoteBuilderPanel() {
       const nextPreferences = normalizeQuotePreferences({
         ...(state.context.quoteBuilder?.preferences || {}),
         [key]: value
-      });
+      }, key);
       applyContextPatch({ quoteBuilder: { preferences: nextPreferences } });
-      const label = target.closest("label");
-      const valueEl = label ? label.querySelector("span") : null;
-      if (valueEl) valueEl.textContent = `${Math.round(value)}`;
+      renderQuoteBuilderPanel();
     });
   });
 
   const generateBtn = quoteBuilderContent.querySelector("#quote-generate-btn");
   if (generateBtn) {
     generateBtn.addEventListener("click", () => {
+      const current = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || {});
+      const total = Number(current.budget || 0) + Number(current.speed || 0) + Number(current.deviceCost || 0);
+      if (total !== 100) {
+        const corrected = normalizeQuotePreferences(current);
+        applyContextPatch({ quoteBuilder: { preferences: corrected } });
+        postMessage("bot", "I adjusted your quote preferences to a total of 100 before generating recommendations.");
+        renderQuoteBuilderPanel();
+      }
       void generateQuotePreview({ announce: true });
     });
   }
@@ -2099,6 +2203,156 @@ function renderQuoteBuilderPanel() {
       const offerId = event.currentTarget.getAttribute("data-offer-id");
       if (!offerId) return;
       applyQuotedPlan(offerId);
+    });
+  });
+}
+
+function getBookingCalendarMonthDate() {
+  const monthToken = state.context.booking?.calendarMonth;
+  if (monthToken && /^\d{4}-\d{2}$/.test(monthToken)) {
+    const [year, month] = monthToken.split("-").map((part) => Number(part));
+    return new Date(year, Math.max(0, month - 1), 1);
+  }
+  const firstSlotDate = state.context.booking?.slots?.[0]?.date;
+  if (firstSlotDate) {
+    const parsed = new Date(`${firstSlotDate}T00:00:00`);
+    return new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+  }
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+function toIsoMonth(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function toIsoDateLocal(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, "0");
+  const d = `${date.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function promptFridayMeetingSetup() {
+  postMessage("bot", "Friday install slots are closed. Would you like me to set up a meeting request?");
+  showChoiceButtons(["Set up meeting", "Choose Monday-Thursday slot"], (choice) => {
+    postMessage("user", choice);
+    if (choice === "Set up meeting") {
+      applyContextPatch({ booking: { awaitingMeetingRequest: true } });
+      postMessage("bot", "Please share your preferred callback day/time and whether you prefer phone or email.");
+      return;
+    }
+    applyContextPatch({ booking: { awaitingMeetingRequest: false } });
+    postMessage("bot", "No problem. Please choose a Monday-Thursday slot from the calendar.");
+  });
+}
+
+function renderBookingCalendarPanel() {
+  if (!panelBooking || !bookingCalendarContent) return;
+  const shouldShow = [FLOW_STEPS.BOOKING_SLOT_SELECTION, FLOW_STEPS.BOOKING_SLOT_CONFIRM].includes(state.flowStep);
+  panelBooking.classList.toggle("hidden", !shouldShow);
+  if (!shouldShow) return;
+
+  const slots = Array.isArray(state.context.booking?.slots) ? state.context.booking.slots : [];
+  const slotMap = new Map();
+  slots.forEach((slot) => {
+    const key = String(slot.date || "");
+    if (!key) return;
+    const list = slotMap.get(key) || [];
+    list.push(slot);
+    slotMap.set(key, list);
+  });
+
+  const monthDate = getBookingCalendarMonthDate();
+  const monthToken = toIsoMonth(monthDate);
+  if (monthToken && state.context.booking?.calendarMonth !== monthToken) {
+    applyContextPatch({ booking: { calendarMonth: monthToken } });
+  }
+  const firstWeekday = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1).getDay();
+  const daysInMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate();
+  const leadingBlanks = (firstWeekday + 6) % 7;
+  const monthLabel = monthDate.toLocaleDateString("en-CA", { month: "long", year: "numeric" });
+
+  const dayCells = [];
+  for (let i = 0; i < leadingBlanks; i += 1) {
+    dayCells.push(`<div class="booking-day blank"></div>`);
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = new Date(monthDate.getFullYear(), monthDate.getMonth(), day);
+    const iso = toIsoDateLocal(date);
+    const weekday = date.getDay();
+    const daySlots = slotMap.get(iso) || [];
+    const isFriday = weekday === 5;
+    const isWeekend = weekday === 0 || weekday === 6;
+    const isOpenWeekday = weekday >= 1 && weekday <= 4;
+    const hasOpenSlot = isOpenWeekday && daySlots.length > 0;
+    const isSelected = state.context.booking?.selectedSlot?.date === iso;
+
+    let cls = "booking-day";
+    if (isSelected) cls += " selected";
+    if (hasOpenSlot) cls += " open";
+    if (isFriday) cls += " friday";
+    if (isWeekend) cls += " weekend";
+    if (!hasOpenSlot && !isFriday) cls += " disabled";
+
+    const label = isFriday ? "Closed" : hasOpenSlot ? `${daySlots.length} slot${daySlots.length > 1 ? "s" : ""}` : "Unavailable";
+    const dataAction = hasOpenSlot ? "pick-slot" : isFriday ? "friday-closed" : "none";
+    const disabled = dataAction === "none" ? "disabled" : "";
+    dayCells.push(
+      `<button type="button" class="${cls}" data-booking-date="${iso}" data-action="${dataAction}" ${disabled}>
+        <span class="day-num">${day}</span>
+        <span class="day-meta">${label}</span>
+      </button>`
+    );
+  }
+
+  bookingCalendarContent.innerHTML = `
+    <div class="booking-calendar-header">
+      <button type="button" data-calendar-nav="-1" class="secondary">Prev</button>
+      <strong>${monthLabel}</strong>
+      <button type="button" data-calendar-nav="1" class="secondary">Next</button>
+    </div>
+    <div class="booking-calendar-weekdays">
+      <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+    </div>
+    <div class="booking-calendar-grid">${dayCells.join("")}</div>
+    <div class="booking-calendar-note">Install slots are available Monday to Thursday. Friday requires a meeting request.</div>
+  `;
+
+  bookingCalendarContent.querySelectorAll("[data-calendar-nav]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const delta = Number(button.getAttribute("data-calendar-nav") || 0);
+      const nextMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + delta, 1);
+      applyContextPatch({ booking: { calendarMonth: toIsoMonth(nextMonth) } });
+      renderBookingCalendarPanel();
+    });
+  });
+
+  bookingCalendarContent.querySelectorAll("[data-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = String(button.getAttribute("data-action") || "");
+      const date = String(button.getAttribute("data-booking-date") || "");
+      if (action === "friday-closed") {
+        promptFridayMeetingSetup();
+        return;
+      }
+      if (action !== "pick-slot") return;
+      const daySlots = slotMap.get(date) || [];
+      const selectedSlot = daySlots[0];
+      if (!selectedSlot) return;
+      applyContextPatch({ booking: { selectedSlot, awaitingMeetingRequest: false } });
+      logClient("info", "booking_slot_selected", {
+        slotId: selectedSlot.slotId,
+        date: selectedSlot.date,
+        window: selectedSlot.window,
+        source: "calendar"
+      });
+      transitionTo(FLOW_STEPS.BOOKING_SLOT_CONFIRM, {}, { pushHistory: true, enforceContract: false });
     });
   });
 }
@@ -2399,7 +2653,13 @@ function setConversationLanguage(languageCode = "en", { announce = true } = {}) 
     syncLanguageSwitcherUi(normalizedLanguage);
     return;
   }
-  applyContextPatch({ uiLanguage: normalizedLanguage });
+  applyContextPatch({
+    uiLanguage: normalizedLanguage,
+    i18n: {
+      uiLanguage: normalizedLanguage,
+      parserLanguage: normalizedLanguage
+    }
+  });
   syncLanguageSwitcherUi(normalizedLanguage);
   refreshQuickActionsLanguage();
   refreshVisibleBotMessagesLanguage(normalizedLanguage);
@@ -2428,6 +2688,97 @@ function refreshVisibleBotMessagesLanguage(languageCode = "en") {
       el.textContent = translated || sourceText;
     });
   });
+}
+
+const NORMALIZED_INPUT_MAP = {
+  fr: [
+    [/\boui\b/gi, "yes"],
+    [/\bnon\b/gi, "no"],
+    [/\bnouveau(?: client)?\b/gi, "new client"],
+    [/\bexistant(?: client)?\b/gi, "existing client"],
+    [/\binternet\b/gi, "internet"],
+    [/\bmobilit[eé]\b/gi, "mobility"],
+    [/\bligne fixe\b/gi, "landline"],
+    [/\bpasser (?:au|a) paiement\b/gi, "checkout"],
+    [/\bcontinuer\b/gi, "continue"],
+    [/\bajouter\b/gi, "add"],
+    [/\bvitesse\b/gi, "speed"],
+    [/\bvaleur\b/gi, "value"],
+    [/\bperformance\b/gi, "performance"],
+    [/\biphone\b/gi, "iphone"],
+    [/\bsamsung\b/gi, "samsung"],
+    [/\bpixel\b/gi, "pixel"],
+    [/\bnouvelle ligne\b/gi, "new line"],
+    [/\bgarder (?:mon )?num[ée]ro\b/gi, "keep existing number"],
+    [/\blocal\b/gi, "local"],
+    [/\binternational\b/gi, "international"]
+  ],
+  es: [
+    [/\bs[íi]\b/gi, "yes"],
+    [/\bno\b/gi, "no"],
+    [/\bnuevo(?: cliente)?\b/gi, "new client"],
+    [/\bcliente existente\b/gi, "existing client"],
+    [/\binternet\b/gi, "internet"],
+    [/\bm[oó]vil(?:es)?\b/gi, "mobility"],
+    [/\bl[ií]nea fija\b/gi, "landline"],
+    [/\bpagar\b/gi, "checkout"],
+    [/\bcontinuar\b/gi, "continue"],
+    [/\bagregar\b/gi, "add"],
+    [/\bvelocidad\b/gi, "speed"],
+    [/\bvalor\b/gi, "value"],
+    [/\brendimiento\b/gi, "performance"],
+    [/\biphone\b/gi, "iphone"],
+    [/\bsamsung\b/gi, "samsung"],
+    [/\bpixel\b/gi, "pixel"],
+    [/\bnueva l[ií]nea\b/gi, "new line"],
+    [/\bmantener (?:mi )?n[uú]mero\b/gi, "keep existing number"],
+    [/\blocal\b/gi, "local"],
+    [/\binternacional\b/gi, "international"]
+  ],
+  zh: [
+    [/是/g, "yes"],
+    [/不是|否/g, "no"],
+    [/新客户/g, "new client"],
+    [/现有客户|老客户/g, "existing client"],
+    [/互联网|宽带/g, "internet"],
+    [/移动|手机/g, "mobility"],
+    [/座机|家庭电话/g, "landline"],
+    [/结账|付款/g, "checkout"],
+    [/继续/g, "continue"],
+    [/添加/g, "add"],
+    [/速度/g, "speed"],
+    [/性价比|价值/g, "value"],
+    [/性能/g, "performance"],
+    [/苹果|iPhone/gi, "iphone"],
+    [/三星/g, "samsung"],
+    [/谷歌|Pixel/gi, "pixel"],
+    [/新线路/g, "new line"],
+    [/保留号码/g, "keep existing number"],
+    [/本地/g, "local"],
+    [/国际/g, "international"]
+  ]
+};
+
+function normalizeUserInputForStep(message = "", languageCode = getCurrentUiLanguage()) {
+  const normalizedLanguage = normalizeLanguageCode(languageCode);
+  const raw = String(message || "").trim();
+  if (!raw || normalizedLanguage === "en") return raw;
+
+  const translationMap = STATIC_UI_TRANSLATIONS[normalizedLanguage] || {};
+  const reverseMap = Object.entries(translationMap).reduce((acc, [source, translated]) => {
+    const key = String(translated || "").trim().toLowerCase();
+    if (key) acc[key] = source;
+    return acc;
+  }, {});
+  const exactMapped = reverseMap[raw.toLowerCase()];
+  if (exactMapped) return exactMapped;
+
+  let normalized = raw;
+  const replacements = NORMALIZED_INPUT_MAP[normalizedLanguage] || [];
+  replacements.forEach(([pattern, replacement]) => {
+    normalized = normalized.replace(pattern, replacement);
+  });
+  return normalized;
 }
 
 function showChoiceButtons(labels, onPick) {
@@ -2647,11 +2998,13 @@ function setPanelFocus(mode = "conversation") {
   const showBasket = mode === "basket" || mode === "offers_basket";
   const showCheckout = mode === "checkout";
   const showQuote = mode === "quote";
-  const splitView = showOffers || showBasket || showCheckout || showQuote;
+  const showBooking = mode === "booking";
+  const splitView = showOffers || showBasket || showCheckout || showQuote || showBooking;
   panelOffers.classList.toggle("hidden", !showOffers);
   panelBasket.classList.toggle("hidden", !showBasket);
   panelCheckout.classList.toggle("hidden", !showCheckout);
   if (panelQuote) panelQuote.classList.toggle("hidden", !showQuote);
+  if (panelBooking) panelBooking.classList.toggle("hidden", !showBooking);
   chatWidget.classList.toggle("expanded", splitView);
   if (chatBody) {
     chatBody.classList.toggle("split-view", splitView);
@@ -2739,6 +3092,10 @@ function resetSessionState() {
     },
     customerType: null,
     clientType: null,
+    i18n: {
+      uiLanguage: selectedLanguage,
+      parserLanguage: selectedLanguage
+    },
     authUser: null,
     intent: null,
     selectedService: null,
@@ -2794,8 +3151,14 @@ function resetSessionState() {
     },
     booking: {
       slots: [],
+      calendarMonth: null,
       selectedSlot: null,
-      confirmed: false
+      confirmed: false,
+      meetingRequest: null,
+      awaitingMeetingRequest: false
+    },
+    checkout: {
+      primaryPlanId: null
     },
     reminders: {
       permission: "default",
@@ -2838,8 +3201,8 @@ function resetSessionState() {
     quoteBuilder: {
       preferences: {
         budget: 55,
-        speed: 65,
-        deviceCost: 35
+        speed: 25,
+        deviceCost: 20
       },
       lastPreview: [],
       lastPreviewAt: null,
@@ -2857,6 +3220,7 @@ function resetSessionState() {
       serviceType: null,
       speedPriority: null,
       byodChoice: null,
+      phoneBrand: null,
       phonePreference: null,
       linePreference: null,
       callingPlan: null,
@@ -2932,7 +3296,16 @@ function getPatchedContext(patch = {}) {
   if (patch.areaCodeRequiredForTask !== undefined) next.areaCodeRequiredForTask = patch.areaCodeRequiredForTask;
   if (patch.customerStatusAsked !== undefined) next.customerStatusAsked = patch.customerStatusAsked;
   if (patch.selectedEntryIntent !== undefined) next.selectedEntryIntent = patch.selectedEntryIntent;
-  if (patch.uiLanguage !== undefined) next.uiLanguage = normalizeLanguageCode(patch.uiLanguage);
+  if (patch.uiLanguage !== undefined) {
+    const normalizedUiLanguage = normalizeLanguageCode(patch.uiLanguage);
+    next.uiLanguage = normalizedUiLanguage;
+    next.i18n = {
+      ...(next.i18n || {}),
+      uiLanguage: normalizedUiLanguage,
+      parserLanguage: normalizedUiLanguage
+    };
+  }
+  if (patch.i18n) next.i18n = { ...next.i18n, ...patch.i18n };
   if (patch.loopGuard) next.loopGuard = { ...next.loopGuard, ...patch.loopGuard };
   if (patch.pathMeta) next.pathMeta = { ...next.pathMeta, ...patch.pathMeta };
   if (patch.sla) next.sla = { ...next.sla, ...patch.sla };
@@ -2966,6 +3339,7 @@ function getPatchedContext(patch = {}) {
   if (patch.financing) next.financing = { ...next.financing, ...patch.financing };
   if (patch.shipping) next.shipping = { ...next.shipping, ...patch.shipping };
   if (patch.booking) next.booking = { ...next.booking, ...patch.booking };
+  if (patch.checkout) next.checkout = { ...next.checkout, ...patch.checkout };
   if (patch.reminders) next.reminders = { ...next.reminders, ...patch.reminders };
   if (patch.handoffPacket !== undefined) next.handoffPacket = patch.handoffPacket;
   if (patch.transcriptExportMeta !== undefined) next.transcriptExportMeta = patch.transcriptExportMeta;
@@ -3131,23 +3505,32 @@ function goBack() {
   renderStep(previous.step);
 }
 
+function resolvePhoneBrandPreference(raw = "") {
+  const lower = String(raw || "").toLowerCase();
+  if (!lower) return null;
+  if (lower.includes("iphone") || lower.includes("ios") || lower.includes("apple")) return "iphone";
+  if (lower.includes("samsung") || lower.includes("galaxy")) return "samsung";
+  if (lower.includes("pixel") || lower.includes("google")) return "pixel";
+  if (lower.includes("other") || lower.includes("autre") || lower.includes("otro") || lower.includes("其他")) return "other";
+  if (lower.includes("android")) return "samsung";
+  return null;
+}
+
 function getFilteredOffersForCategory(category, { maxResults = 3 } = {}) {
   const categoryOffers = offers.filter((offer) => offer.category === category);
   let filtered = [...categoryOffers];
   if (state.context.intent && state.context.intent !== "bundle" && state.context.salesProfile.stage !== "cross_sell") {
     filtered = filtered.filter((offer) => offer.category === state.context.intent);
   }
-  if (category === "mobility" && state.context.deviceSelection.osType) {
-    filtered = filtered.filter((offer) => offer.osType === state.context.deviceSelection.osType);
-  }
-  if (category === "mobility" && state.context.salesProfile.phonePreference) {
-    const pref = state.context.salesProfile.phonePreference.toLowerCase();
-    filtered = filtered.filter((offer) => {
-      if (pref.includes("iphone")) return offer.osType === "ios";
-      if (pref.includes("samsung") || pref.includes("android")) return offer.osType === "android";
-      if (pref.includes("pixel")) return (offer.deviceModel || "").toLowerCase().includes("pixel");
-      return true;
-    });
+  if (category === "mobility") {
+    const explicitBrand = state.context.salesProfile.phoneBrand || resolvePhoneBrandPreference(state.context.salesProfile.phonePreference);
+    if (explicitBrand && explicitBrand !== "other" && state.context.salesProfile.byodChoice === "new_device") {
+      filtered = filtered.filter((offer) => {
+        if ((offer.offerType || "").toLowerCase() !== "device") return false;
+        const offerBrand = String(offer.deviceBrand || resolvePhoneBrandPreference(offer.deviceModel) || "").toLowerCase();
+        return offerBrand === explicitBrand;
+      });
+    }
   }
   if (category === "home internet" && state.context.salesProfile.speedPriority) {
     const pref = state.context.salesProfile.speedPriority.toLowerCase();
@@ -3176,7 +3559,13 @@ function getFilteredOffersForCategory(category, { maxResults = 3 } = {}) {
     });
   }
 
-  if (filtered.length < 3) {
+  const activeMobilityBrand = state.context.salesProfile.phoneBrand || resolvePhoneBrandPreference(state.context.salesProfile.phonePreference);
+  const preserveStrictMobilityBrand =
+    category === "mobility" &&
+    state.context.salesProfile.byodChoice === "new_device" &&
+    Boolean(activeMobilityBrand && activeMobilityBrand !== "other");
+
+  if (filtered.length < 3 && !preserveStrictMobilityBrand) {
     const seen = new Set(filtered.map((offer) => offer.id));
     const topUp = categoryOffers.filter((offer) => !seen.has(offer.id));
     filtered = [...filtered, ...topUp];
@@ -3370,7 +3759,12 @@ function addOfferToBasket(offer, { fromAlternative = false } = {}) {
 
   const previousCount = state.context.basket.length;
   const basket = [...state.context.basket, offer];
-  applyContextPatch({ basket });
+  const primaryPlanId = state.context.selectedPlanId || offer.id;
+  applyContextPatch({
+    basket,
+    selectedPlanId: primaryPlanId,
+    checkout: { primaryPlanId }
+  });
   renderBasket();
   if (state.flowStep === FLOW_STEPS.OFFER_BROWSE && shouldRenderInlineOfferFlow()) {
     setPanelFocus("conversation");
@@ -3425,7 +3819,17 @@ function routeToCrossSellCategory(category) {
       postMessage("user", choice);
       const byodChoice = choice.startsWith("Yes") ? "byod" : "new_device";
       const phonePreference = byodChoice === "byod" ? "BYOD" : null;
-      applyContextPatch({ salesProfile: { byodChoice, phonePreference } });
+      applyContextPatch({ salesProfile: { byodChoice, phoneBrand: phonePreference ? "other" : null, phonePreference } });
+      routeToCrossSellCategory("mobility");
+    });
+    return true;
+  }
+  if (category === "mobility" && state.context.salesProfile.byodChoice === "new_device" && !state.context.salesProfile.phoneBrand) {
+    postMessage("bot", "Which phone brand do you prefer?");
+    showChoiceButtons(["iPhone", "Samsung Galaxy", "Google Pixel", "Other device"], (choice) => {
+      postMessage("user", choice);
+      const phoneBrand = resolvePhoneBrandPreference(choice) || "other";
+      applyContextPatch({ salesProfile: { phoneBrand, phonePreference: choice } });
       routeToCrossSellCategory("mobility");
     });
     return true;
@@ -3592,8 +3996,12 @@ async function detectIntent(message) {
       applyContextPatch({ llmStatus: { configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" } });
       updateLlmStatusUi({ ...state.context.llmStatus, configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" });
     } else if (String(payload.mode || "").includes("fallback")) {
-      applyContextPatch({ llmStatus: { configured: true, connected: false } });
-      updateLlmStatusUi({ ...state.context.llmStatus, configured: true, connected: false });
+      const lastCheckedMs = state.context.llmStatus?.lastCheckedAt
+        ? new Date(state.context.llmStatus.lastCheckedAt).getTime()
+        : 0;
+      if (!state.context.llmStatus?.connected || !lastCheckedMs || Date.now() - lastCheckedMs > 15_000) {
+        void refreshLlmStatus({ silent: true });
+      }
     }
     if (payload.fallbackUsed) {
       logClient("info", "llm_fallback_used", {
@@ -3683,6 +4091,7 @@ function routeHelpdeskSelection(choice, { pushHistory = true } = {}) {
         serviceType: serviceIntent,
         speedPriority: null,
         byodChoice: null,
+        phoneBrand: null,
         phonePreference: null,
         linePreference: null,
         callingPlan: null,
@@ -4283,6 +4692,45 @@ function resolveServiceAddress(context = state.context) {
   );
 }
 
+function ensureCheckoutPrimaryPlan() {
+  const hasSelected = Boolean(state.context.selectedPlanId);
+  if (hasSelected) {
+    const currentPrimary = state.context.checkout?.primaryPlanId || state.context.selectedPlanId;
+    applyContextPatch({ checkout: { primaryPlanId: currentPrimary } });
+    return currentPrimary;
+  }
+  const basket = Array.isArray(state.context.basket) ? state.context.basket : [];
+  if (!basket.length) return null;
+  const primary = basket[0]?.id || null;
+  if (!primary) return null;
+  applyContextPatch({
+    selectedPlanId: primary,
+    checkout: { primaryPlanId: primary }
+  });
+  return primary;
+}
+
+function routeToCheckoutPaymentEntry({ pushHistory = true } = {}) {
+  if (!Array.isArray(state.context.basket) || state.context.basket.length === 0) {
+    postMessage("bot", "Please add at least one item to your basket before checkout.");
+    transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+    return;
+  }
+  ensureCheckoutPrimaryPlan();
+  const shouldUseDirectCardEntry = state.context.customerType === "new" && !state.context.authUser;
+  if (shouldUseDirectCardEntry) {
+    transitionTo(
+      FLOW_STEPS.PAYMENT_CARD_NUMBER,
+      {
+        paymentDraft: getEmptyPaymentDraft()
+      },
+      { pushHistory, enforceContract: false }
+    );
+    return;
+  }
+  transitionTo(FLOW_STEPS.PAYMENT_METHOD, {}, { pushHistory, enforceContract: false });
+}
+
 function runEligibilityCheck() {
   const user = getEligibilityProfile(state.context);
   if (!user) {
@@ -4345,17 +4793,7 @@ function runEligibilityCheck() {
     }
   }
   logClient("info", "eligibility_approved", { basketItems: state.context.basket.length });
-  if (state.context.customerType === "new" && !state.context.authUser) {
-    transitionTo(
-      FLOW_STEPS.PAYMENT_CARD_NUMBER,
-      {
-        paymentDraft: getEmptyPaymentDraft()
-      },
-      { pushHistory: true, enforceContract: false }
-    );
-    return;
-  }
-  transitionTo(FLOW_STEPS.PAYMENT_METHOD, {}, { pushHistory: true });
+  routeToCheckoutPaymentEntry({ pushHistory: true });
 }
 
 async function lookupAddresses(query) {
@@ -4584,8 +5022,14 @@ function confirmOrder() {
     },
     booking: {
       slots: [],
+      calendarMonth: null,
       selectedSlot: null,
-      confirmed: false
+      confirmed: false,
+      meetingRequest: null,
+      awaitingMeetingRequest: false
+    },
+    checkout: {
+      primaryPlanId: state.context.checkout?.primaryPlanId || state.context.selectedPlanId || null
     },
     reminders: {
       permission: state.context.reminders?.permission || "default",
@@ -4595,6 +5039,7 @@ function confirmOrder() {
     transcriptExportMeta: null,
     salesProfile: {
       byodChoice: null,
+      phoneBrand: null,
       linePreference: null,
       awaitingOfferContinuation: false,
       lastSelectedCategory: null,
@@ -4632,7 +5077,7 @@ function renderStep(step) {
   if (![FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE].includes(step)) clearAddressTypeahead();
   if ([FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, FLOW_STEPS.INTERNET_PLAN_PITCH].includes(step)) {
     setPanelFocus("quote");
-  } else if ([FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SERVICE_CLARIFICATION, FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.DEVICE_OS_SELECTION].includes(step)) {
+  } else if ([FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SERVICE_CLARIFICATION, FLOW_STEPS.OFFER_BROWSE].includes(step)) {
     if (step === FLOW_STEPS.OFFER_BROWSE && shouldRenderInlineOfferFlow()) {
       setPanelFocus("conversation");
     } else if (step === FLOW_STEPS.OFFER_BROWSE && state.context.basket.length > 0) {
@@ -4644,6 +5089,8 @@ function renderStep(step) {
     }
   } else if ([FLOW_STEPS.BASKET_REVIEW, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, FLOW_STEPS.ELIGIBILITY_CHECK].includes(step)) {
     setPanelFocus("basket");
+  } else if ([FLOW_STEPS.BOOKING_SLOT_SELECTION, FLOW_STEPS.BOOKING_SLOT_CONFIRM].includes(step)) {
+    setPanelFocus("booking");
   } else if (
     [
       FLOW_STEPS.PAYMENT_METHOD,
@@ -4662,8 +5109,6 @@ function renderStep(step) {
       FLOW_STEPS.SHIPPING_LOOKUP,
       FLOW_STEPS.SHIPPING_MANUAL_ENTRY,
       FLOW_STEPS.ORDER_REVIEW,
-      FLOW_STEPS.BOOKING_SLOT_SELECTION,
-      FLOW_STEPS.BOOKING_SLOT_CONFIRM,
       FLOW_STEPS.REMINDER_OPT_IN,
       FLOW_STEPS.REMINDER_SCHEDULED
     ].includes(step)
@@ -4673,6 +5118,7 @@ function renderStep(step) {
     setPanelFocus("conversation");
   }
   renderQuoteBuilderPanel();
+  renderBookingCalendarPanel();
 
   switch (step) {
     case FLOW_STEPS.INIT_CONNECTING: {
@@ -4772,6 +5218,9 @@ function renderStep(step) {
             selectedEntryIntent: "Internet",
             activeTask: "sales",
             selectedPlanId: null,
+            checkout: {
+              primaryPlanId: null
+            },
             internetPreference: null,
             quoteBuilder: {
               preferences: getQuoteDefaultsFromPreference("value"),
@@ -4788,7 +5237,21 @@ function renderStep(step) {
           selectedService: mappedIntent === "mobility" ? "mobility" : "landline",
           intent: mappedIntent,
           selectedEntryIntent: mappedIntent === "mobility" ? "Mobility" : "Landline",
-          activeTask: "sales"
+          activeTask: "sales",
+          salesProfile: {
+            serviceType: mappedIntent,
+            speedPriority: null,
+            byodChoice: null,
+            phoneBrand: null,
+            phonePreference: null,
+            linePreference: null,
+            callingPlan: null,
+            bundleSize: null,
+            stage: null,
+            awaitingOfferContinuation: false,
+            lastSelectedCategory: null,
+            crossSellOptions: []
+          }
         });
         transitionTo(FLOW_STEPS.INTENT_DISCOVERY, {}, { pushHistory: true, enforceContract: false });
       });
@@ -4890,7 +5353,10 @@ function renderStep(step) {
         }
         const selected = plans.find((plan) => choice.includes(plan.name));
         if (!selected) return;
-        applyContextPatch({ selectedPlanId: selected.id });
+        applyContextPatch({
+          selectedPlanId: selected.id,
+          checkout: { primaryPlanId: selected.id }
+        });
         transitionTo(FLOW_STEPS.PLAN_CONFIRMATION, {}, { pushHistory: true });
       });
       break;
@@ -4938,13 +5404,7 @@ function renderStep(step) {
       showChoiceButtons(["Checkout now", "Add mobility offers", "Add internet offers", "Add landline offers", "No thanks"], (choice) => {
         postMessage("user", choice);
         if (choice === "Checkout now") {
-          transitionTo(
-            FLOW_STEPS.PAYMENT_CARD_NUMBER,
-            {
-              paymentDraft: getEmptyPaymentDraft()
-            },
-            { pushHistory: true, enforceContract: false }
-          );
+          routeToCheckoutPaymentEntry({ pushHistory: true });
           return;
         }
         if (choice === "Add mobility offers") {
@@ -5260,17 +5720,22 @@ function renderStep(step) {
             postMessage("user", choice);
             const byodChoice = choice.startsWith("Yes") ? "byod" : "new_device";
             const phonePreference = byodChoice === "byod" ? "BYOD" : null;
-            applyContextPatch({ salesProfile: { byodChoice, phonePreference } });
+            applyContextPatch({ salesProfile: { byodChoice, phoneBrand: phonePreference ? "other" : null, phonePreference } });
             renderStep(FLOW_STEPS.SERVICE_CLARIFICATION);
           });
           break;
         }
-        if (state.context.salesProfile.byodChoice === "new_device" && !state.context.salesProfile.phonePreference) {
+        if (state.context.salesProfile.byodChoice === "new_device" && !state.context.salesProfile.phoneBrand) {
           postMessage("bot", "Nice, let’s pick your phone first. Which device family do you prefer?");
           presentMobilityDevicePreview();
           showChoiceButtons(["iPhone", "Samsung Galaxy", "Google Pixel", "Other device"], (choice) => {
             postMessage("user", choice);
-            applyContextPatch({ salesProfile: { phonePreference: choice } });
+            applyContextPatch({
+              salesProfile: {
+                phonePreference: choice,
+                phoneBrand: resolvePhoneBrandPreference(choice) || "other"
+              }
+            });
             renderStep(FLOW_STEPS.SERVICE_CLARIFICATION);
           });
           break;
@@ -5325,17 +5790,6 @@ function renderStep(step) {
       });
       break;
     }
-
-    case FLOW_STEPS.DEVICE_OS_SELECTION:
-      postMessage("bot", "For mobility phones, do you want iOS, Android, or other devices?");
-      showChoiceButtons(["iOS", "Android", "Other devices"], (choice) => {
-        postMessage("user", choice);
-        const osType = choice === "iOS" ? "ios" : choice === "Android" ? "android" : "other";
-        applyContextPatch({ deviceSelection: { osType, model: null } });
-        logClient("info", "device_os_selected", { osType });
-        transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true });
-      });
-      break;
 
     case FLOW_STEPS.OFFER_BROWSE:
       hideAvailabilityCard();
@@ -5646,37 +6100,20 @@ function renderStep(step) {
     }
 
     case FLOW_STEPS.BOOKING_SLOT_SELECTION: {
-      postMessage("bot", "Would you like to reserve an installation slot now?");
+      postMessage("bot", "Select an installation day from the calendar. Monday to Thursday are open; Friday is meeting-request only.");
+      showChoiceButtons(["Skip booking"], (choice) => {
+        postMessage("user", choice);
+        transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
+      });
       const existingSlots = state.context.booking?.slots || [];
-      const renderSlotChoices = (slots) => {
-        const labels = slots.slice(0, 4).map((slot) => `${slot.date} • ${slot.window}`);
-        showChoiceButtons([...labels, "Skip booking"], (choice) => {
-          postMessage("user", choice);
-          if (choice === "Skip booking") {
-            transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
-            return;
-          }
-          const selectedSlot = slots.find((slot) => `${slot.date} • ${slot.window}` === choice);
-          if (!selectedSlot) {
-            postMessage("bot", "Please select one of the available slots or skip booking.");
-            return;
-          }
-          applyContextPatch({ booking: { selectedSlot } });
-          logClient("info", "booking_slot_selected", {
-            slotId: selectedSlot.slotId,
-            date: selectedSlot.date,
-            window: selectedSlot.window
-          });
-          transitionTo(FLOW_STEPS.BOOKING_SLOT_CONFIRM, {}, { pushHistory: true, enforceContract: false });
-        });
-      };
       if (existingSlots.length) {
-        renderSlotChoices(existingSlots);
+        renderBookingCalendarPanel();
         break;
       }
       void fetchInstallSlots()
         .then((slots) => {
-          applyContextPatch({ booking: { slots } });
+          const monthToken = slots[0]?.date ? slots[0].date.slice(0, 7) : toIsoMonth(new Date());
+          applyContextPatch({ booking: { slots, calendarMonth: monthToken } });
           logClient("info", "booking_slots_viewed", {
             slotCount: slots.length,
             serviceType: state.context.selectedService || state.context.intent || "internet"
@@ -5686,7 +6123,7 @@ function renderStep(step) {
             transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
             return;
           }
-          renderSlotChoices(slots);
+          renderBookingCalendarPanel();
         })
         .catch(() => {
           postMessage("bot", "I can’t retrieve install slots right now. We can continue without booking.");
@@ -5822,7 +6259,9 @@ function normalizeCommand(text = "") {
 }
 
 function handleGlobalCommands(message) {
-  const cmd = normalizeCommand(message);
+  const cmd = normalizeCommand(
+    normalizeUserInputForStep(message, state.context.i18n?.parserLanguage || getCurrentUiLanguage())
+  );
 
   if (cmd.includes("export transcript") || cmd.includes("download transcript")) {
     void exportTranscript();
@@ -5994,7 +6433,8 @@ async function handleChatInput(message) {
     return;
   }
   const trimmed = message.trim();
-  const lower = trimmed.toLowerCase();
+  const canonicalInput = normalizeUserInputForStep(trimmed, state.context.i18n?.parserLanguage || getCurrentUiLanguage());
+  const lower = canonicalInput.toLowerCase();
 
   switch (state.flowStep) {
     case FLOW_STEPS.INIT_CONNECTING:
@@ -6044,6 +6484,9 @@ async function handleChatInput(message) {
           selectedEntryIntent: "Internet",
           activeTask: "sales",
           selectedPlanId: null,
+          checkout: {
+            primaryPlanId: null
+          },
           internetPreference: null,
           quoteBuilder: {
             preferences: getQuoteDefaultsFromPreference("value"),
@@ -6060,7 +6503,21 @@ async function handleChatInput(message) {
           selectedService: "mobility",
           intent: "mobility",
           selectedEntryIntent: "Mobility",
-          activeTask: "sales"
+          activeTask: "sales",
+          salesProfile: {
+            serviceType: "mobility",
+            speedPriority: null,
+            byodChoice: null,
+            phoneBrand: null,
+            phonePreference: null,
+            linePreference: null,
+            callingPlan: null,
+            bundleSize: null,
+            stage: null,
+            awaitingOfferContinuation: false,
+            lastSelectedCategory: null,
+            crossSellOptions: []
+          }
         });
         transitionTo(FLOW_STEPS.INTENT_DISCOVERY, {}, { pushHistory: true, enforceContract: false });
         return;
@@ -6071,7 +6528,21 @@ async function handleChatInput(message) {
           selectedService: "landline",
           intent: "landline",
           selectedEntryIntent: "Landline",
-          activeTask: "sales"
+          activeTask: "sales",
+          salesProfile: {
+            serviceType: "landline",
+            speedPriority: null,
+            byodChoice: null,
+            phoneBrand: null,
+            phonePreference: null,
+            linePreference: null,
+            callingPlan: null,
+            bundleSize: null,
+            stage: null,
+            awaitingOfferContinuation: false,
+            lastSelectedCategory: null,
+            crossSellOptions: []
+          }
         });
         transitionTo(FLOW_STEPS.INTENT_DISCOVERY, {}, { pushHistory: true, enforceContract: false });
         return;
@@ -6205,7 +6676,10 @@ async function handleChatInput(message) {
         handleUnclearInput(message, "Please select one of the internet plans shown, or say 'generate fresh quote'.");
         return;
       }
-      applyContextPatch({ selectedPlanId: selected.id });
+      applyContextPatch({
+        selectedPlanId: selected.id,
+        checkout: { primaryPlanId: selected.id }
+      });
       transitionTo(FLOW_STEPS.PLAN_CONFIRMATION, {}, { pushHistory: true });
       return;
     }
@@ -6273,13 +6747,7 @@ async function handleChatInput(message) {
 
     case FLOW_STEPS.CHECKOUT_INTENT_PROMPT:
       if (lower.includes("checkout") || lower.includes("yes") || lower.includes("continue")) {
-        transitionTo(
-          FLOW_STEPS.PAYMENT_CARD_NUMBER,
-          {
-            paymentDraft: getEmptyPaymentDraft()
-          },
-          { pushHistory: true, enforceContract: false }
-        );
+        routeToCheckoutPaymentEntry({ pushHistory: true });
         return;
       }
       if (lower.includes("mobility")) {
@@ -6737,6 +7205,7 @@ async function handleChatInput(message) {
             serviceType: intent,
             speedPriority: entities.speedPriority || null,
             byodChoice: null,
+            phoneBrand: resolvePhoneBrandPreference(entities.devicePreference || ""),
             phonePreference: entities.devicePreference || null,
             linePreference: null,
             callingPlan: entities.callingRegion || null,
@@ -6759,63 +7228,68 @@ async function handleChatInput(message) {
 
     case FLOW_STEPS.SERVICE_CLARIFICATION:
       if (state.context.intent === "home internet") {
-        if (!/(fast|balanc|upload)/i.test(trimmed)) {
+        if (!/(fast|balanc|upload|speed|value|performance)/i.test(lower)) {
           handleUnclearInput(message, "For internet, tell me if your priority is fastest speed, balanced value, or upload-heavy performance.");
           return;
         }
-        applyContextPatch({ salesProfile: { speedPriority: trimmed } });
+        applyContextPatch({ salesProfile: { speedPriority: canonicalInput } });
         routeAfterSalesClarification({ pushHistory: true });
         return;
       }
       if (state.context.intent === "mobility") {
         if (!state.context.salesProfile.byodChoice) {
-          if (/(yes|bring|own|byod)/i.test(trimmed)) {
-            applyContextPatch({ salesProfile: { byodChoice: "byod", phonePreference: "BYOD" } });
+          if (/(yes|bring|own|byod)/i.test(lower)) {
+            applyContextPatch({ salesProfile: { byodChoice: "byod", phoneBrand: "other", phonePreference: "BYOD" } });
             postMessage("bot", "Great. Do you need a Canada-only, Canada + US, or International calling plan?");
             return;
           }
-          if (/(no|new phone|need phone|device)/i.test(trimmed)) {
-            applyContextPatch({ salesProfile: { byodChoice: "new_device" } });
+          if (/(no|new phone|need phone|device)/i.test(lower)) {
+            applyContextPatch({ salesProfile: { byodChoice: "new_device", phoneBrand: null } });
             postMessage("bot", "Perfect. Which device family do you prefer: iPhone, Samsung Galaxy, Google Pixel, or other?");
             return;
           }
           handleUnclearInput(message, "Please tell me if you are bringing your own phone (yes) or need a new phone (no).");
           return;
         }
-        if (state.context.salesProfile.byodChoice === "new_device" && !state.context.salesProfile.phonePreference) {
-          if (!/(iphone|samsung|pixel|other|android|ios)/i.test(trimmed)) {
+        if (state.context.salesProfile.byodChoice === "new_device" && !state.context.salesProfile.phoneBrand) {
+          if (!/(iphone|samsung|pixel|other|android|ios)/i.test(lower)) {
             presentMobilityDevicePreview();
             handleUnclearInput(message, "Please tell me your phone preference: iPhone, Samsung, Google Pixel, or other.");
             return;
           }
-          applyContextPatch({ salesProfile: { phonePreference: trimmed } });
+          applyContextPatch({
+            salesProfile: {
+              phonePreference: canonicalInput,
+              phoneBrand: resolvePhoneBrandPreference(canonicalInput) || "other"
+            }
+          });
           postMessage("bot", "Great. Do you need a Canada-only, Canada + US, or International calling plan?");
           return;
         }
-        if (!/(canada|us|international)/i.test(trimmed)) {
+        if (!/(canada|us|international)/i.test(lower)) {
           handleUnclearInput(message, "Please specify calling plan: Canada, Canada + US, or International.");
           return;
         }
-        applyContextPatch({ salesProfile: { callingPlan: trimmed } });
+        applyContextPatch({ salesProfile: { callingPlan: canonicalInput } });
         routeAfterSalesClarification({ pushHistory: true });
         return;
       }
       if (state.context.intent === "bundle") {
-        if (!/(2|3)/.test(trimmed)) {
+        if (!/(2|3)/.test(lower)) {
           handleUnclearInput(message, "Please choose a 2-service or 3-service bundle.");
           return;
         }
-        applyContextPatch({ salesProfile: { bundleSize: trimmed.includes("3") ? 3 : 2 } });
+        applyContextPatch({ salesProfile: { bundleSize: lower.includes("3") ? 3 : 2 } });
         routeAfterSalesClarification({ pushHistory: true });
         return;
       }
       if (!state.context.salesProfile.linePreference) {
-        if (/(new|new line)/i.test(trimmed)) {
+        if (/(new|new line)/i.test(lower)) {
           applyContextPatch({ salesProfile: { linePreference: "new_line" } });
           postMessage("bot", "Thanks. For landline calling, do you need local calling or international minutes?");
           return;
         }
-        if (/(keep|existing|port)/i.test(trimmed)) {
+        if (/(keep|existing|port)/i.test(lower)) {
           applyContextPatch({ salesProfile: { linePreference: "keep_existing" } });
           postMessage("bot", "Thanks. For landline calling, do you need local calling or international minutes?");
           return;
@@ -6823,36 +7297,14 @@ async function handleChatInput(message) {
         handleUnclearInput(message, "For landline, please choose new line or keep existing number.");
         return;
       }
-      if (!/(local|international)/i.test(trimmed)) {
+      if (!/(local|international)/i.test(lower)) {
         handleUnclearInput(message, "For landline, please specify local calling or international minutes.");
         return;
       }
-      applyContextPatch({ salesProfile: { callingPlan: trimmed } });
+      applyContextPatch({ salesProfile: { callingPlan: canonicalInput } });
       routeAfterSalesClarification({ pushHistory: true });
       return;
     
-
-    case FLOW_STEPS.DEVICE_OS_SELECTION:
-      if (lower.includes("ios")) {
-        applyContextPatch({ deviceSelection: { osType: "ios", model: "iPhone" } });
-        logClient("info", "device_os_selected", { osType: "ios", viaChatInput: true });
-        transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true });
-        return;
-      }
-      if (lower.includes("android")) {
-        applyContextPatch({ deviceSelection: { osType: "android", model: "Android" } });
-        logClient("info", "device_os_selected", { osType: "android", viaChatInput: true });
-        transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true });
-        return;
-      }
-      if (lower.includes("other")) {
-        applyContextPatch({ deviceSelection: { osType: "other", model: "Other" } });
-        logClient("info", "device_os_selected", { osType: "other", viaChatInput: true });
-        transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true });
-        return;
-      }
-      handleUnclearInput(message, "Please choose iOS, Android, or Other devices.");
-      return;
 
     case FLOW_STEPS.OFFER_BROWSE:
       if (state.context.salesProfile.awaitingOfferContinuation) {
@@ -7262,17 +7714,51 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.BOOKING_SLOT_SELECTION: {
+      if (state.context.booking?.awaitingMeetingRequest) {
+        if (lower.includes("choose") || lower.includes("another") || lower.includes("slot")) {
+          applyContextPatch({ booking: { awaitingMeetingRequest: false } });
+          postMessage("bot", "Okay. Please choose an available Monday-Thursday slot from the calendar.");
+          return;
+        }
+        applyContextPatch({
+          booking: {
+            awaitingMeetingRequest: false,
+            meetingRequest: {
+              details: trimmed,
+              requestedAt: new Date().toISOString()
+            }
+          }
+        });
+        logClient("info", "booking_meeting_requested", { details: trimmed });
+        postMessage("bot", "Thanks. I logged your meeting request and a specialist will follow up.");
+        transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
       if (lower.includes("skip")) {
         transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      if (lower.includes("friday") || lower.includes("vendredi") || lower.includes("viernes") || lower.includes("周五")) {
+        promptFridayMeetingSetup();
+        return;
+      }
+      if (lower.includes("set up meeting") || lower.includes("meeting")) {
+        applyContextPatch({ booking: { awaitingMeetingRequest: true } });
+        postMessage("bot", "Please share your preferred callback day/time and whether you prefer phone or email.");
         return;
       }
       const slots = state.context.booking?.slots || [];
       const selectedSlot = slots.find((slot) => lower.includes(slot.date.toLowerCase()) || lower.includes(slot.window.toLowerCase()));
       if (!selectedSlot) {
-        handleUnclearInput(message, "Please choose one listed slot or say skip booking.");
+        handleUnclearInput(message, "Please choose a Monday-Thursday slot, say Friday for a meeting request, or say skip booking.");
         return;
       }
-      applyContextPatch({ booking: { selectedSlot } });
+      const weekday = new Date(`${selectedSlot.date}T00:00:00`).getDay();
+      if (weekday === 5) {
+        promptFridayMeetingSetup();
+        return;
+      }
+      applyContextPatch({ booking: { selectedSlot, awaitingMeetingRequest: false } });
       logClient("info", "booking_slot_selected", { slotId: selectedSlot.slotId, viaChatInput: true });
       transitionTo(FLOW_STEPS.BOOKING_SLOT_CONFIRM, {}, { pushHistory: true, enforceContract: false });
       return;
@@ -7323,6 +7809,7 @@ async function handleChatInput(message) {
 
 function openChatWidget() {
   chatWidget.classList.remove("hidden");
+  void refreshLlmStatus({ silent: true });
 }
 
 function closeChatWidget() {
@@ -7391,7 +7878,28 @@ function setInstallPromptAvailable(installable) {
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.register("./sw.js").catch(() => {
+  const hostname = String(window.location.hostname || "");
+  const isLocalDevHost = hostname === "localhost" || hostname === "127.0.0.1";
+  if (isLocalDevHost) {
+    navigator.serviceWorker
+      .getRegistrations()
+      .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+      .catch(() => {});
+    if ("caches" in window) {
+      caches
+        .keys()
+        .then((keys) =>
+          Promise.all(
+            keys
+              .filter((key) => key.startsWith("bell-sales-assistant-"))
+              .map((key) => caches.delete(key))
+          )
+        )
+        .catch(() => {});
+    }
+    return;
+  }
+  navigator.serviceWorker.register("./sw.js?v=20260316-2").catch(() => {
     // Non-blocking for local demo.
   });
 }
@@ -7673,6 +8181,16 @@ chatInput.addEventListener("blur", () => {
   state.timers.push(t);
 });
 
+window.addEventListener("focus", () => {
+  void refreshLlmStatus({ silent: true });
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    void refreshLlmStatus({ silent: true });
+  }
+});
+
 window.addEventListener("error", (event) => {
   logClient("error", "frontend_error", {
     message: event.message,
@@ -7707,6 +8225,7 @@ function boot() {
   validateOfferCoverage();
   updateJourneyProgress(FLOW_STEPS.INIT_CONNECTING);
   applyTheme(savedTheme?.mode || "system", { persist: false });
+  watchSystemThemeChanges();
   updateLlmStatusUi({ configured: false, connected: false, model: null });
   refreshLlmStatus({ silent: true });
   setInterval(() => refreshLlmStatus({ silent: true }), 30000);

@@ -1,4 +1,4 @@
-export const LEGACY_FLOW_STEPS = ["AREA_CODE_ENTRY", "AVAILABILITY_SELECTION", "CLIENT_TYPE_SELECTION"];
+export const LEGACY_FLOW_STEPS = ["AREA_CODE_ENTRY", "AVAILABILITY_SELECTION", "CLIENT_TYPE_SELECTION", "DEVICE_OS_SELECTION"];
 
 export const PATH_STATUS = {
   IDLE: "idle",
@@ -38,11 +38,11 @@ export function canProceed(step = "", context = {}) {
     case "NEW_ACCOUNT_CREATED_CONFIRM":
       return Boolean(context.newOnboarding?.fullName) && Boolean(context.newOnboarding?.email) && Boolean(context.newOnboarding?.phone);
     case "CHECKOUT_INTENT_PROMPT":
-      return Boolean(context.selectedPlanId);
+      return Array.isArray(context.basket) && context.basket.length > 0;
     case "PAYMENT_CARD_ENTRY":
-      return Boolean(context.selectedPlanId) && Array.isArray(context.basket) && context.basket.length > 0;
+      return Array.isArray(context.basket) && context.basket.length > 0;
     case "PAYMENT_CARD_NUMBER":
-      return Boolean(context.selectedPlanId) && Array.isArray(context.basket) && context.basket.length > 0;
+      return Array.isArray(context.basket) && context.basket.length > 0;
     case "PAYMENT_CARD_CVC":
       return Boolean(context.paymentDraft?.cardValidated) && Boolean(context.paymentDraft?.brand);
     case "PAYMENT_CARD_POSTAL":
@@ -53,8 +53,6 @@ export function canProceed(step = "", context = {}) {
       return context.customerType === "existing";
     case "EXISTING_AUTH_MODE":
       return context.customerType === "existing" && Boolean(context.areaCode);
-    case "DEVICE_OS_SELECTION":
-      return context.intent === "mobility";
     case "PAYMENT_FINANCING_TERM":
       return getFinancingAmount(context.basket) > 0;
     case "PAYMENT_FINANCING_UPFRONT":

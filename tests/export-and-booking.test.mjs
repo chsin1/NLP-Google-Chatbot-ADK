@@ -49,4 +49,13 @@ test("app wiring includes booking, reminder, theme, and transcript export hooks"
   assert.match(appCode, /exportTranscript/);
   assert.match(appCode, /beforeinstallprompt/);
   assert.match(appCode, /applyTheme/);
+  assert.match(appCode, /Friday install slots are closed/);
+  assert.match(appCode, /booking_meeting_requested/);
+  assert.match(appCode, /booking-calendar-content/);
+});
+
+test("checkout payment routing helper is used to prevent invalid eligibility transitions", async () => {
+  const appCode = await readFile(`${ROOT}/app.js`, "utf8");
+  assert.match(appCode, /function routeToCheckoutPaymentEntry/);
+  assert.match(appCode, /routeToCheckoutPaymentEntry\(\{ pushHistory: true \}\);/);
 });

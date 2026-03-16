@@ -34,7 +34,7 @@ function baseContext() {
 }
 
 test("legacy state list explicitly tracks deprecated steps", () => {
-  assert.deepEqual(LEGACY_FLOW_STEPS, ["AREA_CODE_ENTRY", "AVAILABILITY_SELECTION", "CLIENT_TYPE_SELECTION"]);
+  assert.deepEqual(LEGACY_FLOW_STEPS, ["AREA_CODE_ENTRY", "AVAILABILITY_SELECTION", "CLIENT_TYPE_SELECTION", "DEVICE_OS_SELECTION"]);
   assert.equal(PATH_STATUS.IN_PROGRESS, "in_progress");
 });
 
@@ -105,6 +105,8 @@ test("negative gating checks fail when required context is missing", () => {
   assert.equal(canProceed("OFFER_BROWSE", ctx), false);
   ctx.selectedPlanId = null;
   assert.equal(canProceed("PLAN_CONFIRMATION", ctx), false);
+  assert.equal(canProceed("CHECKOUT_INTENT_PROMPT", ctx), true);
+  assert.equal(canProceed("PAYMENT_CARD_NUMBER", ctx), true);
   ctx.internetPreference = "value";
   ctx.selectedPlanId = "internet-003";
   ctx.payment.verified = false;
@@ -145,4 +147,10 @@ test("cross-sell and inline offers include internet branch", () => {
   assert.match(appCode, /Add internet offers/);
   assert.match(appCode, /category === "home internet"/);
   assert.match(appCode, /presentInlineOfferChoices\("home internet"\)/);
+});
+
+test("quote builder enforces 100-point allocation in UI", () => {
+  const appCode = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(appCode, /Total: \$\{preferenceTotal\}\/100/);
+  assert.match(appCode, /normalizeQuotePreferences\(\{[\s\S]*\}, key\)/);
 });

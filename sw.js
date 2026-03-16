@@ -1,4 +1,4 @@
-const CACHE_NAME = "bell-sales-assistant-v1";
+const CACHE_NAME = "bell-sales-assistant-v2";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -30,6 +30,25 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
+  const isAppShellAsset =
+    request.mode === "navigate" ||
+    request.destination === "document" ||
+    request.destination === "script" ||
+    request.destination === "style";
+
+  if (isAppShellAsset) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
+          return response;
+        })
+        .catch(() => caches.match(request).then((cached) => cached || caches.match("/index.html")))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;

@@ -113,7 +113,7 @@ async function writeLlmUsage(payload = {}) {
 
 function buildAssistSystemPrompt(task = "") {
   const base =
-    "You are Belinda, a telecom sales assistant. Be concise, professional, and conversational. " +
+    "You are Belinda, a telecom sales assistant. Be concise, helpful, converstaional and professional. Suggest next steps in for clients when they are blocked " +
     "You may improve phrasing, clarify intent, summarize, and explain recommendations. " +
     "Do not invent or override authoritative business data.";
   const guardrails =
@@ -520,12 +520,12 @@ function buildInstallSlots({ postalCode = "", serviceType = "internet" } = {}) {
   const slots = [];
   const now = new Date();
   let dayOffset = 1;
-  while (slots.length < 8 && dayOffset <= 18) {
+  while (slots.length < 8 && dayOffset <= 28) {
     const d = new Date(now);
     d.setDate(now.getDate() + dayOffset);
     const weekday = d.getDay();
     dayOffset += 1;
-    if (weekday === 0) continue;
+    if (weekday === 0 || weekday === 5 || weekday === 6) continue;
     const date = d.toISOString().slice(0, 10);
     windows.forEach((window, index) => {
       if (slots.length >= 8) return;
