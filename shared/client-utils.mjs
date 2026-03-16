@@ -87,6 +87,14 @@ export function detectCardBrand(cardNumber = "") {
   return null;
 }
 
+export function normalizeCardDigits(raw = "") {
+  return String(raw || "").replace(/\D/g, "");
+}
+
+export function isValidCardNumber16(raw = "") {
+  return normalizeCardDigits(raw).length === 16;
+}
+
 export function isValidCardNumberLuhn(cardNumber = "") {
   const digits = String(cardNumber || "").replace(/\D/g, "");
   if (!digits) return false;

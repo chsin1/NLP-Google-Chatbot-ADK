@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyIntentFallbackDetailed, extractIntentEntities, rankAddressSuggestions } from "./shared/flow-utils.mjs";
 import { buildMetrics, parseJsonLines } from "./shared/metrics-utils.mjs";
+import { buildQuotePreview } from "./shared/quote-utils.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -562,6 +563,22 @@ const server = createServer(async (req, res) => {
       json(res, 200, { suggestions });
     } catch {
       json(res, 400, { error: "Invalid JSON body" });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/quote-preview") {
+    try {
+      const parsed = await collectRequestBody(req);
+      const payload = buildQuotePreview({
+        serviceType: parsed.serviceType || "home internet",
+        preferences: parsed.preferences || {},
+        offers: parsed.offers || [],
+        maxResults: parsed.maxResults || 3
+      });
+      json(res, 200, payload);
+    } catch {
+      json(res, 400, { error: "Invalid quote preview payload" });
     }
     return;
   }
