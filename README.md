@@ -58,9 +58,8 @@ Recommended folder: `assets/screenshots/`
 
 ## Project Documents
 
-- Final Report: [docs/Bell_Sales_Chatbot_Final_Report.docx](/Users/alexkatzighera/Documents/NLP%20Google%20Chatbot/docs/Bell_Sales_Chatbot_Final_Report.docx)
-- Demo Script: [docs/Bell_Sales_Chatbot_Demo_Script.docx](/Users/alexkatzighera/Documents/NLP%20Google%20Chatbot/docs/Bell_Sales_Chatbot_Demo_Script.docx)
-
+- Final Report: 
+- Demo Script: 
 ---
 
 ## System Architecture
