@@ -162,6 +162,12 @@
           <span id="llm-status-dot" class="dot"></span>
           <span id="llm-status-text">ChatGPT: Not configured</span>
         </div>
+        <div id="language-switcher" class="language-switcher" role="group" aria-label="Conversation language">
+          <label><input type="radio" name="chat-language" value="en" checked />EN</label>
+          <label><input type="radio" name="chat-language" value="fr" />FR</label>
+          <label><input type="radio" name="chat-language" value="es" />ES</label>
+          <label><input type="radio" name="chat-language" value="zh" />中文</label>
+        </div>
         <div class="chat-topbar-actions">
           <button id="chat-menu-btn" class="chat-menu-btn" aria-label="Chat options">...</button>
           <div id="chat-menu" class="chat-menu hidden">
@@ -218,6 +224,11 @@
         </section>
 
         <section class="assistant-panels">
+          <div id="panel-quote" class="panel-card hidden">
+            <h3>Guided Quote Builder</h3>
+            <div id="quote-builder-content" class="quote-builder-content"></div>
+          </div>
+
           <div id="panel-offers" class="panel-card hidden">
             <h3>Product Carousel</h3>
             <div class="carousel-controls">

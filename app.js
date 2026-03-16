@@ -15,9 +15,8 @@ import {
   normalizeCanadianPhone,
   parseCombinedOnboardingInput,
   detectCardBrand,
-  isValidCardLengthByBrand,
-  isValidCardNumberLuhn,
-  isValidCvcByBrand,
+  normalizeCardDigits,
+  isValidCardNumber16,
   getFinancingAmount,
   getFinancingEligibleItems,
   getEligibilityProfile,
@@ -293,6 +292,85 @@ const CATEGORY_CHOICE_LABELS = {
   "home internet": "Add internet offers",
   landline: "Add landline offers"
 };
+const LANGUAGE_LABELS = {
+  en: "English",
+  fr: "Français",
+  es: "Español",
+  zh: "中文"
+};
+const SUPPORTED_LANGUAGE_CODES = new Set(Object.keys(LANGUAGE_LABELS));
+const STATIC_UI_TRANSLATIONS = {
+  fr: {
+    "New client": "Nouveau client",
+    "Existing client": "Client existant",
+    Internet: "Internet",
+    Mobility: "Mobilité",
+    Landline: "Ligne fixe",
+    Bundle: "Forfait groupé",
+    Speed: "Vitesse",
+    Value: "Valeur",
+    Performance: "Performance",
+    "Build my plan": "Créer mon offre",
+    "Confirm plan": "Confirmer le forfait",
+    "Change plan": "Changer le forfait",
+    "Checkout now": "Passer au paiement",
+    "Add mobility offers": "Ajouter des offres mobilité",
+    "Add landline offers": "Ajouter des offres ligne fixe",
+    "No thanks": "Non merci",
+    "Confirm payment": "Confirmer le paiement",
+    "Start over": "Recommencer",
+    "That is all, continue": "C'est tout, continuer",
+    "Retry authentication": "Réessayer l'authentification",
+    "End chat": "Terminer le chat"
+  },
+  es: {
+    "New client": "Cliente nuevo",
+    "Existing client": "Cliente existente",
+    Internet: "Internet",
+    Mobility: "Móvil",
+    Landline: "Teléfono fijo",
+    Bundle: "Paquete",
+    Speed: "Velocidad",
+    Value: "Valor",
+    Performance: "Rendimiento",
+    "Build my plan": "Crear mi plan",
+    "Confirm plan": "Confirmar plan",
+    "Change plan": "Cambiar plan",
+    "Checkout now": "Ir al pago",
+    "Add mobility offers": "Agregar ofertas móviles",
+    "Add landline offers": "Agregar ofertas de línea fija",
+    "No thanks": "No gracias",
+    "Confirm payment": "Confirmar pago",
+    "Start over": "Comenzar de nuevo",
+    "That is all, continue": "Eso es todo, continuar",
+    "Retry authentication": "Reintentar autenticación",
+    "End chat": "Finalizar chat"
+  },
+  zh: {
+    "New client": "新客户",
+    "Existing client": "现有客户",
+    Internet: "互联网",
+    Mobility: "移动服务",
+    Landline: "固定电话",
+    Bundle: "套餐",
+    Speed: "速度",
+    Value: "性价比",
+    Performance: "性能",
+    "Build my plan": "创建我的方案",
+    "Confirm plan": "确认方案",
+    "Change plan": "更改方案",
+    "Checkout now": "立即结账",
+    "Add mobility offers": "添加移动服务优惠",
+    "Add landline offers": "添加固话优惠",
+    "No thanks": "不需要",
+    "Confirm payment": "确认付款",
+    "Start over": "重新开始",
+    "That is all, continue": "就这些，继续",
+    "Retry authentication": "重试认证",
+    "End chat": "结束聊天"
+  }
+};
+const translatedTextCache = new Map();
 
 const mockUsers = [
   {
@@ -626,6 +704,8 @@ const chatWidget = document.getElementById("chat-widget");
 const closeChat = document.getElementById("close-chat");
 const llmStatusChip = document.getElementById("llm-status");
 const llmStatusText = document.getElementById("llm-status-text");
+const languageSwitcher = document.getElementById("language-switcher");
+const languageInputs = Array.from(document.querySelectorAll("input[name='chat-language']"));
 const openChatHeader = document.getElementById("open-chat-header");
 const openChatOffers = document.getElementById("open-chat-offers");
 const autoLoginBtn = document.getElementById("auto-login-btn");
@@ -655,6 +735,8 @@ const carouselPageLabel = document.getElementById("carousel-page-label");
 const panelOffers = document.getElementById("panel-offers");
 const panelBasket = document.getElementById("panel-basket");
 const panelCheckout = document.getElementById("panel-checkout");
+const panelQuote = document.getElementById("panel-quote");
+const quoteBuilderContent = document.getElementById("quote-builder-content");
 const chatBody = document.querySelector(".chat-body");
 
 const basketList = document.getElementById("basket-list");
@@ -694,6 +776,7 @@ const state = {
     areaCodeRequiredForTask: false,
     customerStatusAsked: false,
     selectedEntryIntent: null,
+    uiLanguage: "en",
     loopGuard: {
       lastStep: null,
       lastContextHash: null,
@@ -789,11 +872,22 @@ const state = {
     paymentDraft: {
       brand: null,
       last4: null,
+      cardSegments: ["", "", "", ""],
       cardValidated: false,
       cvc: null,
       cvcValidated: false,
       postal: null,
       postalValidated: false
+    },
+    quoteBuilder: {
+      preferences: {
+        budget: 55,
+        speed: 65,
+        deviceCost: 35
+      },
+      lastPreview: [],
+      lastPreviewAt: null,
+      savedAt: null
     },
     newOnboarding: {
       fullName: null,
@@ -816,7 +910,8 @@ const state = {
       crossSellOptions: []
     },
     sessionFlags: {
-      orderCompleted: false
+      orderCompleted: false,
+      aiDisclosureShown: false
     },
     discountNotice: {
       lastTierAnnounced: 0
@@ -900,6 +995,7 @@ async function createIdentityHash(value) {
 
 const KPI_SNAPSHOT_STORE_KEY = "bell_sales_kpi_snapshots_v1";
 const KPI_SESSIONS_STORE_KEY = "bell_sales_kpi_sessions_v1";
+const QUOTE_BUILDER_STORE_KEY = "bell_quote_builder_v1";
 const DEFAULT_BUSINESS_KPIS = [
   { key: "mean_time_to_completion", label: "Mean Time To Completion (min)", value: 12.4 },
   { key: "customer_acquisition_value", label: "Customer Acquisition Value (CAD)", value: 145 },
@@ -1339,6 +1435,296 @@ async function requestChatAssist(task, payload = {}, { fallbackText = "", minLen
   }
 }
 
+function getQuoteDefaultsFromPreference(preference = "") {
+  const pref = String(preference || "").toLowerCase();
+  if (pref.includes("speed")) {
+    return { budget: 35, speed: 90, deviceCost: 25 };
+  }
+  if (pref.includes("performance") || pref.includes("upload")) {
+    return { budget: 45, speed: 80, deviceCost: 30 };
+  }
+  return { budget: 85, speed: 40, deviceCost: 35 };
+}
+
+function normalizeQuotePreferences(preferences = {}) {
+  return {
+    budget: Math.max(0, Math.min(100, Number(preferences.budget ?? 55))),
+    speed: Math.max(0, Math.min(100, Number(preferences.speed ?? 65))),
+    deviceCost: Math.max(0, Math.min(100, Number(preferences.deviceCost ?? 35)))
+  };
+}
+
+function getOfferInstallationFee(category = "") {
+  if (category === "home internet") return 25;
+  if (category === "landline") return 50;
+  return 0;
+}
+
+function getQuoteCandidatesForService(serviceType = "home internet") {
+  const normalized = String(serviceType || "").toLowerCase();
+  return offers
+    .filter((offer) => String(offer.category || "").toLowerCase() === normalized)
+    .map((offer) => ({
+      id: offer.id,
+      category: offer.category,
+      name: offer.name,
+      description: offer.description,
+      monthlyPrice: Number(offer.monthlyPrice || 0),
+      devicePrice: offer.devicePrice == null ? null : Number(offer.devicePrice || 0),
+      contractMonths: 24,
+      installationFee: getOfferInstallationFee(offer.category)
+    }));
+}
+
+async function requestQuotePreview(preferences = {}, serviceType = "home internet", maxResults = 3) {
+  const response = await fetch("/api/quote-preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      serviceType,
+      preferences: normalizeQuotePreferences(preferences),
+      maxResults,
+      offers: getQuoteCandidatesForService(serviceType)
+    })
+  });
+  if (!response.ok) {
+    throw new Error("quote preview failed");
+  }
+  return response.json();
+}
+
+function saveQuoteBuilderSnapshot() {
+  const payload = {
+    ts: new Date().toISOString(),
+    serviceType: state.context.selectedService || "internet",
+    preference: state.context.internetPreference || null,
+    preferences: normalizeQuotePreferences(state.context.quoteBuilder?.preferences || {}),
+    lastPreview: state.context.quoteBuilder?.lastPreview || []
+  };
+  writeStore(QUOTE_BUILDER_STORE_KEY, payload);
+  applyContextPatch({ quoteBuilder: { savedAt: payload.ts } });
+  postMessage("bot", "Quote saved. You can resume this quote later in the same browser.");
+  logClient("info", "quote_builder_saved", { quotes: payload.lastPreview.length, serviceType: payload.serviceType });
+}
+
+function loadQuoteBuilderSnapshot() {
+  const stored = readStore(QUOTE_BUILDER_STORE_KEY, null);
+  if (!stored || !stored.preferences) return null;
+  const normalized = normalizeQuotePreferences(stored.preferences);
+  applyContextPatch({
+    quoteBuilder: {
+      preferences: normalized,
+      lastPreview: Array.isArray(stored.lastPreview) ? stored.lastPreview : [],
+      lastPreviewAt: stored.ts || null,
+      savedAt: stored.ts || null
+    }
+  });
+  return stored;
+}
+
+async function generateQuotePreview({ announce = true } = {}) {
+  const serviceType = state.context.intent || "home internet";
+  const preferences = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || {});
+  try {
+    const payload = await requestQuotePreview(preferences, serviceType, 3);
+    const quotes = Array.isArray(payload.quotes) ? payload.quotes : [];
+    const finalQuotes =
+      quotes.length > 0
+        ? quotes
+        : getInternetOffersByPreference(state.context.internetPreference || "value").slice(0, 3).map((offer, idx) => ({
+            offerId: offer.id,
+            name: offer.name,
+            category: offer.category,
+            monthlyPrice: Number(offer.monthlyPrice || 0),
+            devicePrice: offer.devicePrice == null ? 0 : Number(offer.devicePrice || 0),
+            installationFee: getOfferInstallationFee(offer.category),
+            rank: idx + 1,
+            reasons: ["Deterministic fallback recommendation based on your preference."]
+          }));
+    applyContextPatch({
+      quoteBuilder: {
+        preferences,
+        lastPreview: finalQuotes,
+        lastPreviewAt: new Date().toISOString()
+      }
+    });
+    if (announce) {
+      postMessage("bot", `I prepared ${finalQuotes.length} quote option(s). You can apply one directly from the quote panel.`);
+      if (finalQuotes[0]) {
+        postMessage(
+          "bot",
+          `Top recommendation: ${finalQuotes[0].name} at ${currency(Number(finalQuotes[0].monthlyPrice || 0))}/month.`
+        );
+      }
+    }
+    logClient("info", "quote_preview_generated", {
+      serviceType,
+      quoteCount: finalQuotes.length,
+      fallbackUsed: quotes.length === 0,
+      preferences
+    });
+    renderQuoteBuilderPanel();
+    return finalQuotes;
+  } catch {
+    const fallbackQuotes = getInternetOffersByPreference(state.context.internetPreference || "value").slice(0, 3).map((offer, idx) => ({
+      offerId: offer.id,
+      name: offer.name,
+      category: offer.category,
+      monthlyPrice: Number(offer.monthlyPrice || 0),
+      devicePrice: offer.devicePrice == null ? 0 : Number(offer.devicePrice || 0),
+      installationFee: getOfferInstallationFee(offer.category),
+      rank: idx + 1,
+      reasons: ["Deterministic fallback recommendation based on your preference."]
+    }));
+    applyContextPatch({
+      quoteBuilder: {
+        preferences,
+        lastPreview: fallbackQuotes,
+        lastPreviewAt: new Date().toISOString()
+      }
+    });
+    if (announce) {
+      postMessage("bot", "I couldn't build quotes right now, so I’m showing deterministic recommended plans.");
+      if (fallbackQuotes[0]) {
+        postMessage(
+          "bot",
+          `Top recommendation: ${fallbackQuotes[0].name} at ${currency(Number(fallbackQuotes[0].monthlyPrice || 0))}/month.`
+        );
+      }
+    }
+    logClient("error", "quote_preview_failed", {
+      serviceType,
+      preferences,
+      fallbackCount: fallbackQuotes.length
+    });
+    renderQuoteBuilderPanel();
+    return fallbackQuotes;
+  }
+}
+
+function getInternetPlanOptions() {
+  const quoted = state.context.quoteBuilder?.lastPreview || [];
+  if (quoted.length > 0) {
+    const mapped = quoted
+      .map((quote) => {
+        const offer = getOfferByIdSafe(quote.offerId);
+        if (!offer) return null;
+        return { ...offer, quoteRank: quote.rank, quoteReasons: quote.reasons || [] };
+      })
+      .filter(Boolean);
+    if (mapped.length > 0) return mapped;
+  }
+  return getInternetOffersByPreference(state.context.internetPreference || "value");
+}
+
+function applyQuotedPlan(offerId) {
+  const selectedPlan = getOfferByIdSafe(offerId);
+  if (!selectedPlan) {
+    postMessage("bot", "I couldn't match that quote to a plan. Please generate the quote again.");
+    return;
+  }
+  applyContextPatch({ selectedPlanId: selectedPlan.id });
+  postMessage("user", `Apply quote for ${selectedPlan.name}`);
+  postMessage("bot", `Perfect. I selected ${selectedPlan.name} at ${currency(selectedPlan.monthlyPrice)}/month.`);
+  logClient("info", "quote_plan_applied", { offerId: selectedPlan.id });
+  transitionTo(FLOW_STEPS.PLAN_CONFIRMATION, {}, { pushHistory: true, enforceContract: false });
+}
+
+function renderQuoteBuilderPanel() {
+  if (!panelQuote || !quoteBuilderContent) return;
+  const shouldShow =
+    state.context.intent === "home internet" &&
+    [FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, FLOW_STEPS.INTERNET_PLAN_PITCH].includes(state.flowStep);
+  panelQuote.classList.toggle("hidden", !shouldShow);
+  if (!shouldShow) return;
+
+  const preferences = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || {});
+  const quotes = state.context.quoteBuilder?.lastPreview || [];
+  const savedAt = state.context.quoteBuilder?.savedAt || null;
+  const quoteCards = quotes.length
+    ? quotes
+        .map(
+          (quote) => `
+          <article class="quote-card">
+            <div class="quote-rank">Quote ${quote.rank}</div>
+            <div class="quote-name">${quote.name}</div>
+            <div class="quote-price">${currency(Number(quote.monthlyPrice || 0))}/month</div>
+            <div class="quote-meta">Install: ${currency(Number(quote.installationFee || 0))}</div>
+            <div class="quote-reasons">${(quote.reasons || []).slice(0, 2).join(" ")}</div>
+            <button type="button" class="quote-apply-btn" data-offer-id="${quote.offerId}">Apply Quote ${quote.rank}</button>
+          </article>`
+        )
+        .join("")
+    : `<div class="quote-empty">No quote generated yet. Set preferences and click "Generate quote".</div>`;
+
+  quoteBuilderContent.innerHTML = `
+    <div class="quote-builder-grid">
+      <label>Budget focus <span>${Math.round(preferences.budget)}</span>
+        <input type="range" min="0" max="100" value="${preferences.budget}" data-quote-slider="budget" />
+      </label>
+      <label>Speed focus <span>${Math.round(preferences.speed)}</span>
+        <input type="range" min="0" max="100" value="${preferences.speed}" data-quote-slider="speed" />
+      </label>
+      <label>Device cost focus <span>${Math.round(preferences.deviceCost)}</span>
+        <input type="range" min="0" max="100" value="${preferences.deviceCost}" data-quote-slider="deviceCost" />
+      </label>
+    </div>
+    <div class="quote-builder-actions">
+      <button type="button" id="quote-generate-btn">Generate quote</button>
+      <button type="button" id="quote-save-btn" class="secondary">Save quote</button>
+      <button type="button" id="quote-resume-btn" class="secondary">Resume quote</button>
+    </div>
+    <div class="quote-save-note">${savedAt ? `Last saved: ${new Date(savedAt).toLocaleString()}` : "No saved quote in this browser yet."}</div>
+    <div class="quote-cards">${quoteCards}</div>
+  `;
+
+  quoteBuilderContent.querySelectorAll("[data-quote-slider]").forEach((slider) => {
+    slider.addEventListener("input", (event) => {
+      const target = event.currentTarget;
+      const key = target.dataset.quoteSlider;
+      const value = Number(target.value || 0);
+      const nextPreferences = normalizeQuotePreferences({
+        ...(state.context.quoteBuilder?.preferences || {}),
+        [key]: value
+      });
+      applyContextPatch({ quoteBuilder: { preferences: nextPreferences } });
+      const label = target.closest("label");
+      const valueEl = label ? label.querySelector("span") : null;
+      if (valueEl) valueEl.textContent = `${Math.round(value)}`;
+    });
+  });
+
+  const generateBtn = quoteBuilderContent.querySelector("#quote-generate-btn");
+  if (generateBtn) {
+    generateBtn.addEventListener("click", () => {
+      void generateQuotePreview({ announce: true });
+    });
+  }
+  const saveBtn = quoteBuilderContent.querySelector("#quote-save-btn");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", () => saveQuoteBuilderSnapshot());
+  }
+  const resumeBtn = quoteBuilderContent.querySelector("#quote-resume-btn");
+  if (resumeBtn) {
+    resumeBtn.addEventListener("click", () => {
+      const stored = loadQuoteBuilderSnapshot();
+      if (!stored) {
+        postMessage("bot", "No saved quote found yet in this browser.");
+        return;
+      }
+      postMessage("bot", "Saved quote loaded. You can regenerate or apply one of the saved options.");
+      renderQuoteBuilderPanel();
+    });
+  }
+  quoteBuilderContent.querySelectorAll(".quote-apply-btn").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const offerId = event.currentTarget.getAttribute("data-offer-id");
+      if (!offerId) return;
+      applyQuotedPlan(offerId);
+    });
+  });
+}
+
 function clearAddressTypeahead() {
   if (!addressTypeahead) return;
   addressTypeahead.innerHTML = "";
@@ -1366,10 +1752,21 @@ function postMessage(role, text, { force = false } = {}) {
   if (role === "bot" && state.muted && !force) return;
   const el = document.createElement("div");
   el.className = `msg ${role}`;
-  el.textContent = text;
+  const sourceText = String(text || "");
+  el.textContent = sourceText;
   chatWindow.appendChild(el);
   chatWindow.scrollTop = chatWindow.scrollHeight;
   if (role === "bot") {
+    const uiLanguage = getCurrentUiLanguage();
+    if (uiLanguage !== "en") {
+      el.setAttribute("data-source-text", sourceText);
+      const activeLanguage = uiLanguage;
+      void translateForUi(sourceText, activeLanguage).then((translated) => {
+        if (!el.isConnected) return;
+        if (getCurrentUiLanguage() !== activeLanguage) return;
+        el.textContent = translated || sourceText;
+      });
+    }
     trackSlaFirstReply();
   }
 }
@@ -1490,15 +1887,327 @@ function setChatInputHint(placeholder) {
   chatInput.placeholder = placeholder || "Type your message here...";
 }
 
+function normalizeLanguageCode(code = "en") {
+  const normalized = String(code || "en").toLowerCase();
+  return SUPPORTED_LANGUAGE_CODES.has(normalized) ? normalized : "en";
+}
+
+function getCurrentUiLanguage() {
+  return normalizeLanguageCode(state.context.uiLanguage || "en");
+}
+
+function getStaticTranslation(text = "", languageCode = "en") {
+  const normalizedLanguage = normalizeLanguageCode(languageCode);
+  if (normalizedLanguage === "en") return String(text || "");
+  const map = STATIC_UI_TRANSLATIONS[normalizedLanguage] || {};
+  return map[String(text || "")] || "";
+}
+
+async function translateForUi(text = "", languageCode = "en") {
+  const normalizedLanguage = normalizeLanguageCode(languageCode);
+  const sourceText = String(text || "");
+  if (!sourceText || normalizedLanguage === "en") return sourceText;
+  const staticTranslation = getStaticTranslation(sourceText, normalizedLanguage);
+  if (staticTranslation) return staticTranslation;
+  const cacheKey = `${normalizedLanguage}::${sourceText}`;
+  if (translatedTextCache.has(cacheKey)) return translatedTextCache.get(cacheKey);
+
+  const translated = await requestChatAssist(
+    "translate",
+    {
+      userMessage: sourceText,
+      deterministicData: {
+        sourceLanguage: "English",
+        targetLanguage: LANGUAGE_LABELS[normalizedLanguage] || normalizedLanguage,
+        preserveNumbers: true,
+        preserveCurrency: true
+      }
+    },
+    {
+      fallbackText: sourceText,
+      minLength: 2
+    }
+  );
+  const finalized = String(translated || sourceText).trim() || sourceText;
+  translatedTextCache.set(cacheKey, finalized);
+  return finalized;
+}
+
+function localizeQuickActionButton(button, baseLabel, languageCode) {
+  const normalizedLanguage = normalizeLanguageCode(languageCode);
+  if (!button) return;
+  if (normalizedLanguage === "en") {
+    button.textContent = baseLabel;
+    return;
+  }
+
+  const staticTranslation = getStaticTranslation(baseLabel, normalizedLanguage);
+  if (staticTranslation) {
+    button.textContent = staticTranslation;
+    return;
+  }
+
+  button.textContent = baseLabel;
+  const activeLanguage = normalizedLanguage;
+  void translateForUi(baseLabel, activeLanguage).then((translated) => {
+    if (!button.isConnected) return;
+    if (getCurrentUiLanguage() !== activeLanguage) return;
+    button.textContent = translated || baseLabel;
+  });
+}
+
+function refreshQuickActionsLanguage() {
+  const language = getCurrentUiLanguage();
+  quickActions.querySelectorAll("button[data-base-label]").forEach((button) => {
+    const baseLabel = button.getAttribute("data-base-label") || button.textContent || "";
+    localizeQuickActionButton(button, baseLabel, language);
+  });
+}
+
+function getLanguageStatusPrompt(step) {
+  switch (step) {
+    case FLOW_STEPS.CUSTOMER_STATUS_SELECTION:
+      return "Are you a new client or an existing Bell client?";
+    case FLOW_STEPS.SERVICE_SELECTION:
+      return "What service are you looking for today?";
+    case FLOW_STEPS.INTERNET_ADDRESS_REQUEST:
+      return "Please share your service address so I can confirm availability.";
+    case FLOW_STEPS.INTERNET_PRIORITY_CAPTURE:
+      return "What is your internet priority: speed, value, or performance?";
+    case FLOW_STEPS.INTERNET_PLAN_PITCH:
+      return "I will continue with your plan recommendations in this language.";
+    case FLOW_STEPS.OFFER_BROWSE:
+      return "I will continue with your offer selection in this language.";
+    case FLOW_STEPS.PAYMENT_CARD_NUMBER:
+      return "I will continue with payment details in this language.";
+    default:
+      return "Language updated. I will continue in your selected language.";
+  }
+}
+
+function syncLanguageSwitcherUi(languageCode = "en") {
+  const normalizedLanguage = normalizeLanguageCode(languageCode);
+  languageInputs.forEach((input) => {
+    input.checked = input.value === normalizedLanguage;
+  });
+  if (languageSwitcher) {
+    languageSwitcher.setAttribute("data-language", normalizedLanguage);
+  }
+}
+
+function setConversationLanguage(languageCode = "en", { announce = true } = {}) {
+  const normalizedLanguage = normalizeLanguageCode(languageCode);
+  const previousLanguage = getCurrentUiLanguage();
+  if (previousLanguage === normalizedLanguage) {
+    syncLanguageSwitcherUi(normalizedLanguage);
+    return;
+  }
+  applyContextPatch({ uiLanguage: normalizedLanguage });
+  syncLanguageSwitcherUi(normalizedLanguage);
+  refreshQuickActionsLanguage();
+  logClient("info", "language_changed", { from: previousLanguage, to: normalizedLanguage });
+
+  if (announce) {
+    const languageLabel = LANGUAGE_LABELS[normalizedLanguage] || normalizedLanguage;
+    postMessage("bot", `Language switched to ${languageLabel}.`);
+    postMessage("bot", getLanguageStatusPrompt(state.flowStep));
+  }
+}
+
 function showChoiceButtons(labels, onPick) {
   clearQuickActions();
+  const languageCode = getCurrentUiLanguage();
   labels.forEach((label) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = label;
+    button.setAttribute("data-base-label", label);
+    localizeQuickActionButton(button, label, languageCode);
     button.addEventListener("click", () => onPick(label));
     quickActions.appendChild(button);
   });
+}
+
+function resolveCardBrandForDigits(rawDigits = "") {
+  const digits = normalizeCardDigits(rawDigits);
+  const detected = detectCardBrand(digits);
+  if (detected) return detected;
+  if (/^4/.test(digits)) return "visa";
+  if (/^(5[1-5]|2[2-7])/.test(digits)) return "mastercard";
+  if (/^3[47]/.test(digits)) return "amex";
+  return "card";
+}
+
+function formatCardBrandLabel(brand = "") {
+  const normalized = String(brand || "").toLowerCase();
+  if (normalized === "visa") return "Visa";
+  if (normalized === "mastercard") return "MasterCard";
+  if (normalized === "amex") return "Amex";
+  return "card";
+}
+
+function isValidPaymentCvc(cvc = "", brand = "") {
+  const normalized = String(brand || "").toLowerCase();
+  const digits = normalizeCardDigits(cvc);
+  if (normalized === "amex") return /^\d{4}$/.test(digits);
+  return /^\d{3}$/.test(digits);
+}
+
+function submitCardNumberDigits(rawDigits = "", { echo = false } = {}) {
+  const digits = normalizeCardDigits(rawDigits);
+  if (!isValidCardNumber16(digits)) {
+    postMessage("bot", "Please enter a valid 16-digit card number using the four boxes.");
+    return false;
+  }
+  const brand = resolveCardBrandForDigits(digits);
+  applyContextPatch({
+    paymentDraft: {
+      brand,
+      last4: digits.slice(-4),
+      cardSegments: [
+        digits.slice(0, 4),
+        digits.slice(4, 8),
+        digits.slice(8, 12),
+        digits.slice(12, 16)
+      ],
+      cardValidated: true,
+      cvc: null,
+      cvcValidated: false,
+      postal: null,
+      postalValidated: false
+    }
+  });
+  if (echo) {
+    postMessage("user", `**** **** **** ${digits.slice(-4)}`);
+  }
+  transitionTo(FLOW_STEPS.PAYMENT_CARD_CVC, {}, { pushHistory: true, enforceContract: false });
+  return true;
+}
+
+function renderPaymentCardSegmentInput() {
+  clearQuickActions();
+  const wrapper = document.createElement("div");
+  wrapper.className = "card-segment-entry";
+
+  const row = document.createElement("div");
+  row.className = "card-segment-row";
+  wrapper.appendChild(row);
+
+  const seed = Array.isArray(state.context.paymentDraft?.cardSegments)
+    ? [...state.context.paymentDraft.cardSegments]
+    : ["", "", "", ""];
+  const segments = [...seed, "", "", ""].slice(0, 4).map((segment) => normalizeCardDigits(segment).slice(0, 4));
+
+  const continueBtn = document.createElement("button");
+  continueBtn.type = "button";
+  continueBtn.className = "card-segment-continue";
+  continueBtn.textContent = "Continue";
+
+  const hint = document.createElement("div");
+  hint.className = "card-segment-help";
+  hint.textContent = "Enter 16 digits. Example: 4111 1111 1111 1111";
+
+  const inputs = [];
+  const syncState = () => {
+    applyContextPatch({
+      paymentDraft: {
+        cardSegments: [...segments]
+      }
+    });
+    continueBtn.disabled = segments.join("").length !== 16;
+  };
+
+  const distributeDigits = (digits = "") => {
+    const sanitized = normalizeCardDigits(digits).slice(0, 16);
+    for (let i = 0; i < 4; i += 1) {
+      segments[i] = sanitized.slice(i * 4, i * 4 + 4);
+      if (inputs[i]) inputs[i].value = segments[i];
+    }
+    syncState();
+  };
+
+  for (let i = 0; i < 4; i += 1) {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "numeric";
+    input.autocomplete = "cc-number";
+    input.maxLength = 4;
+    input.placeholder = "0000";
+    input.value = segments[i];
+    input.setAttribute("aria-label", `Card digits ${i + 1}`);
+
+    input.addEventListener("input", (event) => {
+      const value = normalizeCardDigits(event.currentTarget.value).slice(0, 4);
+      segments[i] = value;
+      input.value = value;
+      if (value.length === 4 && i < 3) {
+        inputs[i + 1]?.focus();
+        inputs[i + 1]?.select();
+      }
+      syncState();
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Backspace" && !input.value && i > 0) {
+        inputs[i - 1]?.focus();
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const accepted = submitCardNumberDigits(segments.join(""), { echo: true });
+        if (accepted) clearQuickActions();
+      }
+    });
+
+    input.addEventListener("paste", (event) => {
+      const pasted = event.clipboardData?.getData("text") || "";
+      const digits = normalizeCardDigits(pasted);
+      if (!digits) return;
+      event.preventDefault();
+      distributeDigits(digits);
+      const firstIncomplete = segments.findIndex((segment) => segment.length < 4);
+      const focusIdx = firstIncomplete === -1 ? 3 : firstIncomplete;
+      inputs[focusIdx]?.focus();
+    });
+
+    inputs.push(input);
+    row.appendChild(input);
+  }
+
+  continueBtn.addEventListener("click", () => {
+    const accepted = submitCardNumberDigits(segments.join(""), { echo: true });
+    if (accepted) clearQuickActions();
+  });
+
+  wrapper.appendChild(continueBtn);
+  wrapper.appendChild(hint);
+  quickActions.appendChild(wrapper);
+  syncState();
+  inputs[0]?.focus();
+}
+
+function ensureAiDisclosure() {
+  if (state.context.sessionFlags?.aiDisclosureShown) return;
+  postMessage(
+    "bot",
+    "Hi, I’m Belinda, Bell’s automated AI agent. I’m not a human representative, and I can guide you through plans, offers, and checkout."
+  );
+  applyContextPatch({
+    sessionFlags: {
+      aiDisclosureShown: true
+    }
+  });
+}
+
+function getEmptyPaymentDraft() {
+  return {
+    brand: null,
+    last4: null,
+    cardSegments: ["", "", "", ""],
+    cardValidated: false,
+    cvc: null,
+    cvcValidated: false,
+    postal: null,
+    postalValidated: false
+  };
 }
 
 function showAvailabilityCard() {
@@ -1521,10 +2230,12 @@ function setPanelFocus(mode = "conversation") {
   const showOffers = mode === "offers" || mode === "offers_basket";
   const showBasket = mode === "basket" || mode === "offers_basket";
   const showCheckout = mode === "checkout";
-  const splitView = showOffers || showBasket || showCheckout;
+  const showQuote = mode === "quote";
+  const splitView = showOffers || showBasket || showCheckout || showQuote;
   panelOffers.classList.toggle("hidden", !showOffers);
   panelBasket.classList.toggle("hidden", !showBasket);
   panelCheckout.classList.toggle("hidden", !showCheckout);
+  if (panelQuote) panelQuote.classList.toggle("hidden", !showQuote);
   chatWidget.classList.toggle("expanded", splitView);
   if (chatBody) {
     chatBody.classList.toggle("split-view", splitView);
@@ -1569,6 +2280,8 @@ function resetCheckoutPanel() {
 
 function resetSessionState() {
   clearTimers();
+  const selectedLanguageInput = languageInputs.find((input) => input.checked);
+  const selectedLanguage = normalizeLanguageCode(selectedLanguageInput?.value || state.context.uiLanguage || "en");
   state.flowStep = FLOW_STEPS.INIT_CONNECTING;
   state.historyStack = [];
   state.offerPageIndex = 0;
@@ -1580,6 +2293,8 @@ function resetSessionState() {
     areaCodeRequiredForTask: false,
     customerStatusAsked: false,
     selectedEntryIntent: null,
+    uiLanguage: selectedLanguage,
+    uiLanguage: "en",
     loopGuard: {
       lastStep: null,
       lastContextHash: null,
@@ -1675,11 +2390,22 @@ function resetSessionState() {
     paymentDraft: {
       brand: null,
       last4: null,
+      cardSegments: ["", "", "", ""],
       cardValidated: false,
       cvc: null,
       cvcValidated: false,
       postal: null,
       postalValidated: false
+    },
+    quoteBuilder: {
+      preferences: {
+        budget: 55,
+        speed: 65,
+        deviceCost: 35
+      },
+      lastPreview: [],
+      lastPreviewAt: null,
+      savedAt: null
     },
     newOnboarding: {
       fullName: null,
@@ -1702,7 +2428,8 @@ function resetSessionState() {
       crossSellOptions: []
     },
     sessionFlags: {
-      orderCompleted: false
+      orderCompleted: false,
+      aiDisclosureShown: false
     },
     discountNotice: {
       lastTierAnnounced: 0
@@ -1745,6 +2472,8 @@ function resetSessionState() {
   renderCarouselPage();
   resetCheckoutPanel();
   setPanelFocus("conversation");
+  syncLanguageSwitcherUi(selectedLanguage);
+  refreshQuickActionsLanguage();
   setStatus();
 }
 
@@ -1763,6 +2492,7 @@ function getPatchedContext(patch = {}) {
   if (patch.areaCodeRequiredForTask !== undefined) next.areaCodeRequiredForTask = patch.areaCodeRequiredForTask;
   if (patch.customerStatusAsked !== undefined) next.customerStatusAsked = patch.customerStatusAsked;
   if (patch.selectedEntryIntent !== undefined) next.selectedEntryIntent = patch.selectedEntryIntent;
+  if (patch.uiLanguage !== undefined) next.uiLanguage = normalizeLanguageCode(patch.uiLanguage);
   if (patch.loopGuard) next.loopGuard = { ...next.loopGuard, ...patch.loopGuard };
   if (patch.pathMeta) next.pathMeta = { ...next.pathMeta, ...patch.pathMeta };
   if (patch.sla) next.sla = { ...next.sla, ...patch.sla };
@@ -1791,6 +2521,7 @@ function getPatchedContext(patch = {}) {
   if (patch.addressAuth) next.addressAuth = { ...next.addressAuth, ...patch.addressAuth };
   if (patch.llmStatus) next.llmStatus = { ...next.llmStatus, ...patch.llmStatus };
   if (patch.paymentDraft) next.paymentDraft = { ...next.paymentDraft, ...patch.paymentDraft };
+  if (patch.quoteBuilder) next.quoteBuilder = { ...next.quoteBuilder, ...patch.quoteBuilder };
   if (patch.payment) next.payment = { ...next.payment, ...patch.payment };
   if (patch.financing) next.financing = { ...next.financing, ...patch.financing };
   if (patch.shipping) next.shipping = { ...next.shipping, ...patch.shipping };
@@ -1800,6 +2531,41 @@ function getPatchedContext(patch = {}) {
   if (patch.corporateProfile) next.corporateProfile = { ...next.corporateProfile, ...patch.corporateProfile };
   if (patch.deviceSelection) next.deviceSelection = { ...next.deviceSelection, ...patch.deviceSelection };
   if (patch.authMeta) next.authMeta = { ...next.authMeta, ...patch.authMeta };
+
+  if (patch.customerType === "new") {
+    next.authUser = null;
+    next.existingAuthAttempt = {
+      name: null,
+      email: null,
+      phone: null,
+      status: null
+    };
+    next.authMeta = {
+      mode: next.authMeta?.mode === "new-client" ? "new-client" : null,
+      phone: next.newOnboarding?.phone || null,
+      email: next.newOnboarding?.email || null,
+      secureRef: next.authMeta?.mode === "new-client" ? next.authMeta?.secureRef || null : null
+    };
+    next.payment = {
+      method: null,
+      expectedLast4: null,
+      last4Confirmed: false,
+      cvvValidated: false,
+      verified: false,
+      token: null
+    };
+    next.cardEntry = {
+      brand: null,
+      maskedLast4: null,
+      cvcValidated: false,
+      postalValidated: false,
+      tokenized: false
+    };
+  }
+
+  if (patch.customerType === "existing") {
+    next.clientType = next.clientType || "personal";
+  }
 
   return next;
 }
@@ -1918,9 +2684,7 @@ function goBack() {
   renderStep(previous.step);
 }
 
-function renderCarouselPage() {
-  state.offerPageIndex = Math.max(0, Math.min(state.offerPageIndex, CATEGORY_PAGES.length - 1));
-  const category = CATEGORY_PAGES[state.offerPageIndex];
+function getFilteredOffersForCategory(category, { maxResults = 3 } = {}) {
   const categoryOffers = offers.filter((offer) => offer.category === category);
   let filtered = [...categoryOffers];
   if (state.context.intent && state.context.intent !== "bundle" && state.context.salesProfile.stage !== "cross_sell") {
@@ -1970,7 +2734,63 @@ function renderCarouselPage() {
     const topUp = categoryOffers.filter((offer) => !seen.has(offer.id));
     filtered = [...filtered, ...topUp];
   }
-  filtered = filtered.slice(0, 3);
+  return filtered.slice(0, maxResults);
+}
+
+function shouldInlineOfferCategory(category = "") {
+  return category === "mobility" || category === "landline";
+}
+
+function getActiveOfferCategory() {
+  state.offerPageIndex = Math.max(0, Math.min(state.offerPageIndex, CATEGORY_PAGES.length - 1));
+  return CATEGORY_PAGES[state.offerPageIndex];
+}
+
+function shouldRenderInlineOfferFlow() {
+  const category = getActiveOfferCategory();
+  return shouldInlineOfferCategory(category);
+}
+
+function presentInlineOfferChoices(category = getActiveOfferCategory()) {
+  const filtered = getFilteredOffersForCategory(category, { maxResults: 3 });
+  if (filtered.length === 0) {
+    postMessage("bot", "I couldn’t find offers for this category right now. Please try another service.");
+    return;
+  }
+  const categoryLabel = CATEGORY_LABELS[category] || category;
+  postMessage("bot", `Here are ${categoryLabel} offers I can add for you now:`);
+  filtered.forEach((offer, index) => {
+    const stockNotice =
+      offer.category === "mobility" && offer.offerType === "device"
+        ? getOfferStockState(offer)
+          ? " (In stock)"
+          : " (Out of stock, alternatives available)"
+        : "";
+    postMessage(
+      "bot",
+      `${index + 1}. ${offer.name} - ${currency(offer.monthlyPrice)}/month${stockNotice}. ${offer.description}`
+    );
+  });
+  const labels = filtered.map((offer) => `Add ${offer.name}`);
+  if (state.context.basket.length > 0) {
+    labels.push("That is all, continue");
+  }
+  showChoiceButtons(labels, (choice) => {
+    postMessage("user", choice);
+    if (choice === "That is all, continue") {
+      handleOfferContinuationChoice(choice);
+      return;
+    }
+    const selected = filtered.find((offer) => choice === `Add ${offer.name}`);
+    if (!selected) return;
+    addOfferToBasket(selected);
+  });
+}
+
+function renderCarouselPage() {
+  state.offerPageIndex = Math.max(0, Math.min(state.offerPageIndex, CATEGORY_PAGES.length - 1));
+  const category = CATEGORY_PAGES[state.offerPageIndex];
+  const filtered = getFilteredOffersForCategory(category, { maxResults: 3 });
 
   carousel.innerHTML = "";
   filtered.forEach((offer) => {
@@ -2094,7 +2914,11 @@ function addOfferToBasket(offer, { fromAlternative = false } = {}) {
   const basket = [...state.context.basket, offer];
   applyContextPatch({ basket });
   renderBasket();
-  setPanelFocus("offers_basket");
+  if (state.flowStep === FLOW_STEPS.OFFER_BROWSE && shouldRenderInlineOfferFlow()) {
+    setPanelFocus("conversation");
+  } else {
+    setPanelFocus("offers_basket");
+  }
   postMessage("bot", `Added ${offer.name} to your basket.`);
   logClient("info", "basket_item_added", { offerId: offer.id, basketSize: basket.length, fromAlternative });
   announceDiscountQualification(previousCount, basket.length);
@@ -2179,18 +3003,27 @@ function routeToCrossSellCategory(category) {
     state.offerPageIndex = 1;
     renderCarouselPage();
     postMessage("bot", "Showing internet offers. Add any option you want.");
+    if (state.flowStep === FLOW_STEPS.OFFER_BROWSE && shouldRenderInlineOfferFlow()) {
+      presentInlineOfferChoices("home internet");
+    }
     return true;
   }
   if (category === "landline") {
     state.offerPageIndex = 2;
     renderCarouselPage();
-    postMessage("bot", "Showing landline offers. Add any option you want.");
+    postMessage("bot", "Showing landline offers in chat. Add any option you want.");
+    if (state.flowStep === FLOW_STEPS.OFFER_BROWSE) {
+      presentInlineOfferChoices("landline");
+    }
     return true;
   }
   if (category === "mobility") {
     state.offerPageIndex = 0;
     renderCarouselPage();
-    postMessage("bot", "Showing mobility offers. Add any option you want.");
+    postMessage("bot", "Showing mobility offers in chat. Add any option you want.");
+    if (state.flowStep === FLOW_STEPS.OFFER_BROWSE) {
+      presentInlineOfferChoices("mobility");
+    }
     return true;
   }
   return false;
@@ -2443,6 +3276,22 @@ function continueFromSelectedIntent({ pushHistory = true } = {}) {
   const intent = normalizeEntryIntent(state.context.selectedEntryIntent || state.context.activeTask || "");
   startPath(intent);
   if (intent === "sales") {
+    if (state.context.selectedService === "internet" || state.context.intent === "home internet") {
+      if (!state.context.serviceAddress || !state.context.serviceAddressValidated) {
+        transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, { activeTask: "sales" }, { pushHistory, enforceContract: false });
+        return;
+      }
+      if (!state.context.internetPreference) {
+        transitionTo(FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, { activeTask: "sales" }, { pushHistory, enforceContract: false });
+        return;
+      }
+      if (!state.context.selectedPlanId) {
+        transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, { activeTask: "sales" }, { pushHistory, enforceContract: false });
+        return;
+      }
+      transitionTo(FLOW_STEPS.PLAN_CONFIRMATION, { activeTask: "sales" }, { pushHistory, enforceContract: false });
+      return;
+    }
     if (state.context.intent && canAccessOfferBrowse(state.context)) {
       transitionTo(FLOW_STEPS.OFFER_BROWSE, { activeTask: "sales" }, { pushHistory });
       return;
@@ -2467,6 +3316,18 @@ function continueFromSelectedIntent({ pushHistory = true } = {}) {
 }
 
 function routeAfterSalesClarification({ pushHistory = true } = {}) {
+  if (state.context.intent === "home internet") {
+    if (!state.context.serviceAddress || !state.context.serviceAddressValidated) {
+      transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, { activeTask: "sales" }, { pushHistory, enforceContract: false });
+      return;
+    }
+    if (!state.context.internetPreference) {
+      transitionTo(FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, { activeTask: "sales" }, { pushHistory, enforceContract: false });
+      return;
+    }
+    transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, { activeTask: "sales" }, { pushHistory, enforceContract: false });
+    return;
+  }
   if (canAccessOfferBrowse(state.context)) {
     transitionTo(
       FLOW_STEPS.OFFER_BROWSE,
@@ -2496,6 +3357,8 @@ async function finalizeExistingAuthentication(user, mode, rawIdentifier = "", { 
   const hash = await createIdentityHash(`${user.id}|${contact.phone || ""}|${contact.email || ""}|${Date.now()}`);
   const secureRef = `${generateSecureRef()}-${hash}`;
   applyContextPatch({
+    customerType: "existing",
+    clientType: state.context.clientType || "personal",
     authUser: user,
     areaCode: state.context.areaCode || derivedAreaCode,
     areaCodeSource: state.context.areaCode ? state.context.areaCodeSource || "user_input" : (derivedAreaCode ? "profile" : null),
@@ -2529,7 +3392,7 @@ function renderPaymentChoices(user, onPick) {
     { label: "Bell Smart Financing", value: "smart_financing", logoClass: "existing", logoText: "Bell" }
   ];
 
-  if (user?.savedCardLast4) {
+  if (state.context.customerType === "existing" && user?.savedCardLast4) {
     choices.push({
       label: `Use Existing Payment (•••• ${user.savedCardLast4})`,
       value: "existing",
@@ -2590,6 +3453,13 @@ function choosePaymentMethod(method) {
     });
     logClient("info", "financing_selected", { approvedAmount, itemCount: eligibleItems.length });
     transitionTo(FLOW_STEPS.PAYMENT_FINANCING_TERM, {}, { pushHistory: true });
+    return;
+  }
+
+  if (method === "existing" && state.context.customerType !== "existing") {
+    postMessage("bot", "Saved payment is available only for existing authenticated clients.");
+    logClient("error", "payment_existing_blocked_new_customer", { customerType: state.context.customerType || "unknown" });
+    transitionTo(FLOW_STEPS.PAYMENT_METHOD, {}, { pushHistory: false });
     return;
   }
 
@@ -2888,39 +3758,6 @@ async function processExistingAuthAttempt() {
   transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true, enforceContract: false });
 }
 
-function parseCardEntryInput(raw = "") {
-  const text = String(raw || "").trim();
-  const compact = text.replace(/\s+/g, " ");
-  const segments = compact.split(",").map((part) => part.trim()).filter(Boolean);
-
-  let cardNumber = "";
-  let cvc = "";
-  let postal = "";
-
-  const cardFromSegments = segments.find((segment) => /\d[\d\s-]{12,22}\d/.test(segment));
-  if (cardFromSegments) {
-    cardNumber = cardFromSegments.replace(/\D/g, "");
-  } else {
-    const cardMatch = compact.match(/\d[\d\s-]{12,22}\d/);
-    cardNumber = cardMatch ? cardMatch[0].replace(/\D/g, "") : "";
-  }
-
-  const cvcLabeled = compact.match(/(?:cvc|cvv)\s*[:=-]?\s*(\d{3,4})/i);
-  if (cvcLabeled) {
-    cvc = cvcLabeled[1];
-  } else if (segments.length >= 2 && /^\d{3,4}$/.test(segments[1].replace(/\D/g, ""))) {
-    cvc = segments[1].replace(/\D/g, "");
-  } else {
-    const matches = compact.match(/\b\d{3,4}\b/g) || [];
-    cvc = matches.find((candidate) => candidate !== cardNumber.slice(0, candidate.length)) || "";
-  }
-
-  const postalMatch = compact.toUpperCase().match(/[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z][ -]?\d[ABCEGHJ-NPRSTV-Z]\d/);
-  postal = postalMatch ? postalMatch[0].toUpperCase().replace(/\s+/g, "") : "";
-
-  return { cardNumber, cvc, postal };
-}
-
 function normalizeAddressSuggestionLabel(item = {}) {
   return [item.line1, item.city, item.province, item.postalCode].filter(Boolean).join(", ").trim();
 }
@@ -3038,6 +3875,16 @@ function runEligibilityCheck() {
     }
   }
   logClient("info", "eligibility_approved", { basketItems: state.context.basket.length });
+  if (state.context.customerType === "new" && !state.context.authUser) {
+    transitionTo(
+      FLOW_STEPS.PAYMENT_CARD_NUMBER,
+      {
+        paymentDraft: getEmptyPaymentDraft()
+      },
+      { pushHistory: true, enforceContract: false }
+    );
+    return;
+  }
   transitionTo(FLOW_STEPS.PAYMENT_METHOD, {}, { pushHistory: true });
 }
 
@@ -3298,8 +4145,12 @@ function renderStep(step) {
   setStatus();
   resetChatInputHint();
   if (![FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE].includes(step)) clearAddressTypeahead();
-  if ([FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SERVICE_CLARIFICATION, FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.DEVICE_OS_SELECTION].includes(step)) {
-    if (step === FLOW_STEPS.OFFER_BROWSE && state.context.basket.length > 0) {
+  if ([FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, FLOW_STEPS.INTERNET_PLAN_PITCH].includes(step)) {
+    setPanelFocus("quote");
+  } else if ([FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SERVICE_CLARIFICATION, FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.DEVICE_OS_SELECTION].includes(step)) {
+    if (step === FLOW_STEPS.OFFER_BROWSE && shouldRenderInlineOfferFlow()) {
+      setPanelFocus("conversation");
+    } else if (step === FLOW_STEPS.OFFER_BROWSE && state.context.basket.length > 0) {
       setPanelFocus("offers_basket");
     } else if (step === FLOW_STEPS.OFFER_BROWSE) {
       setPanelFocus("offers");
@@ -3332,6 +4183,7 @@ function renderStep(step) {
   } else {
     setPanelFocus("conversation");
   }
+  renderQuoteBuilderPanel();
 
   switch (step) {
     case FLOW_STEPS.INIT_CONNECTING: {
@@ -3349,7 +4201,8 @@ function renderStep(step) {
 
     case FLOW_STEPS.GREETING_CONVERSATIONAL:
       hideAvailabilityCard();
-      postMessage("bot", "Hi, I’m Belinda from Bell. How are you today, and how can I help?");
+      ensureAiDisclosure();
+      postMessage("bot", "How are you today, and how can I help?");
       transitionTo(FLOW_STEPS.CUSTOMER_STATUS_SELECTION, {}, { pushHistory: false });
       break;
 
@@ -3395,7 +4248,12 @@ function renderStep(step) {
             selectedEntryIntent: "Internet",
             activeTask: "sales",
             selectedPlanId: null,
-            internetPreference: null
+            internetPreference: null,
+            quoteBuilder: {
+              preferences: getQuoteDefaultsFromPreference("value"),
+              lastPreview: [],
+              lastPreviewAt: null
+            }
           });
           transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true });
           return;
@@ -3458,23 +4316,52 @@ function renderStep(step) {
 
     case FLOW_STEPS.INTERNET_PRIORITY_CAPTURE:
       postMessage("bot", "What is your top priority for internet: speed, value, or performance?");
-      showChoiceButtons(["Speed", "Value", "Performance"], (choice) => {
+      postMessage("bot", "You can also use the Guided Quote Builder on the right to compare plans before selecting.");
+      showChoiceButtons(["Speed", "Value", "Performance", "Build my plan"], (choice) => {
         postMessage("user", choice);
+        if (choice === "Build my plan") {
+          const defaultPrefs = getQuoteDefaultsFromPreference(state.context.internetPreference || "value");
+          applyContextPatch({ quoteBuilder: { preferences: defaultPrefs } });
+          void generateQuotePreview({ announce: true }).then(() => {
+            transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
+          });
+          return;
+        }
+        const normalizedPreference = choice.toLowerCase();
+        const defaultPrefs = getQuoteDefaultsFromPreference(normalizedPreference);
         applyContextPatch({ internetPreference: choice.toLowerCase() });
+        applyContextPatch({ quoteBuilder: { preferences: defaultPrefs } });
         transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
       });
       break;
 
     case FLOW_STEPS.INTERNET_PLAN_PITCH: {
-      const plans = getInternetOffersByPreference(state.context.internetPreference || "value");
-      postMessage("bot", "Based on your preference, here are recommended internet plans:");
+      if (!(state.context.quoteBuilder?.lastPreview || []).length) {
+        postMessage("bot", "Generating your quote recommendations now.");
+        void generateQuotePreview({ announce: true });
+      }
+      const plans = getInternetPlanOptions();
+      if (!plans.length) {
+        postMessage("bot", "I’m still preparing your internet recommendations. Please choose Generate fresh quote.");
+        showChoiceButtons(["Generate fresh quote"], (choice) => {
+          postMessage("user", choice);
+          void generateQuotePreview({ announce: true });
+        });
+        break;
+      }
+      if (state.context.quoteBuilder?.lastPreview?.length) {
+        postMessage("bot", "Here are your quote-ranked internet options:");
+      } else {
+        postMessage("bot", "Based on your preference, here are recommended internet plans:");
+      }
+      postMessage("bot", `Top recommendation: ${plans[0].name} at ${currency(plans[0].monthlyPrice)}/month.`);
       void requestChatAssist(
         "explain_recommendation",
         {
           userMessage: state.context.internetPreference || "value",
           deterministicData: {
             preference: state.context.internetPreference || "value",
-            plans: plans.map((plan) => ({ name: plan.name, monthlyPrice: plan.monthlyPrice }))
+            plans: plans.map((plan) => ({ name: plan.name, monthlyPrice: plan.monthlyPrice, quoteRank: plan.quoteRank || null }))
           }
         },
         {
@@ -3485,8 +4372,13 @@ function renderStep(step) {
         if (assistText) postMessage("bot", assistText);
       });
       const labels = plans.map((plan) => `Select ${plan.name} - ${currency(plan.monthlyPrice)}/month`);
+      labels.push("Generate fresh quote");
       showChoiceButtons(labels, (choice) => {
         postMessage("user", choice);
+        if (choice === "Generate fresh quote") {
+          void generateQuotePreview({ announce: true });
+          return;
+        }
         const selected = plans.find((plan) => choice.includes(plan.name));
         if (!selected) return;
         applyContextPatch({ selectedPlanId: selected.id });
@@ -3540,15 +4432,7 @@ function renderStep(step) {
           transitionTo(
             FLOW_STEPS.PAYMENT_CARD_NUMBER,
             {
-              paymentDraft: {
-                brand: null,
-                last4: null,
-                cardValidated: false,
-                cvc: null,
-                cvcValidated: false,
-                postal: null,
-                postalValidated: false
-              }
+              paymentDraft: getEmptyPaymentDraft()
             },
             { pushHistory: true, enforceContract: false }
           );
@@ -3569,12 +4453,20 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.PAYMENT_CARD_ENTRY:
-      transitionTo(FLOW_STEPS.PAYMENT_CARD_NUMBER, {}, { pushHistory: false, enforceContract: false });
+      transitionTo(
+        FLOW_STEPS.PAYMENT_CARD_NUMBER,
+        {
+          paymentDraft: getEmptyPaymentDraft()
+        },
+        { pushHistory: false, enforceContract: false }
+      );
       break;
 
     case FLOW_STEPS.PAYMENT_CARD_NUMBER:
-      postMessage("bot", "Enter your card number (Visa, MasterCard, or Amex).");
-      setChatInputHint("Card number");
+      postMessage("bot", "Enter your card number using the 4 boxes below (16 digits total).");
+      postMessage("bot", "Accepted brands: Visa, MasterCard, and Amex.");
+      setChatInputHint("16-digit card number (or use 4 boxes)");
+      renderPaymentCardSegmentInput();
       break;
 
     case FLOW_STEPS.PAYMENT_CARD_CVC:
@@ -3590,7 +4482,7 @@ function renderStep(step) {
     case FLOW_STEPS.PAYMENT_CARD_CONFIRM:
       postMessage(
         "bot",
-        `Please confirm payment with ${String(state.context.paymentDraft.brand || "").toUpperCase()} ending in ${state.context.paymentDraft.last4}.`
+        `Please confirm payment with ${formatCardBrandLabel(state.context.paymentDraft.brand)} ending in ${state.context.paymentDraft.last4}.`
       );
       showChoiceButtons(["Confirm payment", "Start over"], (choice) => {
         postMessage("user", choice);
@@ -3598,15 +4490,7 @@ function renderStep(step) {
           transitionTo(
             FLOW_STEPS.PAYMENT_CARD_NUMBER,
             {
-              paymentDraft: {
-                brand: null,
-                last4: null,
-                cardValidated: false,
-                cvc: null,
-                cvcValidated: false,
-                postal: null,
-                postalValidated: false
-              }
+              paymentDraft: getEmptyPaymentDraft()
             },
             { pushHistory: true, enforceContract: false }
           );
@@ -3741,9 +4625,10 @@ function renderStep(step) {
 
     case FLOW_STEPS.HELPDESK_ENTRY:
       hideAvailabilityCard();
+      ensureAiDisclosure();
       stepPrompt(
         FLOW_STEPS.HELPDESK_ENTRY,
-        "Welcome to Bell. My name is Belinda, your Bell AI assistant. What service are you shopping for today?"
+        "Welcome to Bell. I’m Belinda, your automated AI assistant. What service are you shopping for today?"
       );
       showChoiceButtons(
         [
@@ -3954,10 +4839,18 @@ function renderStep(step) {
     case FLOW_STEPS.OFFER_BROWSE:
       hideAvailabilityCard();
       refreshPromoState({ announce: true });
-      stepPrompt(
-        FLOW_STEPS.OFFER_BROWSE,
-        "I found your top 3 matched offers. Take a look and I’ll help you build the best bundle."
-      );
+      if (shouldRenderInlineOfferFlow()) {
+        stepPrompt(
+          FLOW_STEPS.OFFER_BROWSE,
+          "I found your top matched offers. I’ll present them directly here in chat so you can add them instantly."
+        );
+        presentInlineOfferChoices();
+      } else {
+        stepPrompt(
+          FLOW_STEPS.OFFER_BROWSE,
+          "I found your top 3 matched offers. Take a look and I’ll help you build the best bundle."
+        );
+      }
       break;
 
     case FLOW_STEPS.BASKET_REVIEW:
@@ -4008,7 +4901,7 @@ function renderStep(step) {
     case FLOW_STEPS.PAYMENT_METHOD:
       tokenizeBtn.disabled = false;
       const paymentProfile = getEligibilityProfile(state.context);
-      const supportsExisting = Boolean(paymentProfile?.savedCardLast4);
+      const supportsExisting = state.context.customerType === "existing" && Boolean(paymentProfile?.savedCardLast4);
       stepPrompt(
         FLOW_STEPS.PAYMENT_METHOD,
         supportsExisting
@@ -4328,6 +5221,25 @@ function normalizeCommand(text = "") {
 function handleGlobalCommands(message) {
   const cmd = normalizeCommand(message);
 
+  if (cmd.includes("language")) {
+    if (cmd.includes("english")) {
+      setConversationLanguage("en");
+      return true;
+    }
+    if (cmd.includes("french") || cmd.includes("francais") || cmd.includes("français")) {
+      setConversationLanguage("fr");
+      return true;
+    }
+    if (cmd.includes("spanish") || cmd.includes("español") || cmd.includes("espanol")) {
+      setConversationLanguage("es");
+      return true;
+    }
+    if (cmd.includes("chinese") || cmd.includes("mandarin") || cmd.includes("中文")) {
+      setConversationLanguage("zh");
+      return true;
+    }
+  }
+
   if (cmd.includes("go back") || cmd === "back" || cmd.includes("previous step")) {
     if (state.flowStep === FLOW_STEPS.PAYMENT_FINANCING_CONFIRM) {
       transitionTo(FLOW_STEPS.PAYMENT_FINANCING_TERM, {}, { pushHistory: false });
@@ -4355,7 +5267,11 @@ function handleGlobalCommands(message) {
     if (state.offerPageIndex < CATEGORY_PAGES.length - 1) {
       state.offerPageIndex += 1;
       renderCarouselPage();
-      postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+      if (shouldRenderInlineOfferFlow()) {
+        presentInlineOfferChoices();
+      } else {
+        postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+      }
     }
     return true;
   }
@@ -4364,7 +5280,11 @@ function handleGlobalCommands(message) {
     if (state.offerPageIndex > 0) {
       state.offerPageIndex -= 1;
       renderCarouselPage();
-      postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+      if (shouldRenderInlineOfferFlow()) {
+        presentInlineOfferChoices();
+      } else {
+        postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+      }
     }
     return true;
   }
@@ -4375,7 +5295,7 @@ function handleGlobalCommands(message) {
 function routeFromAgentAssist(task = "") {
   const t = String(task || "").toLowerCase();
   if (t.includes("product")) return FLOW_STEPS.INTENT_DISCOVERY;
-  if (t.includes("offer")) return FLOW_STEPS.OFFER_BROWSE;
+  if (t.includes("offer")) return FLOW_STEPS.INTENT_DISCOVERY;
   if (t.includes("troubleshoot")) return FLOW_STEPS.SUPPORT_DISCOVERY;
   if (t.includes("login") || t.includes("auth")) return FLOW_STEPS.EXISTING_AUTH_ENTRY;
   return FLOW_STEPS.HELPDESK_ENTRY;
@@ -4499,7 +5419,12 @@ async function handleChatInput(message) {
           selectedEntryIntent: "Internet",
           activeTask: "sales",
           selectedPlanId: null,
-          internetPreference: null
+          internetPreference: null,
+          quoteBuilder: {
+            preferences: getQuoteDefaultsFromPreference("value"),
+            lastPreview: [],
+            lastPreviewAt: null
+          }
         });
         transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true });
         return;
@@ -4614,23 +5539,43 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.INTERNET_PRIORITY_CAPTURE: {
+      if (/(quote|build my plan|compare)/i.test(trimmed)) {
+        const defaults = getQuoteDefaultsFromPreference(state.context.internetPreference || "value");
+        applyContextPatch({ quoteBuilder: { preferences: defaults } });
+        await generateQuotePreview({ announce: true });
+        transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
+        return;
+      }
       const preference = resolveInternetPreference(trimmed);
       if (!preference) {
         handleUnclearInput(message, "Please tell me your internet priority: speed, value, or performance.");
         return;
       }
       applyContextPatch({ internetPreference: preference });
+      applyContextPatch({ quoteBuilder: { preferences: getQuoteDefaultsFromPreference(preference) } });
       transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
       return;
     }
 
     case FLOW_STEPS.INTERNET_PLAN_PITCH: {
-      const plans = getInternetOffersByPreference(state.context.internetPreference || "value");
+      if (/(generate|refresh).*(quote)/i.test(lower) || /(quote).*(generate|refresh)/i.test(lower)) {
+        await generateQuotePreview({ announce: true });
+        return;
+      }
+      let plans = getInternetPlanOptions();
+      if (!plans.length) {
+        await generateQuotePreview({ announce: true });
+        plans = getInternetPlanOptions();
+      }
+      if (!plans.length) {
+        postMessage("bot", "I still couldn't generate plans. Please try Generate fresh quote once more.");
+        return;
+      }
       const selected = plans.find(
         (plan) => lower.includes(plan.name.toLowerCase()) || lower.includes(plan.id.toLowerCase()) || lower.includes(String(plan.monthlyPrice))
       );
       if (!selected) {
-        handleUnclearInput(message, "Please select one of the internet plans shown.");
+        handleUnclearInput(message, "Please select one of the internet plans shown, or say 'generate fresh quote'.");
         return;
       }
       applyContextPatch({ selectedPlanId: selected.id });
@@ -4701,7 +5646,13 @@ async function handleChatInput(message) {
 
     case FLOW_STEPS.CHECKOUT_INTENT_PROMPT:
       if (lower.includes("checkout") || lower.includes("yes") || lower.includes("continue")) {
-        transitionTo(FLOW_STEPS.PAYMENT_CARD_NUMBER, {}, { pushHistory: true, enforceContract: false });
+        transitionTo(
+          FLOW_STEPS.PAYMENT_CARD_NUMBER,
+          {
+            paymentDraft: getEmptyPaymentDraft()
+          },
+          { pushHistory: true, enforceContract: false }
+        );
         return;
       }
       if (lower.includes("mobility")) {
@@ -4722,71 +5673,29 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.PAYMENT_CARD_ENTRY:
-      transitionTo(FLOW_STEPS.PAYMENT_CARD_NUMBER, {}, { pushHistory: false, enforceContract: false });
+      transitionTo(
+        FLOW_STEPS.PAYMENT_CARD_NUMBER,
+        {
+          paymentDraft: getEmptyPaymentDraft()
+        },
+        { pushHistory: false, enforceContract: false }
+      );
       return;
 
     case FLOW_STEPS.PAYMENT_CARD_NUMBER: {
-      const { cardNumber, cvc, postal } = parseCardEntryInput(trimmed);
-      const brand = detectCardBrand(cardNumber);
-      if (brand && isValidCardNumberLuhn(cardNumber) && isValidCardLengthByBrand(cardNumber, brand) && cvc && postal) {
-        if (!isValidCvcByBrand(cvc, brand)) {
-          postMessage("bot", brand === "amex" ? "Please enter a valid 4-digit Amex CVC." : "Please enter a valid 3-digit card CVC.");
-          transitionTo(FLOW_STEPS.PAYMENT_CARD_CVC, { paymentDraft: { brand, last4: cardNumber.slice(-4), cardValidated: true } }, { pushHistory: true, enforceContract: false });
-          return;
-        }
-        if (!isValidCanadianPostalCode(postal)) {
-          postMessage("bot", "Please enter a valid Canadian postal code (example: M5V 2T6).");
-          transitionTo(
-            FLOW_STEPS.PAYMENT_CARD_POSTAL,
-            { paymentDraft: { brand, last4: cardNumber.slice(-4), cardValidated: true, cvc, cvcValidated: true } },
-            { pushHistory: true, enforceContract: false }
-          );
-          return;
-        }
-        applyContextPatch({
-          paymentDraft: {
-            brand,
-            last4: cardNumber.slice(-4),
-            cardValidated: true,
-            cvc,
-            cvcValidated: true,
-            postal,
-            postalValidated: true
-          }
-        });
-        transitionTo(FLOW_STEPS.PAYMENT_CARD_CONFIRM, {}, { pushHistory: true, enforceContract: false });
+      const digitsOnly = normalizeCardDigits(trimmed);
+      if (!isValidCardNumber16(digitsOnly)) {
+        postMessage("bot", "Please enter exactly 16 digits for your card number.");
         return;
       }
-
-      const digitsOnly = trimmed.replace(/\D/g, "");
-      const parsedBrand = detectCardBrand(digitsOnly);
-      if (!parsedBrand || !isValidCardNumberLuhn(digitsOnly) || !isValidCardLengthByBrand(digitsOnly, parsedBrand)) {
-        postMessage("bot", "Card number is invalid. Please enter a valid Visa, MasterCard, or Amex number.");
-        return;
-      }
-      applyContextPatch({
-        paymentDraft: {
-          brand: parsedBrand,
-          last4: digitsOnly.slice(-4),
-          cardValidated: true,
-          cvc: null,
-          cvcValidated: false,
-          postal: null,
-          postalValidated: false
-        }
-      });
-      transitionTo(FLOW_STEPS.PAYMENT_CARD_CVC, {}, { pushHistory: true, enforceContract: false });
+      submitCardNumberDigits(digitsOnly);
       return;
     }
 
     case FLOW_STEPS.PAYMENT_CARD_CVC: {
       const brand = state.context.paymentDraft.brand;
       const cvcDigits = trimmed.replace(/\D/g, "");
-      if (!brand) {
-        transitionTo(FLOW_STEPS.PAYMENT_CARD_NUMBER, {}, { pushHistory: true, enforceContract: false });
-        return;
-      }
-      if (!isValidCvcByBrand(cvcDigits, brand)) {
+      if (!isValidPaymentCvc(cvcDigits, brand)) {
         postMessage("bot", brand === "amex" ? "Please enter a valid 4-digit Amex CVC." : "Please enter a valid 3-digit card CVC.");
         return;
       }
@@ -4821,15 +5730,7 @@ async function handleChatInput(message) {
         transitionTo(
           FLOW_STEPS.PAYMENT_CARD_NUMBER,
           {
-            paymentDraft: {
-              brand: null,
-              last4: null,
-              cardValidated: false,
-              cvc: null,
-              cvcValidated: false,
-              postal: null,
-              postalValidated: false
-            }
+            paymentDraft: getEmptyPaymentDraft()
           },
           { pushHistory: true, enforceContract: false }
         );
@@ -4840,7 +5741,13 @@ async function handleChatInput(message) {
         return;
       }
       if (!state.context.paymentDraft.cardValidated || !state.context.paymentDraft.cvcValidated || !state.context.paymentDraft.postalValidated) {
-        transitionTo(FLOW_STEPS.PAYMENT_CARD_NUMBER, {}, { pushHistory: true, enforceContract: false });
+        transitionTo(
+          FLOW_STEPS.PAYMENT_CARD_NUMBER,
+          {
+            paymentDraft: getEmptyPaymentDraft()
+          },
+          { pushHistory: true, enforceContract: false }
+        );
         return;
       }
       applyContextPatch({
@@ -4860,7 +5767,7 @@ async function handleChatInput(message) {
           token: `tok_${Date.now()}`
         }
       });
-      postMessage("bot", `${String(state.context.paymentDraft.brand || "").toUpperCase()} card validated and tokenized. Proceeding to shipping.`);
+      postMessage("bot", `${formatCardBrandLabel(state.context.paymentDraft.brand)} card validated and tokenized. Proceeding to shipping.`);
       transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true, enforceContract: false });
       return;
     
@@ -5331,6 +6238,25 @@ async function handleChatInput(message) {
         );
         return;
       }
+      {
+        const activeCategory = getActiveOfferCategory();
+        const inlineFlow = shouldInlineOfferCategory(activeCategory);
+        const inlineOffers = getFilteredOffersForCategory(activeCategory, { maxResults: 3 });
+        if (inlineFlow) {
+          const typedOffer = inlineOffers.find((offer) => {
+            const normalizedName = String(offer.name || "").toLowerCase();
+            return lower.includes(normalizedName) || lower.includes(String(offer.id || "").toLowerCase());
+          });
+          if (typedOffer && (lower.includes("add") || lower.includes("select") || lower.includes("choose"))) {
+            addOfferToBasket(typedOffer);
+            return;
+          }
+          if (lower.includes("show") || lower.includes("list") || lower.includes("offers")) {
+            presentInlineOfferChoices(activeCategory);
+            return;
+          }
+        }
+      }
       if ((lower.includes("that is all") || lower.includes("that is it") || lower.includes("continue")) && state.context.basket.length > 0) {
         transitionTo(FLOW_STEPS.BASKET_REVIEW, {}, { pushHistory: true });
         return;
@@ -5358,7 +6284,11 @@ async function handleChatInput(message) {
       if (lower.includes("mobility")) {
         state.offerPageIndex = 0;
         renderCarouselPage();
-        postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+        if (shouldRenderInlineOfferFlow()) {
+          presentInlineOfferChoices("mobility");
+        } else {
+          postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+        }
         return;
       }
       if (lower.includes("internet")) {
@@ -5370,13 +6300,24 @@ async function handleChatInput(message) {
       if (lower.includes("landline") || lower.includes("home phone")) {
         state.offerPageIndex = 2;
         renderCarouselPage();
-        postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+        if (shouldRenderInlineOfferFlow()) {
+          presentInlineOfferChoices("landline");
+        } else {
+          postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+        }
         return;
       }
-      postMessage(
-        "bot",
-        "I can help with this step. You can say 'next page', 'previous page', 'checkout', 'go back', or ask for clarification."
-      );
+      if (shouldRenderInlineOfferFlow()) {
+        postMessage(
+          "bot",
+          "You can say 'add' with an offer name, ask to see offers again, continue, or choose another category."
+        );
+      } else {
+        postMessage(
+          "bot",
+          "I can help with this step. You can say 'next page', 'previous page', 'checkout', 'go back', or ask for clarification."
+        );
+      }
       handleUnclearInput(message, "I can help with this step.");
       return;
 
@@ -5465,6 +6406,10 @@ async function handleChatInput(message) {
     case FLOW_STEPS.PAYMENT_METHOD:
       if (lower.includes("smart financing") || lower.includes("bell smart financing") || lower.includes("financing")) {
         choosePaymentMethod("smart_financing");
+        return;
+      }
+      if ((lower.includes("existing") || lower.includes("saved")) && state.context.customerType !== "existing") {
+        postMessage("bot", "Saved payment can only be used by existing authenticated clients. Please choose Visa, MasterCard, Amex, or financing.");
         return;
       }
       if ((lower.includes("existing") || lower.includes("saved")) && !getEligibilityProfile(state.context)?.savedCardLast4) {
@@ -5922,7 +6867,11 @@ carouselPrevBtn.addEventListener("click", () => {
   renderCarouselPage();
   logClient("info", "carousel_page_changed", { direction: "prev", pageIndex: state.offerPageIndex });
   if (state.flowStep === FLOW_STEPS.OFFER_BROWSE) {
-    postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+    if (shouldRenderInlineOfferFlow()) {
+      presentInlineOfferChoices();
+    } else {
+      postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+    }
   }
 });
 
@@ -5932,7 +6881,11 @@ carouselNextBtn.addEventListener("click", () => {
   renderCarouselPage();
   logClient("info", "carousel_page_changed", { direction: "next", pageIndex: state.offerPageIndex });
   if (state.flowStep === FLOW_STEPS.OFFER_BROWSE) {
-    postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+    if (shouldRenderInlineOfferFlow()) {
+      presentInlineOfferChoices();
+    } else {
+      postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+    }
   }
 });
 
@@ -5971,12 +6924,27 @@ if (metricsRouteFilter) {
   });
 }
 
+if (languageInputs.length > 0) {
+  languageInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      setConversationLanguage(input.value);
+    });
+  });
+}
+
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const message = chatInput.value.trim();
   if (!message) return;
   chatInput.value = "";
-  const userMessage = state.flowStep === FLOW_STEPS.PAYMENT_CVV ? "***" : message;
+  let userMessage = message;
+  if (state.flowStep === FLOW_STEPS.PAYMENT_CVV || state.flowStep === FLOW_STEPS.PAYMENT_CARD_CVC) {
+    userMessage = "***";
+  } else if (state.flowStep === FLOW_STEPS.PAYMENT_CARD_NUMBER) {
+    const digits = normalizeCardDigits(message);
+    userMessage = digits.length >= 4 ? `**** **** **** ${digits.slice(-4)}` : "**** **** **** ****";
+  }
   postMessage("user", userMessage);
   clearAddressTypeahead();
   await handleChatInput(message);

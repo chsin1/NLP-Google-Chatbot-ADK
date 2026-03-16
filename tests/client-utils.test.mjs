@@ -17,6 +17,8 @@ import {
   normalizeCanadianPhone,
   parseCombinedOnboardingInput,
   detectCardBrand,
+  normalizeCardDigits,
+  isValidCardNumber16,
   isValidCardNumberLuhn,
   isValidCardLengthByBrand,
   isValidCvcByBrand,
@@ -137,6 +139,13 @@ test("card brand + luhn + length validations are enforced", () => {
   assert.equal(isValidCardLengthByBrand(visa, "visa"), true);
   assert.equal(isValidCardLengthByBrand(amex, "amex"), true);
   assert.equal(isValidCardLengthByBrand("411111111111111", "visa"), false);
+});
+
+test("16-digit card helper accepts exactly 16 digits", () => {
+  assert.equal(normalizeCardDigits("4111 1111 1111 1111"), "4111111111111111");
+  assert.equal(isValidCardNumber16("4111111111111111"), true);
+  assert.equal(isValidCardNumber16("4111 1111 1111 111"), false);
+  assert.equal(isValidCardNumber16("41111111111111111"), false);
 });
 
 test("isValidCvcByBrand applies brand-specific length", () => {

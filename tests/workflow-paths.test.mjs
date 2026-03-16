@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   LEGACY_FLOW_STEPS,
   PATH_STATUS,
@@ -127,4 +128,10 @@ test("loop guard marks stuck after repeated same-step no-context changes", () =>
   assert.equal(guard.stuck, false);
   guard = nextLoopGuard(guard, "HELPDESK_ENTRY", hash, 3);
   assert.equal(guard.stuck, true);
+});
+
+test("greeting includes Belinda automated AI disclosure text", () => {
+  const appCode = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(appCode, /Belinda, Bell’s automated AI agent/i);
+  assert.match(appCode, /I’m not a human representative/i);
 });
