@@ -9,9 +9,20 @@ test("server includes ChatGPT endpoints and guardrails", async () => {
   assert.match(serverCode, /\/api\/chat-assist/);
   assert.match(serverCode, /\/api\/llm-health/);
   assert.match(serverCode, /\/api\/quote-preview/);
+  assert.match(serverCode, /\/api\/handoff-summary/);
+  assert.match(serverCode, /\/api\/transcript-export/);
+  assert.match(serverCode, /\/api\/install-slots/);
   assert.match(serverCode, /exact pricing/);
   assert.match(serverCode, /payment execution/);
   assert.match(serverCode, /OPENAI_API_KEY/);
+});
+
+test("transcript export supports empty-session fallback payload", async () => {
+  const serverCode = await readFile(`${ROOT}/server.mjs`, "utf8");
+  const appCode = await readFile(`${ROOT}/app.js`, "utf8");
+  assert.match(serverCode, /Session opened\. No chat messages captured yet\./);
+  assert.doesNotMatch(serverCode, /No transcript messages provided/);
+  assert.doesNotMatch(appCode, /I need at least one message before I can export a transcript\./);
 });
 
 test("env example includes required LLM configuration keys", async () => {

@@ -76,6 +76,10 @@ test("forward path canProceed coverage for existing + checkout", () => {
   assert.equal(canProceed("PAYMENT_CARD_CONFIRM", ctx), true);
   assert.equal(canProceed("SHIPPING_SELECTION", ctx), true);
   assert.equal(canProceed("ORDER_REVIEW", ctx), true);
+  assert.equal(canProceed("BOOKING_SLOT_SELECTION", ctx), true);
+  assert.equal(canProceed("BOOKING_SLOT_CONFIRM", ctx), true);
+  assert.equal(canProceed("REMINDER_OPT_IN", ctx), true);
+  assert.equal(canProceed("REMINDER_SCHEDULED", ctx), true);
   assert.equal(canProceed("POST_CHAT_RATING", ctx), true);
   assert.equal(canProceed("ORDER_CONFIRMED", ctx), true);
 });
@@ -134,4 +138,11 @@ test("greeting includes Belinda automated AI disclosure text", () => {
   const appCode = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
   assert.match(appCode, /Belinda, Bell’s automated AI agent/i);
   assert.match(appCode, /I’m not a human representative/i);
+});
+
+test("cross-sell and inline offers include internet branch", () => {
+  const appCode = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(appCode, /Add internet offers/);
+  assert.match(appCode, /category === "home internet"/);
+  assert.match(appCode, /presentInlineOfferChoices\("home internet"\)/);
 });

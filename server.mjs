@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { classifyIntentFallbackDetailed, extractIntentEntities, rankAddressSuggestions } from "./shared/flow-utils.mjs";
 import { buildMetrics, parseJsonLines } from "./shared/metrics-utils.mjs";
 import { buildQuotePreview } from "./shared/quote-utils.mjs";
+import { buildHandoffSummary, buildTranscriptHtml } from "./shared/conversation-utils.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,7 +51,8 @@ const staticTypes = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8"
+  ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8"
 };
 
 const LLM_ENABLED = String(process.env.LLM_ENABLED || "true").toLowerCase() !== "false";
@@ -475,6 +477,71 @@ function summarizeLlmUsage(records = []) {
   };
 }
 
+function toIsoDate(value) {
+  try {
+    return new Date(value).toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
+function normalizeTranscriptMessages(messages = []) {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .map((message, idx) => ({
+      role: message?.role === "user" ? "user" : "bot",
+      text: String(message?.text || "").trim(),
+      ts: toIsoDate(message?.ts || Date.now() + idx)
+    }))
+    .filter((message) => Boolean(message.text));
+}
+
+function deriveServiceType(value = "") {
+  const lower = String(value || "").toLowerCase();
+  if (lower.includes("mob")) return "mobility";
+  if (lower.includes("land")) return "landline";
+  return "internet";
+}
+
+function derivePostalPrefix(postalCode = "") {
+  const cleaned = String(postalCode || "").trim().toUpperCase().replace(/\s+/g, "");
+  const match = cleaned.match(/^[A-Z]\d[A-Z]/);
+  return match ? match[0] : "M5V";
+}
+
+function buildInstallSlots({ postalCode = "", serviceType = "internet" } = {}) {
+  const normalizedService = deriveServiceType(serviceType);
+  const prefix = derivePostalPrefix(postalCode);
+  const windows = [
+    { id: "am", label: "9:00 AM - 11:00 AM" },
+    { id: "mid", label: "12:30 PM - 2:30 PM" },
+    { id: "eve", label: "5:30 PM - 7:30 PM" }
+  ];
+  const slots = [];
+  const now = new Date();
+  let dayOffset = 1;
+  while (slots.length < 8 && dayOffset <= 18) {
+    const d = new Date(now);
+    d.setDate(now.getDate() + dayOffset);
+    const weekday = d.getDay();
+    dayOffset += 1;
+    if (weekday === 0) continue;
+    const date = d.toISOString().slice(0, 10);
+    windows.forEach((window, index) => {
+      if (slots.length >= 8) return;
+      slots.push({
+        slotId: `${normalizedService}-${date}-${window.id}`,
+        serviceType: normalizedService,
+        date,
+        window: window.label,
+        technicianRegion: `${prefix}-${(index + 1) * 3}`,
+        available: true
+      });
+    });
+  }
+  return slots;
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -580,6 +647,116 @@ const server = createServer(async (req, res) => {
     } catch {
       json(res, 400, { error: "Invalid quote preview payload" });
     }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/handoff-summary") {
+    try {
+      const parsed = await collectRequestBody(req);
+      const sessionId = parsed.sessionId || parsed.context?.sessionId || null;
+      const messages = normalizeTranscriptMessages(parsed.messages || []);
+      const context = parsed.context || {};
+      const currentStep = String(parsed.currentStep || "");
+      const deterministicSummary = buildHandoffSummary({
+        sessionId,
+        messages,
+        context,
+        currentStep
+      });
+      const assist = await callOpenAIResponses({
+        task: "handoff_summary",
+        sessionId,
+        step: currentStep,
+        userMessage: messages[messages.length - 1]?.text || "handoff requested",
+        context,
+        deterministicData: deterministicSummary,
+        endpoint: "/api/handoff-summary"
+      });
+      const summaryText = assist.ok && assist.data?.output_text
+        ? String(assist.data.output_text).trim()
+        : deterministicSummary.summaryText;
+      await writeLog("info", {
+        event: "handoff_summary_generated",
+        details: {
+          sessionId,
+          currentStep,
+          route: deterministicSummary.summaryJson?.route || "sales"
+        }
+      });
+      json(res, 200, {
+        summaryText,
+        summaryJson: deterministicSummary.summaryJson,
+        mode: assist.ok ? "llm" : "template_fallback"
+      });
+    } catch {
+      json(res, 400, { error: "Invalid handoff summary payload" });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/transcript-export") {
+    try {
+      const parsed = await collectRequestBody(req);
+      const sessionId = parsed.sessionId || parsed.context?.sessionId || "session";
+      const context = parsed.context || {};
+      const normalizedMessages = normalizeTranscriptMessages(parsed.messages || []);
+      const messages =
+        normalizedMessages.length > 0
+          ? normalizedMessages
+          : [
+              {
+                role: "system",
+                text: "Session opened. No chat messages captured yet.",
+                ts: new Date().toISOString()
+              }
+            ];
+      const fileNameBase = `bell-chat-${String(sessionId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48) || "session"}`;
+      const summary = buildHandoffSummary({
+        sessionId,
+        messages,
+        context,
+        currentStep: parsed.currentStep || context.flowStep || ""
+      });
+      const htmlPrintable = buildTranscriptHtml({
+        sessionId,
+        context,
+        messages,
+        summary
+      });
+      const jsonPayload = {
+        sessionId,
+        exportedAt: new Date().toISOString(),
+        context,
+        summary: summary.summaryJson,
+        messages
+      };
+      await writeLog("info", {
+        event: "transcript_export_generated",
+        details: {
+          sessionId,
+          messageCount: messages.length
+        }
+      });
+      json(res, 200, {
+        htmlPrintable,
+        jsonPayload,
+        fileNameBase
+      });
+    } catch {
+      json(res, 400, { error: "Invalid transcript export payload" });
+    }
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/install-slots") {
+    const postalCode = url.searchParams.get("postalCode") || "";
+    const serviceType = url.searchParams.get("serviceType") || "internet";
+    const slots = buildInstallSlots({ postalCode, serviceType });
+    json(res, 200, {
+      serviceType: deriveServiceType(serviceType),
+      postalCode,
+      slots
+    });
     return;
   }
 

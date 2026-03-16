@@ -79,6 +79,11 @@ export function canProceed(step = "", context = {}) {
       return Boolean(context.payment?.verified);
     case "ORDER_REVIEW":
       return Boolean(context.shipping?.address);
+    case "BOOKING_SLOT_SELECTION":
+    case "BOOKING_SLOT_CONFIRM":
+    case "REMINDER_OPT_IN":
+    case "REMINDER_SCHEDULED":
+      return true;
     case "ORDER_CONFIRMED":
     case "POST_CHAT_RATING":
     case "POST_CHAT_FEEDBACK":

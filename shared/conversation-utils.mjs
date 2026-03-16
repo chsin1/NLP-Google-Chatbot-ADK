@@ -241,3 +241,119 @@ export function buildReceiptHtml(payload = {}) {
 </body>
 </html>`;
 }
+
+function summarizeBasket(basket = []) {
+  if (!Array.isArray(basket) || basket.length === 0) return "No items in basket";
+  return basket
+    .slice(0, 6)
+    .map((item) => `${item.name || "Offer"} (${fmtMoney(item.monthlyPrice || 0)}/month)`)
+    .join("; ");
+}
+
+export function buildHandoffSummary({
+  sessionId = null,
+  messages = [],
+  context = {},
+  currentStep = ""
+} = {}) {
+  const route = resolveRouteFromStep(currentStep || context?.flowStep || "", context?.activeTask || "");
+  const authState = context?.authUser
+    ? "authenticated_existing"
+    : context?.customerType === "new" && context?.newOnboarding?.fullName
+      ? "new_profile_created"
+      : context?.customerType === "new"
+        ? "new_unverified"
+        : "unknown";
+  const blockers = [];
+  if (!context?.serviceAddress && route === "sales") blockers.push("missing_service_address");
+  if (!Array.isArray(context?.basket) || context.basket.length === 0) blockers.push("empty_basket");
+  if (!context?.payment?.verified && currentStep && String(currentStep).includes("PAYMENT")) blockers.push("payment_unverified");
+  if (!context?.shipping?.address && currentStep && String(currentStep).includes("SHIPPING")) blockers.push("shipping_missing");
+
+  const summaryJson = {
+    sessionId: sessionId || context?.sessionId || null,
+    route,
+    currentStep: currentStep || context?.flowStep || null,
+    authState,
+    customerType: context?.customerType || null,
+    intent: context?.intent || context?.selectedService || null,
+    basketSummary: summarizeBasket(context?.basket || []),
+    blockers,
+    recommendedNextAction: blockers.length ? "resolve_blockers" : "continue_current_step",
+    messageCount: Array.isArray(messages) ? messages.length : 0
+  };
+
+  const summaryText =
+    `Route ${summaryJson.route}. ` +
+    `Current step ${summaryJson.currentStep || "unknown"}. ` +
+    `Auth state ${summaryJson.authState}. ` +
+    `${blockers.length ? `Blockers: ${blockers.join(", ")}.` : "No blockers detected."} ` +
+    `Basket: ${summaryJson.basketSummary}.`;
+
+  return {
+    summaryText,
+    summaryJson
+  };
+}
+
+export function buildTranscriptHtml({
+  sessionId = null,
+  context = {},
+  messages = [],
+  summary = null
+} = {}) {
+  const safeMessages = Array.isArray(messages) ? messages : [];
+  const handoff = summary?.summaryJson || buildHandoffSummary({ sessionId, messages: safeMessages, context }).summaryJson;
+  const rows = safeMessages
+    .map((message) => {
+      const role = message.role === "user" ? "Customer" : "Belinda";
+      const ts = message.ts ? new Date(message.ts).toLocaleString("en-CA") : "";
+      return `<tr><td>${esc(role)}</td><td>${esc(ts)}</td><td>${esc(message.text || "")}</td></tr>`;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Bell Transcript Export</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #1f2f46; background: #fff; }
+    .head { background: #00549a; color: #fff; padding: 16px 18px; border-radius: 10px; }
+    .sub { font-size: 12px; opacity: 0.95; margin-top: 4px; }
+    .section { margin-top: 16px; padding: 12px; border: 1px solid #dce3ee; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border-bottom: 1px solid #dce3ee; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #f4f8ff; }
+    .actions { margin-top: 16px; display: flex; gap: 8px; }
+    button { border: 1px solid #00549a; color: #00549a; background: #fff; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <h2>Bell Corporate Conversation Transcript</h2>
+    <div class="sub">Session ${esc(sessionId || context?.sessionId || "unknown")} | Generated ${esc(new Date().toISOString())}</div>
+  </div>
+  <div class="section">
+    <h3>Handoff Summary</h3>
+    <p><strong>Route:</strong> ${esc(handoff.route || "sales")}</p>
+    <p><strong>Current Step:</strong> ${esc(handoff.currentStep || "unknown")}</p>
+    <p><strong>Customer Type:</strong> ${esc(handoff.customerType || "unknown")}</p>
+    <p><strong>Intent:</strong> ${esc(handoff.intent || "unknown")}</p>
+    <p><strong>Blockers:</strong> ${esc((handoff.blockers || []).join(", ") || "none")}</p>
+    <p><strong>Recommended Next Action:</strong> ${esc(handoff.recommendedNextAction || "continue_current_step")}</p>
+  </div>
+  <div class="section">
+    <h3>Transcript</h3>
+    <table>
+      <thead><tr><th>Role</th><th>Timestamp</th><th>Message</th></tr></thead>
+      <tbody>${rows || "<tr><td colspan='3'>No transcript messages captured.</td></tr>"}</tbody>
+    </table>
+  </div>
+  <div class="actions">
+    <button onclick="window.print()">Print / Save as PDF</button>
+    <button onclick="window.close()">Close</button>
+  </div>
+</body>
+</html>`;
+}

@@ -135,6 +135,20 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
   let shippingLookupRequested = 0;
   let shippingLookupSelected = 0;
   let shippingManualEntered = 0;
+  let quoteComparisonViewed = 0;
+  let quoteDiffRendered = 0;
+  let handoffSummaryGenerated = 0;
+  let transcriptExportPdf = 0;
+  let transcriptExportJson = 0;
+  let bookingSlotsViewed = 0;
+  let bookingSlotSelected = 0;
+  let reminderOptInYes = 0;
+  let reminderOptInNo = 0;
+  let reminderScheduled = 0;
+  let themeChanged = 0;
+  let darkThemeChanged = 0;
+  let pwaInstallPrompted = 0;
+  let offlineDraftRestored = 0;
   let pathStartedCount = 0;
   let pathCompletedCount = 0;
   let pathFailedCount = 0;
@@ -329,6 +343,49 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
         break;
       case "shipping_manual_entered":
         shippingManualEntered += 1;
+        break;
+      case "quote_comparison_viewed":
+        quoteComparisonViewed += 1;
+        break;
+      case "quote_diff_rendered":
+        quoteDiffRendered += 1;
+        break;
+      case "handoff_summary_generated":
+        handoffSummaryGenerated += 1;
+        break;
+      case "transcript_exported_pdf":
+        transcriptExportPdf += 1;
+        break;
+      case "transcript_exported_json":
+        transcriptExportJson += 1;
+        break;
+      case "booking_slots_viewed":
+        bookingSlotsViewed += 1;
+        break;
+      case "booking_slot_selected":
+        bookingSlotSelected += 1;
+        break;
+      case "reminder_opt_in":
+        if (String(details.choice || "").toLowerCase().includes("yes")) {
+          reminderOptInYes += 1;
+        } else {
+          reminderOptInNo += 1;
+        }
+        break;
+      case "reminder_scheduled":
+        reminderScheduled += 1;
+        break;
+      case "theme_changed":
+        themeChanged += 1;
+        if (String(details.mode || "").toLowerCase() === "dark") {
+          darkThemeChanged += 1;
+        }
+        break;
+      case "pwa_install_prompted":
+        pwaInstallPrompted += 1;
+        break;
+      case "offline_draft_restored":
+        offlineDraftRestored += 1;
         break;
       case "path_started":
         pathStartedCount += 1;
@@ -556,6 +613,11 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
     baselines.activityVolume,
     100 + interactionVolume + sessionsCount * 5
   );
+  const quoteToCheckoutRatePercent = pct(orderAttempt, quoteComparisonViewed);
+  const bookingCompletionRatePercent = pct(bookingSlotSelected, bookingSlotsViewed);
+  const reminderOptInRatePercent = pct(reminderOptInYes, reminderOptInYes + reminderOptInNo);
+  const exportUsageRatePercent = pct(transcriptExportPdf + transcriptExportJson, sessionsCount || 1);
+  const darkModeAdoptionPercent = pct(darkThemeChanged, themeChanged || 1);
   const replyRatePercent = pct(authSuccess + orderAttempt + paymentConfirmed, Math.max(1, interactionVolume));
   const qualifiedConversionRatePercent = pct(orderSuccess, Math.max(authSuccess, 1));
   const customerAcquisitionValueCad = round2(
@@ -639,6 +701,20 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
       shippingLookupRequestedCount: shippingLookupRequested,
       shippingLookupSelectedCount: shippingLookupSelected,
       shippingManualEnteredCount: shippingManualEntered,
+      quoteComparisonViewedCount: quoteComparisonViewed,
+      quoteDiffRenderedCount: quoteDiffRendered,
+      handoffSummaryGeneratedCount: handoffSummaryGenerated,
+      transcriptExportPdfCount: transcriptExportPdf,
+      transcriptExportJsonCount: transcriptExportJson,
+      bookingSlotsViewedCount: bookingSlotsViewed,
+      bookingSlotSelectedCount: bookingSlotSelected,
+      reminderOptInYesCount: reminderOptInYes,
+      reminderOptInNoCount: reminderOptInNo,
+      reminderScheduledCount: reminderScheduled,
+      themeChangedCount: themeChanged,
+      darkThemeChangedCount: darkThemeChanged,
+      pwaInstallPromptedCount: pwaInstallPrompted,
+      offlineDraftRestoredCount: offlineDraftRestored,
       pathStartedCount,
       pathCompletedCount,
       pathFailedCount,
@@ -657,6 +733,11 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
       offerPresentationSeconds,
       checkoutCompletionMinutes,
       maxClarifyRetries,
+      quoteToCheckoutRatePercent,
+      bookingCompletionRatePercent,
+      reminderOptInRatePercent,
+      exportUsageRatePercent,
+      darkModeAdoptionPercent,
       slaOverallHealthScore: overallHealthScore,
       slaBreachCount: totalSlaBreaches
     },
@@ -670,7 +751,12 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
       { key: "qualified_conversion_rate", label: "Qualified Conversion Rate (%)", value: qualifiedConversionRatePercent },
       { key: "customer_lifetime_value", label: "Customer Lifetime Value (CAD)", value: customerLifetimeValueCad },
       { key: "monthly_recurring_revenue", label: "Monthly Recurring Revenue (CAD)", value: monthlyRecurringRevenueCad },
-      { key: "pipeline_value", label: "Pipeline Value (CAD)", value: pipelineValueCad }
+      { key: "pipeline_value", label: "Pipeline Value (CAD)", value: pipelineValueCad },
+      { key: "quote_to_checkout_rate", label: "Quote to Checkout Rate (%)", value: quoteToCheckoutRatePercent },
+      { key: "booking_completion_rate", label: "Booking Completion Rate (%)", value: bookingCompletionRatePercent },
+      { key: "reminder_opt_in_rate", label: "Reminder Opt-in Rate (%)", value: reminderOptInRatePercent },
+      { key: "export_usage_rate", label: "Export Usage Rate (%)", value: exportUsageRatePercent },
+      { key: "dark_mode_adoption", label: "Dark Mode Adoption (%)", value: darkModeAdoptionPercent }
     ],
     monthlySnapshots,
     sessionInteractions,

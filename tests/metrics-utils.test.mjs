@@ -52,7 +52,10 @@ test("buildMetrics aggregates KPI values and route breakdown", () => {
   assert.equal(metrics.qaSignals.entries, 1);
   assert.equal(metrics.routeBreakdown.find((r) => r.route === "sales").orderSuccess, 1);
   assert.equal(metrics.pathSets.completedUnique, 1);
-  assert.equal(metrics.businessKpis.length, 10);
+  assert.ok(metrics.businessKpis.length >= 10);
+  assert.ok(metrics.businessKpis.some((kpi) => kpi.key === "quote_to_checkout_rate"));
+  assert.ok(metrics.businessKpis.some((kpi) => kpi.key === "booking_completion_rate"));
+  assert.ok(metrics.businessKpis.some((kpi) => kpi.key === "reminder_opt_in_rate"));
   assert.ok(metrics.kpis.monthlyRecurringRevenueCad >= 100);
   assert.ok(metrics.kpis.pipelineValueCad >= 100);
   assert.ok(metrics.monthlySnapshots.length >= 6);

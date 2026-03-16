@@ -95,7 +95,11 @@ const FLOW_STEPS = {
   SHIPPING_MANUAL_ENTRY: "SHIPPING_MANUAL_ENTRY",
   SHIPPING_LOOKUP: "SHIPPING_LOOKUP",
   ORDER_REVIEW: "ORDER_REVIEW",
-  ORDER_CONFIRMED: "ORDER_CONFIRMED"
+  ORDER_CONFIRMED: "ORDER_CONFIRMED",
+  BOOKING_SLOT_SELECTION: "BOOKING_SLOT_SELECTION",
+  BOOKING_SLOT_CONFIRM: "BOOKING_SLOT_CONFIRM",
+  REMINDER_OPT_IN: "REMINDER_OPT_IN",
+  REMINDER_SCHEDULED: "REMINDER_SCHEDULED"
 };
 
 const STEP_CONTRACT = {
@@ -172,7 +176,7 @@ const STEP_CONTRACT = {
     fallbackTarget: FLOW_STEPS.NEW_ACCOUNT_CREATED_CONFIRM
   },
   [FLOW_STEPS.CHECKOUT_INTENT_PROMPT]: {
-    validInputs: ["checkout", "add mobility", "add landline", "not now"],
+    validInputs: ["checkout", "add mobility", "add internet", "add landline", "not now"],
     requiredContext: ["selectedPlanId"],
     allowedNext: [FLOW_STEPS.PAYMENT_CARD_NUMBER, FLOW_STEPS.PAYMENT_CARD_ENTRY, FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.ORDER_CONFIRMED],
     fallbackTarget: FLOW_STEPS.CHECKOUT_INTENT_PROMPT
@@ -278,6 +282,30 @@ const STEP_CONTRACT = {
     requiredContext: ["basket"],
     allowedNext: [FLOW_STEPS.ELIGIBILITY_CHECK],
     fallbackTarget: FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE
+  },
+  [FLOW_STEPS.BOOKING_SLOT_SELECTION]: {
+    validInputs: ["slot selection"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.BOOKING_SLOT_CONFIRM, FLOW_STEPS.REMINDER_OPT_IN],
+    fallbackTarget: FLOW_STEPS.BOOKING_SLOT_SELECTION
+  },
+  [FLOW_STEPS.BOOKING_SLOT_CONFIRM]: {
+    validInputs: ["confirm booking", "change slot"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.REMINDER_OPT_IN, FLOW_STEPS.BOOKING_SLOT_SELECTION],
+    fallbackTarget: FLOW_STEPS.BOOKING_SLOT_CONFIRM
+  },
+  [FLOW_STEPS.REMINDER_OPT_IN]: {
+    validInputs: ["yes", "no"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.REMINDER_SCHEDULED, FLOW_STEPS.POST_CHAT_RATING],
+    fallbackTarget: FLOW_STEPS.REMINDER_OPT_IN
+  },
+  [FLOW_STEPS.REMINDER_SCHEDULED]: {
+    validInputs: ["continue"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.POST_CHAT_RATING],
+    fallbackTarget: FLOW_STEPS.REMINDER_SCHEDULED
   }
 };
 
@@ -465,7 +493,7 @@ const offers = [
     category: "mobility",
     name: "Google Pixel 10 + Premium 200",
     description: "Large-data mobility package with international calling add-on option.",
-    monthlyPrice: 109,
+    monthlyPrice: 100,
     osType: "android",
     deviceModel: "Pixel 10",
     offerType: "device",
@@ -541,7 +569,7 @@ const offers = [
     category: "home internet",
     name: "Fibe Gigabit 1.5",
     description: "Up to 1.5 Gbps download and up to 940 Mbps upload for high-demand homes.",
-    monthlyPrice: 110,
+    monthlyPrice: 100,
     financingEligible: false,
     devicePrice: null,
     minCreditScore: 600,
@@ -706,6 +734,9 @@ const llmStatusChip = document.getElementById("llm-status");
 const llmStatusText = document.getElementById("llm-status-text");
 const languageSwitcher = document.getElementById("language-switcher");
 const languageInputs = Array.from(document.querySelectorAll("input[name='chat-language']"));
+const themeSwitcher = document.getElementById("theme-switcher");
+const themeInputs = Array.from(document.querySelectorAll("input[name='chat-theme']"));
+const installAppBtn = document.getElementById("install-app-btn");
 const openChatHeader = document.getElementById("open-chat-header");
 const openChatOffers = document.getElementById("open-chat-offers");
 const autoLoginBtn = document.getElementById("auto-login-btn");
@@ -716,6 +747,7 @@ const loginSections = document.getElementById("login-sections");
 const chatMenuBtn = document.getElementById("chat-menu-btn");
 const chatMenu = document.getElementById("chat-menu");
 const muteChatBtn = document.getElementById("mute-chat-btn");
+const exportTranscriptBtn = document.getElementById("export-transcript-btn");
 const refreshChatBtn = document.getElementById("refresh-chat-btn");
 const endChatBtn = document.getElementById("end-chat-btn");
 
@@ -761,6 +793,8 @@ const journeyProgress = document.getElementById("journey-progress");
 const state = {
   chatStarted: false,
   muted: false,
+  transcript: [],
+  deferredInstallPrompt: null,
   flowStep: FLOW_STEPS.INIT_CONNECTING,
   historyStack: [],
   offerPageIndex: 0,
@@ -856,6 +890,26 @@ const state = {
       lookupQuery: null,
       suggestions: []
     },
+    booking: {
+      slots: [],
+      selectedSlot: null,
+      confirmed: false
+    },
+    reminders: {
+      permission: "default",
+      scheduledAt: null
+    },
+    handoffPacket: null,
+    transcriptExportMeta: null,
+    theme: "system",
+    pwa: {
+      installable: false,
+      installed: false
+    },
+    offlineDraft: {
+      input: "",
+      restoredAt: null
+    },
     serviceAddress: null,
     serviceAddressValidated: false,
     addressAuth: {
@@ -887,7 +941,8 @@ const state = {
       },
       lastPreview: [],
       lastPreviewAt: null,
-      savedAt: null
+      savedAt: null,
+      lastDiff: null
     },
     newOnboarding: {
       fullName: null,
@@ -944,8 +999,23 @@ const state = {
 };
 
 const conversationStyle = {
+  [FLOW_STEPS.GREETING_CONVERSATIONAL]: "consultative",
   [FLOW_STEPS.HELPDESK_ENTRY]: "consultative",
   [FLOW_STEPS.CUSTOMER_STATUS_SELECTION]: "consultative",
+  [FLOW_STEPS.SERVICE_SELECTION]: "consultative",
+  [FLOW_STEPS.INTERNET_ADDRESS_REQUEST]: "consultative",
+  [FLOW_STEPS.INTERNET_PRIORITY_CAPTURE]: "consultative",
+  [FLOW_STEPS.INTERNET_PLAN_PITCH]: "consultative",
+  [FLOW_STEPS.PLAN_CONFIRMATION]: "consultative",
+  [FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE]: "consultative",
+  [FLOW_STEPS.CHECKOUT_INTENT_PROMPT]: "consultative",
+  [FLOW_STEPS.PAYMENT_CARD_NUMBER]: "consultative",
+  [FLOW_STEPS.PAYMENT_CARD_CVC]: "consultative",
+  [FLOW_STEPS.PAYMENT_CARD_POSTAL]: "consultative",
+  [FLOW_STEPS.SHIPPING_SELECTION]: "consultative",
+  [FLOW_STEPS.ORDER_REVIEW]: "consultative",
+  [FLOW_STEPS.BOOKING_SLOT_SELECTION]: "consultative",
+  [FLOW_STEPS.REMINDER_OPT_IN]: "consultative",
   [FLOW_STEPS.EXISTING_AUTH_MODE]: "consultative",
   [FLOW_STEPS.NEW_ONBOARD_NAME]: "consultative",
   [FLOW_STEPS.INTENT_DISCOVERY]: "consultative",
@@ -996,6 +1066,8 @@ async function createIdentityHash(value) {
 const KPI_SNAPSHOT_STORE_KEY = "bell_sales_kpi_snapshots_v1";
 const KPI_SESSIONS_STORE_KEY = "bell_sales_kpi_sessions_v1";
 const QUOTE_BUILDER_STORE_KEY = "bell_quote_builder_v1";
+const CHAT_THEME_STORE_KEY = "bell_chat_theme_v1";
+const OFFLINE_DRAFT_STORE_KEY = "bell_chat_offline_draft_v1";
 const DEFAULT_BUSINESS_KPIS = [
   { key: "mean_time_to_completion", label: "Mean Time To Completion (min)", value: 12.4 },
   { key: "customer_acquisition_value", label: "Customer Acquisition Value (CAD)", value: 145 },
@@ -1006,7 +1078,12 @@ const DEFAULT_BUSINESS_KPIS = [
   { key: "qualified_conversion_rate", label: "Qualified Conversion Rate (%)", value: 62.3 },
   { key: "customer_lifetime_value", label: "Customer Lifetime Value (CAD)", value: 980 },
   { key: "monthly_recurring_revenue", label: "Monthly Recurring Revenue (CAD)", value: 420 },
-  { key: "pipeline_value", label: "Pipeline Value (CAD)", value: 760 }
+  { key: "pipeline_value", label: "Pipeline Value (CAD)", value: 760 },
+  { key: "quote_to_checkout_rate", label: "Quote to Checkout Rate (%)", value: 52.4 },
+  { key: "booking_completion_rate", label: "Booking Completion Rate (%)", value: 48.2 },
+  { key: "reminder_opt_in_rate", label: "Reminder Opt-in Rate (%)", value: 61.5 },
+  { key: "export_usage_rate", label: "Export Usage Rate (%)", value: 37.8 },
+  { key: "dark_mode_adoption", label: "Dark Mode Adoption (%)", value: 29.1 }
 ];
 
 function formatKpiValue(label, value) {
@@ -1035,6 +1112,68 @@ function writeStore(key, value) {
   } catch {
     // local storage failures should never block chat flow
   }
+}
+
+function resolveThemeMode(mode = "system") {
+  const value = String(mode || "").toLowerCase();
+  return ["light", "dark", "system"].includes(value) ? value : "system";
+}
+
+function syncThemeSwitcherUi(mode = "system") {
+  const normalized = resolveThemeMode(mode);
+  themeInputs.forEach((input) => {
+    input.checked = input.value === normalized;
+  });
+}
+
+function applyTheme(mode = "system", { persist = true } = {}) {
+  const normalized = resolveThemeMode(mode);
+  const resolved =
+    normalized === "system"
+      ? (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      : normalized;
+  document.documentElement.setAttribute("data-theme", resolved);
+  syncThemeSwitcherUi(normalized);
+  applyContextPatch({ theme: normalized });
+  if (persist) {
+    writeStore(CHAT_THEME_STORE_KEY, { mode: normalized });
+  }
+  logClient("info", "theme_changed", { mode: normalized, resolved });
+}
+
+function clearOfflineDraft() {
+  writeStore(OFFLINE_DRAFT_STORE_KEY, null);
+}
+
+function saveOfflineDraft() {
+  const payload = {
+    ts: new Date().toISOString(),
+    step: state.flowStep,
+    input: chatInput?.value || "",
+    context: {
+      sessionId: state.context.sessionId,
+      customerType: state.context.customerType,
+      intent: state.context.intent,
+      basketCount: state.context.basket.length
+    }
+  };
+  writeStore(OFFLINE_DRAFT_STORE_KEY, payload);
+}
+
+function restoreOfflineDraft() {
+  const saved = readStore(OFFLINE_DRAFT_STORE_KEY, null);
+  if (!saved || !saved.input) return;
+  if (chatInput) {
+    chatInput.value = saved.input;
+  }
+  applyContextPatch({
+    offlineDraft: {
+      input: saved.input,
+      restoredAt: saved.ts || new Date().toISOString()
+    }
+  });
+  postMessage("bot", "I restored your unsent draft from this browser session.");
+  logClient("info", "offline_draft_restored", { step: saved.step || null });
 }
 
 function mergeMonthlySnapshots(existing = [], incoming = []) {
@@ -1268,7 +1407,19 @@ function stepToJourneyStage(step) {
   if (
     [FLOW_STEPS.SHIPPING_SELECTION, FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.SHIPPING_LOOKUP].includes(step)
   ) return 4;
-  if ([FLOW_STEPS.ORDER_REVIEW, FLOW_STEPS.ORDER_CONFIRMED, FLOW_STEPS.POST_CHAT_RATING, FLOW_STEPS.POST_CHAT_FEEDBACK, FLOW_STEPS.AUXILIARY_ASSIST].includes(step)) return 5;
+  if (
+    [
+      FLOW_STEPS.ORDER_REVIEW,
+      FLOW_STEPS.ORDER_CONFIRMED,
+      FLOW_STEPS.BOOKING_SLOT_SELECTION,
+      FLOW_STEPS.BOOKING_SLOT_CONFIRM,
+      FLOW_STEPS.REMINDER_OPT_IN,
+      FLOW_STEPS.REMINDER_SCHEDULED,
+      FLOW_STEPS.POST_CHAT_RATING,
+      FLOW_STEPS.POST_CHAT_FEEDBACK,
+      FLOW_STEPS.AUXILIARY_ASSIST
+    ].includes(step)
+  ) return 5;
   return -1;
 }
 
@@ -1435,6 +1586,176 @@ async function requestChatAssist(task, payload = {}, { fallbackText = "", minLen
   }
 }
 
+async function requestHandoffSummary({ currentStep = state.flowStep } = {}) {
+  try {
+    const response = await fetch("/api/handoff-summary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: state.context.sessionId,
+        currentStep,
+        context: {
+          sessionId: state.context.sessionId,
+          customerType: state.context.customerType,
+          intent: state.context.intent,
+          selectedService: state.context.selectedService,
+          activeTask: state.context.activeTask,
+          flowStep: state.flowStep,
+          authUser: state.context.authUser ? { id: state.context.authUser.id, name: state.context.authUser.name } : null,
+          basket: state.context.basket,
+          payment: state.context.payment,
+          shipping: state.context.shipping,
+          serviceAddress: state.context.serviceAddress
+        },
+        messages: state.transcript.slice(-100)
+      })
+    });
+    if (!response.ok) throw new Error("handoff summary unavailable");
+    const payload = await response.json();
+    if (payload?.summaryJson) {
+      applyContextPatch({ handoffPacket: payload.summaryJson });
+      logClient("info", "handoff_summary_generated", {
+        route: payload.summaryJson.route || "sales",
+        currentStep: payload.summaryJson.currentStep || state.flowStep
+      });
+    }
+    return payload?.summaryText || "";
+  } catch {
+    return "";
+  }
+}
+
+function downloadJsonFile(payload, fileName) {
+  try {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch {
+    postMessage("bot", "I couldn't download the JSON file automatically.");
+  }
+}
+
+async function exportTranscript() {
+  try {
+    const sessionMessages = state.transcript.length
+      ? state.transcript
+      : [
+          {
+            role: "system",
+            text: "Session opened. No chat messages captured yet.",
+            ts: new Date().toISOString()
+          }
+        ];
+    const response = await fetch("/api/transcript-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: state.context.sessionId,
+        currentStep: state.flowStep,
+        format: "pdf+json",
+        context: {
+          sessionId: state.context.sessionId,
+          customerType: state.context.customerType,
+          intent: state.context.intent,
+          selectedService: state.context.selectedService,
+          flowStep: state.flowStep,
+          activeTask: state.context.activeTask,
+          basket: state.context.basket,
+          payment: state.context.payment,
+          shipping: state.context.shipping,
+          authUser: state.context.authUser ? { id: state.context.authUser.id, name: state.context.authUser.name } : null
+        },
+        messages: sessionMessages
+      })
+    });
+    if (!response.ok) throw new Error("transcript export unavailable");
+    const payload = await response.json();
+    applyContextPatch({
+      transcriptExportMeta: {
+        exportedAt: new Date().toISOString(),
+        fileNameBase: payload.fileNameBase
+      }
+    });
+    const receiptWindow = window.open("about:blank", "_blank", "width=980,height=820");
+    if (receiptWindow && payload.htmlPrintable) {
+      receiptWindow.document.write(payload.htmlPrintable);
+      receiptWindow.document.close();
+      logClient("info", "transcript_exported_pdf", {
+        sessionId: state.context.sessionId,
+        fileNameBase: payload.fileNameBase
+      });
+    } else {
+      postMessage("bot", "Transcript preview window was blocked. Please allow pop-ups and try again.");
+    }
+    if (payload.jsonPayload) {
+      downloadJsonFile(payload.jsonPayload, `${payload.fileNameBase || "bell-chat"}.json`);
+      logClient("info", "transcript_exported_json", {
+        sessionId: state.context.sessionId,
+        fileNameBase: payload.fileNameBase
+      });
+    }
+    postMessage("bot", "Transcript export is ready. I opened a printable view and downloaded the JSON summary.");
+  } catch {
+    postMessage("bot", "Transcript export is unavailable right now. Please try again.");
+  }
+}
+
+async function fetchInstallSlots() {
+  const postalCode = state.context.paymentDraft?.postal || "M5V2T6";
+  const serviceType = state.context.selectedService || state.context.intent || "internet";
+  const params = new URLSearchParams({
+    postalCode,
+    serviceType
+  });
+  const response = await fetch(`/api/install-slots?${params.toString()}`);
+  if (!response.ok) throw new Error("install slots unavailable");
+  const payload = await response.json();
+  return Array.isArray(payload.slots) ? payload.slots : [];
+}
+
+function computeReminderTimestamp(slot = null) {
+  if (!slot?.date || !slot?.window) return null;
+  const hourMatch = String(slot.window).match(/(\d{1,2}):?(\d{0,2})\s*(AM|PM)/i);
+  if (!hourMatch) return null;
+  let hour = Number(hourMatch[1] || 9);
+  const minute = Number(hourMatch[2] || 0);
+  const meridiem = String(hourMatch[3] || "AM").toUpperCase();
+  if (meridiem === "PM" && hour < 12) hour += 12;
+  if (meridiem === "AM" && hour === 12) hour = 0;
+  const target = new Date(`${slot.date}T00:00:00`);
+  target.setHours(hour, minute, 0, 0);
+  const reminder = new Date(target.getTime() - 60 * 60 * 1000);
+  return reminder.toISOString();
+}
+
+async function scheduleBrowserReminder(slot) {
+  if (!("Notification" in window)) {
+    applyContextPatch({ reminders: { permission: "unsupported", scheduledAt: null } });
+    return { ok: false, reason: "unsupported" };
+  }
+  let permission = Notification.permission;
+  if (permission === "default") {
+    permission = await Notification.requestPermission();
+  }
+  applyContextPatch({ reminders: { permission } });
+  if (permission !== "granted") {
+    return { ok: false, reason: permission };
+  }
+  const scheduledAt = computeReminderTimestamp(slot);
+  applyContextPatch({ reminders: { permission, scheduledAt } });
+  logClient("info", "reminder_scheduled", {
+    scheduledAt,
+    slotId: slot?.slotId || null
+  });
+  return { ok: true, scheduledAt };
+}
+
 function getQuoteDefaultsFromPreference(preference = "") {
   const pref = String(preference || "").toLowerCase();
   if (pref.includes("speed")) {
@@ -1525,6 +1846,8 @@ function loadQuoteBuilderSnapshot() {
 async function generateQuotePreview({ announce = true } = {}) {
   const serviceType = state.context.intent || "home internet";
   const preferences = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || {});
+  const previousPreview = Array.isArray(state.context.quoteBuilder?.lastPreview) ? state.context.quoteBuilder.lastPreview : [];
+  const previousTop = previousPreview[0] || null;
   try {
     const payload = await requestQuotePreview(preferences, serviceType, 3);
     const quotes = Array.isArray(payload.quotes) ? payload.quotes : [];
@@ -1541,11 +1864,17 @@ async function generateQuotePreview({ announce = true } = {}) {
             rank: idx + 1,
             reasons: ["Deterministic fallback recommendation based on your preference."]
           }));
+    const nextTop = finalQuotes[0] || null;
+    const diffText =
+      previousTop && nextTop
+        ? `Top plan changed from ${previousTop.name} (${currency(Number(previousTop.monthlyPrice || 0))}/month) to ${nextTop.name} (${currency(Number(nextTop.monthlyPrice || 0))}/month).`
+        : null;
     applyContextPatch({
       quoteBuilder: {
         preferences,
         lastPreview: finalQuotes,
-        lastPreviewAt: new Date().toISOString()
+        lastPreviewAt: new Date().toISOString(),
+        lastDiff: diffText
       }
     });
     if (announce) {
@@ -1563,6 +1892,16 @@ async function generateQuotePreview({ announce = true } = {}) {
       fallbackUsed: quotes.length === 0,
       preferences
     });
+    logClient("info", "quote_comparison_viewed", {
+      serviceType,
+      quoteCount: finalQuotes.length
+    });
+    if (diffText) {
+      logClient("info", "quote_diff_rendered", {
+        serviceType,
+        diff: diffText
+      });
+    }
     renderQuoteBuilderPanel();
     return finalQuotes;
   } catch {
@@ -1576,11 +1915,17 @@ async function generateQuotePreview({ announce = true } = {}) {
       rank: idx + 1,
       reasons: ["Deterministic fallback recommendation based on your preference."]
     }));
+    const nextTop = fallbackQuotes[0] || null;
+    const diffText =
+      previousTop && nextTop
+        ? `Top plan changed from ${previousTop.name} (${currency(Number(previousTop.monthlyPrice || 0))}/month) to ${nextTop.name} (${currency(Number(nextTop.monthlyPrice || 0))}/month).`
+        : null;
     applyContextPatch({
       quoteBuilder: {
         preferences,
         lastPreview: fallbackQuotes,
-        lastPreviewAt: new Date().toISOString()
+        lastPreviewAt: new Date().toISOString(),
+        lastDiff: diffText
       }
     });
     if (announce) {
@@ -1597,6 +1942,17 @@ async function generateQuotePreview({ announce = true } = {}) {
       preferences,
       fallbackCount: fallbackQuotes.length
     });
+    logClient("info", "quote_comparison_viewed", {
+      serviceType,
+      quoteCount: fallbackQuotes.length,
+      fallback: true
+    });
+    if (diffText) {
+      logClient("info", "quote_diff_rendered", {
+        serviceType,
+        diff: diffText
+      });
+    }
     renderQuoteBuilderPanel();
     return fallbackQuotes;
   }
@@ -1641,6 +1997,27 @@ function renderQuoteBuilderPanel() {
   const preferences = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || {});
   const quotes = state.context.quoteBuilder?.lastPreview || [];
   const savedAt = state.context.quoteBuilder?.savedAt || null;
+  const diffNote = state.context.quoteBuilder?.lastDiff || null;
+  const quoteComparison = quotes.length
+    ? `
+    <table class="quote-compare-table">
+      <thead>
+        <tr><th>Quote</th><th>Monthly</th><th>Install</th><th>Contract</th></tr>
+      </thead>
+      <tbody>
+        ${quotes
+          .map(
+            (quote) => `<tr>
+              <td>${quote.name}</td>
+              <td>${currency(Number(quote.monthlyPrice || 0))}</td>
+              <td>${currency(Number(quote.installationFee || 0))}</td>
+              <td>${quote.contractMonths || 24} months</td>
+            </tr>`
+          )
+          .join("")}
+      </tbody>
+    </table>`
+    : "";
   const quoteCards = quotes.length
     ? quotes
         .map(
@@ -1650,7 +2027,6 @@ function renderQuoteBuilderPanel() {
             <div class="quote-name">${quote.name}</div>
             <div class="quote-price">${currency(Number(quote.monthlyPrice || 0))}/month</div>
             <div class="quote-meta">Install: ${currency(Number(quote.installationFee || 0))}</div>
-            <div class="quote-reasons">${(quote.reasons || []).slice(0, 2).join(" ")}</div>
             <button type="button" class="quote-apply-btn" data-offer-id="${quote.offerId}">Apply Quote ${quote.rank}</button>
           </article>`
         )
@@ -1675,6 +2051,8 @@ function renderQuoteBuilderPanel() {
       <button type="button" id="quote-resume-btn" class="secondary">Resume quote</button>
     </div>
     <div class="quote-save-note">${savedAt ? `Last saved: ${new Date(savedAt).toLocaleString()}` : "No saved quote in this browser yet."}</div>
+    ${quoteComparison}
+    ${diffNote ? `<div class="quote-diff">${diffNote}</div>` : ""}
     <div class="quote-cards">${quoteCards}</div>
   `;
 
@@ -1754,12 +2132,22 @@ function postMessage(role, text, { force = false } = {}) {
   el.className = `msg ${role}`;
   const sourceText = String(text || "");
   el.textContent = sourceText;
+  if (role === "bot") {
+    el.setAttribute("data-source-text", sourceText);
+  }
   chatWindow.appendChild(el);
   chatWindow.scrollTop = chatWindow.scrollHeight;
+  state.transcript.push({
+    role: role === "user" ? "user" : "bot",
+    text: sourceText,
+    ts: new Date().toISOString()
+  });
+  if (state.transcript.length > 600) {
+    state.transcript = state.transcript.slice(-600);
+  }
   if (role === "bot") {
     const uiLanguage = getCurrentUiLanguage();
     if (uiLanguage !== "en") {
-      el.setAttribute("data-source-text", sourceText);
       const activeLanguage = uiLanguage;
       void translateForUi(sourceText, activeLanguage).then((translated) => {
         if (!el.isConnected) return;
@@ -1966,10 +2354,14 @@ function refreshQuickActionsLanguage() {
 
 function getLanguageStatusPrompt(step) {
   switch (step) {
+    case FLOW_STEPS.GREETING_CONVERSATIONAL:
+      return "How are you today, and how can I help?";
     case FLOW_STEPS.CUSTOMER_STATUS_SELECTION:
       return "Are you a new client or an existing Bell client?";
     case FLOW_STEPS.SERVICE_SELECTION:
       return "What service are you looking for today?";
+    case FLOW_STEPS.SERVICE_CLARIFICATION:
+      return "I will continue with the next service question in this language.";
     case FLOW_STEPS.INTERNET_ADDRESS_REQUEST:
       return "Please share your service address so I can confirm availability.";
     case FLOW_STEPS.INTERNET_PRIORITY_CAPTURE:
@@ -1978,6 +2370,11 @@ function getLanguageStatusPrompt(step) {
       return "I will continue with your plan recommendations in this language.";
     case FLOW_STEPS.OFFER_BROWSE:
       return "I will continue with your offer selection in this language.";
+    case FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE:
+      return "Please provide your full name, email, and phone number in one message.";
+    case FLOW_STEPS.NEW_ONBOARD_ADDRESS:
+    case FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE:
+      return "Please provide your full service address so I can continue.";
     case FLOW_STEPS.PAYMENT_CARD_NUMBER:
       return "I will continue with payment details in this language.";
     default:
@@ -2005,6 +2402,7 @@ function setConversationLanguage(languageCode = "en", { announce = true } = {}) 
   applyContextPatch({ uiLanguage: normalizedLanguage });
   syncLanguageSwitcherUi(normalizedLanguage);
   refreshQuickActionsLanguage();
+  refreshVisibleBotMessagesLanguage(normalizedLanguage);
   logClient("info", "language_changed", { from: previousLanguage, to: normalizedLanguage });
 
   if (announce) {
@@ -2012,6 +2410,24 @@ function setConversationLanguage(languageCode = "en", { announce = true } = {}) 
     postMessage("bot", `Language switched to ${languageLabel}.`);
     postMessage("bot", getLanguageStatusPrompt(state.flowStep));
   }
+}
+
+function refreshVisibleBotMessagesLanguage(languageCode = "en") {
+  const normalizedLanguage = normalizeLanguageCode(languageCode);
+  chatWindow.querySelectorAll(".msg.bot").forEach((el) => {
+    const sourceText = el.getAttribute("data-source-text") || el.textContent || "";
+    el.setAttribute("data-source-text", sourceText);
+    if (normalizedLanguage === "en") {
+      el.textContent = sourceText;
+      return;
+    }
+    const activeLanguage = normalizedLanguage;
+    void translateForUi(sourceText, activeLanguage).then((translated) => {
+      if (!el.isConnected) return;
+      if (getCurrentUiLanguage() !== activeLanguage) return;
+      el.textContent = translated || sourceText;
+    });
+  });
 }
 
 function showChoiceButtons(labels, onPick) {
@@ -2282,10 +2698,13 @@ function resetSessionState() {
   clearTimers();
   const selectedLanguageInput = languageInputs.find((input) => input.checked);
   const selectedLanguage = normalizeLanguageCode(selectedLanguageInput?.value || state.context.uiLanguage || "en");
+  const selectedThemeInput = themeInputs.find((input) => input.checked);
+  const selectedTheme = selectedThemeInput?.value || state.context.theme || "system";
   state.flowStep = FLOW_STEPS.INIT_CONNECTING;
   state.historyStack = [];
   state.offerPageIndex = 0;
   state.pendingAuthMode = null;
+  state.transcript = [];
   state.context = {
     sessionId: generateSessionId(),
     areaCode: null,
@@ -2294,7 +2713,6 @@ function resetSessionState() {
     customerStatusAsked: false,
     selectedEntryIntent: null,
     uiLanguage: selectedLanguage,
-    uiLanguage: "en",
     loopGuard: {
       lastStep: null,
       lastContextHash: null,
@@ -2374,6 +2792,26 @@ function resetSessionState() {
       lookupQuery: null,
       suggestions: []
     },
+    booking: {
+      slots: [],
+      selectedSlot: null,
+      confirmed: false
+    },
+    reminders: {
+      permission: "default",
+      scheduledAt: null
+    },
+    handoffPacket: null,
+    transcriptExportMeta: null,
+    theme: selectedTheme,
+    pwa: {
+      installable: false,
+      installed: false
+    },
+    offlineDraft: {
+      input: "",
+      restoredAt: null
+    },
     serviceAddress: null,
     serviceAddressValidated: false,
     addressAuth: {
@@ -2405,7 +2843,8 @@ function resetSessionState() {
       },
       lastPreview: [],
       lastPreviewAt: null,
-      savedAt: null
+      savedAt: null,
+      lastDiff: null
     },
     newOnboarding: {
       fullName: null,
@@ -2473,6 +2912,7 @@ function resetSessionState() {
   resetCheckoutPanel();
   setPanelFocus("conversation");
   syncLanguageSwitcherUi(selectedLanguage);
+  syncThemeSwitcherUi(selectedTheme);
   refreshQuickActionsLanguage();
   setStatus();
 }
@@ -2525,6 +2965,13 @@ function getPatchedContext(patch = {}) {
   if (patch.payment) next.payment = { ...next.payment, ...patch.payment };
   if (patch.financing) next.financing = { ...next.financing, ...patch.financing };
   if (patch.shipping) next.shipping = { ...next.shipping, ...patch.shipping };
+  if (patch.booking) next.booking = { ...next.booking, ...patch.booking };
+  if (patch.reminders) next.reminders = { ...next.reminders, ...patch.reminders };
+  if (patch.handoffPacket !== undefined) next.handoffPacket = patch.handoffPacket;
+  if (patch.transcriptExportMeta !== undefined) next.transcriptExportMeta = patch.transcriptExportMeta;
+  if (patch.theme !== undefined) next.theme = patch.theme;
+  if (patch.pwa) next.pwa = { ...next.pwa, ...patch.pwa };
+  if (patch.offlineDraft) next.offlineDraft = { ...next.offlineDraft, ...patch.offlineDraft };
   if (patch.newOnboarding) next.newOnboarding = { ...next.newOnboarding, ...patch.newOnboarding };
   if (patch.salesProfile) next.salesProfile = { ...next.salesProfile, ...patch.salesProfile };
   if (patch.supportCase) next.supportCase = { ...next.supportCase, ...patch.supportCase };
@@ -2738,7 +3185,7 @@ function getFilteredOffersForCategory(category, { maxResults = 3 } = {}) {
 }
 
 function shouldInlineOfferCategory(category = "") {
-  return category === "mobility" || category === "landline";
+  return category === "mobility" || category === "landline" || category === "home internet";
 }
 
 function getActiveOfferCategory() {
@@ -2784,6 +3231,17 @@ function presentInlineOfferChoices(category = getActiveOfferCategory()) {
     const selected = filtered.find((offer) => choice === `Add ${offer.name}`);
     if (!selected) return;
     addOfferToBasket(selected);
+  });
+}
+
+function presentMobilityDevicePreview() {
+  const deviceOffers = getFilteredOffersForCategory("mobility", { maxResults: 3 }).filter(
+    (offer) => offer.offerType === "device"
+  );
+  if (!deviceOffers.length) return;
+  postMessage("bot", "Current phone options include:");
+  deviceOffers.forEach((offer, index) => {
+    postMessage("bot", `${index + 1}. ${offer.name} - ${currency(offer.monthlyPrice)}/month`);
   });
 }
 
@@ -3003,7 +3461,7 @@ function routeToCrossSellCategory(category) {
     state.offerPageIndex = 1;
     renderCarouselPage();
     postMessage("bot", "Showing internet offers. Add any option you want.");
-    if (state.flowStep === FLOW_STEPS.OFFER_BROWSE && shouldRenderInlineOfferFlow()) {
+    if (state.flowStep === FLOW_STEPS.OFFER_BROWSE) {
       presentInlineOfferChoices("home internet");
     }
     return true;
@@ -3203,8 +3661,7 @@ function normalizeEntryIntent(value = "") {
 function routeHelpdeskSelection(choice, { pushHistory = true } = {}) {
   const serviceIntent = parseSalesIntentDeterministic(choice);
   if (!serviceIntent) return false;
-  const pageMap = { mobility: 0, "home internet": 1, landline: 2, bundle: 0 };
-  state.offerPageIndex = pageMap[serviceIntent] ?? 0;
+  setOfferPageForCategory(serviceIntent);
   const selectedEntryIntent =
     serviceIntent === "home internet"
       ? "Internet"
@@ -3244,6 +3701,17 @@ function routeHelpdeskSelection(choice, { pushHistory = true } = {}) {
     { pushHistory }
   );
   return true;
+}
+
+function setOfferPageForCategory(serviceType = "") {
+  const normalized = String(serviceType || "").toLowerCase();
+  const pageMap = {
+    mobility: 0,
+    "home internet": 1,
+    internet: 1,
+    landline: 2
+  };
+  state.offerPageIndex = pageMap[normalized] ?? 0;
 }
 
 function startPath(route) {
@@ -3293,6 +3761,7 @@ function continueFromSelectedIntent({ pushHistory = true } = {}) {
       return;
     }
     if (state.context.intent && canAccessOfferBrowse(state.context)) {
+      setOfferPageForCategory(state.context.intent || state.context.selectedService);
       transitionTo(FLOW_STEPS.OFFER_BROWSE, { activeTask: "sales" }, { pushHistory });
       return;
     }
@@ -3329,6 +3798,7 @@ function routeAfterSalesClarification({ pushHistory = true } = {}) {
     return;
   }
   if (canAccessOfferBrowse(state.context)) {
+    setOfferPageForCategory(state.context.intent || state.context.selectedService);
     transitionTo(
       FLOW_STEPS.OFFER_BROWSE,
       {
@@ -4112,6 +4582,17 @@ function confirmOrder() {
       lookupQuery: null,
       suggestions: []
     },
+    booking: {
+      slots: [],
+      selectedSlot: null,
+      confirmed: false
+    },
+    reminders: {
+      permission: state.context.reminders?.permission || "default",
+      scheduledAt: null
+    },
+    handoffPacket: null,
+    transcriptExportMeta: null,
     salesProfile: {
       byodChoice: null,
       linePreference: null,
@@ -4134,7 +4615,11 @@ function confirmOrder() {
   });
   renderBasket();
   resetCheckoutPanel();
-  transitionTo(FLOW_STEPS.POST_CHAT_RATING, { activeTask: "post_order_rating" }, { pushHistory: true, enforceContract: false });
+  transitionTo(
+    FLOW_STEPS.BOOKING_SLOT_SELECTION,
+    { activeTask: "post_order_booking" },
+    { pushHistory: true, enforceContract: false }
+  );
 }
 
 function renderStep(step) {
@@ -4176,7 +4661,11 @@ function renderStep(step) {
       FLOW_STEPS.SHIPPING_SELECTION,
       FLOW_STEPS.SHIPPING_LOOKUP,
       FLOW_STEPS.SHIPPING_MANUAL_ENTRY,
-      FLOW_STEPS.ORDER_REVIEW
+      FLOW_STEPS.ORDER_REVIEW,
+      FLOW_STEPS.BOOKING_SLOT_SELECTION,
+      FLOW_STEPS.BOOKING_SLOT_CONFIRM,
+      FLOW_STEPS.REMINDER_OPT_IN,
+      FLOW_STEPS.REMINDER_SCHEDULED
     ].includes(step)
   ) {
     setPanelFocus("checkout");
@@ -4203,6 +4692,40 @@ function renderStep(step) {
       hideAvailabilityCard();
       ensureAiDisclosure();
       postMessage("bot", "How are you today, and how can I help?");
+      if (state.pendingAuthMode) {
+        const pendingMode = state.pendingAuthMode;
+        state.pendingAuthMode = null;
+        postMessage("bot", "I can help you sign in to your existing Bell profile now.");
+        if (pendingMode === "auto") {
+          const user = mockUsers.find((candidate) => candidate.id === "u1001");
+          if (user) {
+            applyContextPatch({
+              customerType: "existing",
+              selectedService: "internet",
+              selectedEntryIntent: "Internet",
+              intent: "home internet",
+              activeTask: "sales",
+              customerStatusAsked: true
+            });
+            void finalizeExistingAuthentication(user, "auto", user.phone, { routeAfterAuth: false });
+            transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true, enforceContract: false });
+            break;
+          }
+        }
+        transitionTo(
+          FLOW_STEPS.EXISTING_AUTH_ENTRY,
+          {
+            customerType: "existing",
+            selectedService: "internet",
+            selectedEntryIntent: "Internet",
+            intent: "home internet",
+            activeTask: "sales",
+            customerStatusAsked: true
+          },
+          { pushHistory: true, enforceContract: false }
+        );
+        break;
+      }
       transitionTo(FLOW_STEPS.CUSTOMER_STATUS_SELECTION, {}, { pushHistory: false });
       break;
 
@@ -4242,6 +4765,7 @@ function renderStep(step) {
       showChoiceButtons(["Internet", "Mobility", "Landline"], (choice) => {
         postMessage("user", choice);
         if (choice === "Internet") {
+          setOfferPageForCategory("home internet");
           applyContextPatch({
             selectedService: "internet",
             intent: "home internet",
@@ -4259,6 +4783,7 @@ function renderStep(step) {
           return;
         }
         const mappedIntent = choice === "Mobility" ? "mobility" : "landline";
+        setOfferPageForCategory(mappedIntent);
         applyContextPatch({
           selectedService: mappedIntent === "mobility" ? "mobility" : "landline",
           intent: mappedIntent,
@@ -4355,22 +4880,6 @@ function renderStep(step) {
         postMessage("bot", "Based on your preference, here are recommended internet plans:");
       }
       postMessage("bot", `Top recommendation: ${plans[0].name} at ${currency(plans[0].monthlyPrice)}/month.`);
-      void requestChatAssist(
-        "explain_recommendation",
-        {
-          userMessage: state.context.internetPreference || "value",
-          deterministicData: {
-            preference: state.context.internetPreference || "value",
-            plans: plans.map((plan) => ({ name: plan.name, monthlyPrice: plan.monthlyPrice, quoteRank: plan.quoteRank || null }))
-          }
-        },
-        {
-          fallbackText: "I prioritized these plans based on your stated preference, while keeping available service tiers aligned to your needs.",
-          minLength: 20
-        }
-      ).then((assistText) => {
-        if (assistText) postMessage("bot", assistText);
-      });
       const labels = plans.map((plan) => `Select ${plan.name} - ${currency(plan.monthlyPrice)}/month`);
       labels.push("Generate fresh quote");
       showChoiceButtons(labels, (choice) => {
@@ -4425,8 +4934,8 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.CHECKOUT_INTENT_PROMPT:
-      postMessage("bot", "Would you like to checkout now? You can also add mobility or landline offers.");
-      showChoiceButtons(["Checkout now", "Add mobility offers", "Add landline offers", "No thanks"], (choice) => {
+      postMessage("bot", "Would you like to checkout now? You can also add mobility, internet, or landline offers.");
+      showChoiceButtons(["Checkout now", "Add mobility offers", "Add internet offers", "Add landline offers", "No thanks"], (choice) => {
         postMessage("user", choice);
         if (choice === "Checkout now") {
           transitionTo(
@@ -4440,6 +4949,11 @@ function renderStep(step) {
         }
         if (choice === "Add mobility offers") {
           routeToCrossSellCategory("mobility");
+          transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        if (choice === "Add internet offers") {
+          routeToCrossSellCategory("home internet");
           transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
           return;
         }
@@ -4698,21 +5212,7 @@ function renderStep(step) {
 
     case FLOW_STEPS.WARM_AGENT_ROUTING:
       postMessage("bot", "I’m stepping in to help directly. Let’s sort this out together. What do you need right now?");
-      void requestChatAssist(
-        "handoff_summary",
-        {
-          userMessage: "Agent handoff requested",
-          deterministicData: {
-            flowStep: state.flowStep,
-            activeTask: state.context.activeTask,
-            intent: state.context.intent
-          }
-        },
-        {
-          fallbackText: "",
-          minLength: 24
-        }
-      ).then((assistSummary) => {
+      void requestHandoffSummary({ currentStep: state.flowStep }).then((assistSummary) => {
         if (assistSummary) {
           postMessage("bot", assistSummary);
         }
@@ -4767,6 +5267,7 @@ function renderStep(step) {
         }
         if (state.context.salesProfile.byodChoice === "new_device" && !state.context.salesProfile.phonePreference) {
           postMessage("bot", "Nice, let’s pick your phone first. Which device family do you prefer?");
+          presentMobilityDevicePreview();
           showChoiceButtons(["iPhone", "Samsung Galaxy", "Google Pixel", "Other device"], (choice) => {
             postMessage("user", choice);
             applyContextPatch({ salesProfile: { phonePreference: choice } });
@@ -5144,6 +5645,108 @@ function renderStep(step) {
       break;
     }
 
+    case FLOW_STEPS.BOOKING_SLOT_SELECTION: {
+      postMessage("bot", "Would you like to reserve an installation slot now?");
+      const existingSlots = state.context.booking?.slots || [];
+      const renderSlotChoices = (slots) => {
+        const labels = slots.slice(0, 4).map((slot) => `${slot.date} • ${slot.window}`);
+        showChoiceButtons([...labels, "Skip booking"], (choice) => {
+          postMessage("user", choice);
+          if (choice === "Skip booking") {
+            transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
+            return;
+          }
+          const selectedSlot = slots.find((slot) => `${slot.date} • ${slot.window}` === choice);
+          if (!selectedSlot) {
+            postMessage("bot", "Please select one of the available slots or skip booking.");
+            return;
+          }
+          applyContextPatch({ booking: { selectedSlot } });
+          logClient("info", "booking_slot_selected", {
+            slotId: selectedSlot.slotId,
+            date: selectedSlot.date,
+            window: selectedSlot.window
+          });
+          transitionTo(FLOW_STEPS.BOOKING_SLOT_CONFIRM, {}, { pushHistory: true, enforceContract: false });
+        });
+      };
+      if (existingSlots.length) {
+        renderSlotChoices(existingSlots);
+        break;
+      }
+      void fetchInstallSlots()
+        .then((slots) => {
+          applyContextPatch({ booking: { slots } });
+          logClient("info", "booking_slots_viewed", {
+            slotCount: slots.length,
+            serviceType: state.context.selectedService || state.context.intent || "internet"
+          });
+          if (!slots.length) {
+            postMessage("bot", "I don’t have install slots right now. We can continue without booking.");
+            transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
+            return;
+          }
+          renderSlotChoices(slots);
+        })
+        .catch(() => {
+          postMessage("bot", "I can’t retrieve install slots right now. We can continue without booking.");
+          transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
+        });
+      break;
+    }
+
+    case FLOW_STEPS.BOOKING_SLOT_CONFIRM: {
+      const slot = state.context.booking?.selectedSlot;
+      if (!slot) {
+        transitionTo(FLOW_STEPS.BOOKING_SLOT_SELECTION, {}, { pushHistory: false, enforceContract: false });
+        break;
+      }
+      postMessage("bot", `Please confirm your installation window: ${slot.date} • ${slot.window}.`);
+      showChoiceButtons(["Confirm booking", "Choose another slot"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "Choose another slot") {
+          transitionTo(FLOW_STEPS.BOOKING_SLOT_SELECTION, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        applyContextPatch({ booking: { confirmed: true } });
+        postMessage("bot", "Great, your install window is reserved.");
+        transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
+      });
+      break;
+    }
+
+    case FLOW_STEPS.REMINDER_OPT_IN:
+      postMessage("bot", "Would you like a browser reminder before your install window?");
+      showChoiceButtons(["Yes, remind me", "No reminder"], (choice) => {
+        postMessage("user", choice);
+        logClient("info", "reminder_opt_in", { choice });
+        if (choice === "No reminder") {
+          transitionTo(FLOW_STEPS.POST_CHAT_RATING, { activeTask: "post_order_rating" }, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        void scheduleBrowserReminder(state.context.booking?.selectedSlot).then((result) => {
+          if (!result.ok) {
+            postMessage("bot", "I could not enable notifications in this browser. We can continue without reminders.");
+            transitionTo(FLOW_STEPS.POST_CHAT_RATING, { activeTask: "post_order_rating" }, { pushHistory: true, enforceContract: false });
+            return;
+          }
+          transitionTo(FLOW_STEPS.REMINDER_SCHEDULED, {}, { pushHistory: true, enforceContract: false });
+        });
+      });
+      break;
+
+    case FLOW_STEPS.REMINDER_SCHEDULED: {
+      const scheduledAt = state.context.reminders?.scheduledAt;
+      postMessage(
+        "bot",
+        scheduledAt
+          ? `Reminder scheduled for ${new Date(scheduledAt).toLocaleString("en-CA")}.`
+          : "Reminder is enabled for your selected slot."
+      );
+      transitionTo(FLOW_STEPS.POST_CHAT_RATING, { activeTask: "post_order_rating" }, { pushHistory: true, enforceContract: false });
+      break;
+    }
+
     case FLOW_STEPS.ORDER_CONFIRMED:
       postMessage("bot", "Thank you for contacting Bell. Your request is complete. You can continue shopping or start a fresh session.");
       break;
@@ -5220,6 +5823,27 @@ function normalizeCommand(text = "") {
 
 function handleGlobalCommands(message) {
   const cmd = normalizeCommand(message);
+
+  if (cmd.includes("export transcript") || cmd.includes("download transcript")) {
+    void exportTranscript();
+    return true;
+  }
+
+  if (cmd.includes("dark mode")) {
+    applyTheme("dark");
+    postMessage("bot", "Dark mode enabled.");
+    return true;
+  }
+  if (cmd.includes("light mode")) {
+    applyTheme("light");
+    postMessage("bot", "Light mode enabled.");
+    return true;
+  }
+  if (cmd.includes("system theme")) {
+    applyTheme("system");
+    postMessage("bot", "Theme follows your system setting.");
+    return true;
+  }
 
   if (cmd.includes("language")) {
     if (cmd.includes("english")) {
@@ -5413,6 +6037,7 @@ async function handleChatInput(message) {
 
     case FLOW_STEPS.SERVICE_SELECTION:
       if (lower.includes("internet")) {
+        setOfferPageForCategory("home internet");
         applyContextPatch({
           selectedService: "internet",
           intent: "home internet",
@@ -5430,6 +6055,7 @@ async function handleChatInput(message) {
         return;
       }
       if (lower.includes("mobility")) {
+        setOfferPageForCategory("mobility");
         applyContextPatch({
           selectedService: "mobility",
           intent: "mobility",
@@ -5440,6 +6066,7 @@ async function handleChatInput(message) {
         return;
       }
       if (lower.includes("landline") || lower.includes("home phone")) {
+        setOfferPageForCategory("landline");
         applyContextPatch({
           selectedService: "landline",
           intent: "landline",
@@ -5660,6 +6287,11 @@ async function handleChatInput(message) {
         transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
         return;
       }
+      if (lower.includes("internet")) {
+        routeToCrossSellCategory("home internet");
+        transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
       if (lower.includes("landline") || lower.includes("home phone")) {
         routeToCrossSellCategory("landline");
         transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
@@ -5669,7 +6301,7 @@ async function handleChatInput(message) {
         transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
         return;
       }
-      handleUnclearInput(message, "Reply with checkout, add mobility, add landline, or no thanks.");
+      handleUnclearInput(message, "Reply with checkout, add mobility, add internet, add landline, or no thanks.");
       return;
 
     case FLOW_STEPS.PAYMENT_CARD_ENTRY:
@@ -5976,6 +6608,25 @@ async function handleChatInput(message) {
         return;
       }
       const normalizedPhone = normalizeCanadianPhone(trimmed);
+      const fullName = state.context.newOnboarding.fullName || "";
+      const email = state.context.newOnboarding.email || "";
+      const hash = await createIdentityHash(
+        `${fullName}|${email}|${normalizedPhone}|${Date.now()}`
+      );
+      const secureRef = `${generateSecureRef()}-${hash}`;
+      applyContextPatch({
+        authMeta: {
+          mode: "new-client",
+          phone: normalizedPhone,
+          email,
+          secureRef
+        }
+      });
+      postMessage(
+        "bot",
+        `Profile captured. Name: ${fullName}, Email: ${email}, Phone: ${formatPhone(normalizedPhone)}.`
+      );
+      postMessage("bot", "Great. Please enter your full service address so I can continue.");
       transitionTo(
         FLOW_STEPS.NEW_ONBOARD_ADDRESS,
         {
@@ -5984,24 +6635,8 @@ async function handleChatInput(message) {
         },
         { pushHistory: true }
       );
-      const hash = await createIdentityHash(
-        `${state.context.newOnboarding.fullName || ""}|${state.context.newOnboarding.email || ""}|${normalizedPhone}|${Date.now()}`
-      );
-      const secureRef = `${generateSecureRef()}-${hash}`;
-      applyContextPatch({
-        authMeta: {
-          mode: "new-client",
-          phone: normalizedPhone,
-          email: state.context.newOnboarding.email,
-          secureRef
-        }
-      });
       setStatus();
-      postMessage(
-        "bot",
-        `Profile captured. Name: ${state.context.newOnboarding.fullName}, Email: ${state.context.newOnboarding.email}, Phone: ${formatPhone(normalizedPhone)}.`
-      );
-      logClient("info", "new_customer_created", { fullName: state.context.newOnboarding.fullName, email: state.context.newOnboarding.email, phone: normalizedPhone });
+      logClient("info", "new_customer_created", { fullName, email, phone: normalizedPhone });
       return;
 
     case FLOW_STEPS.NEW_ONBOARD_ADDRESS:
@@ -6149,6 +6784,7 @@ async function handleChatInput(message) {
         }
         if (state.context.salesProfile.byodChoice === "new_device" && !state.context.salesProfile.phonePreference) {
           if (!/(iphone|samsung|pixel|other|android|ios)/i.test(trimmed)) {
+            presentMobilityDevicePreview();
             handleUnclearInput(message, "Please tell me your phone preference: iPhone, Samsung, Google Pixel, or other.");
             return;
           }
@@ -6294,7 +6930,11 @@ async function handleChatInput(message) {
       if (lower.includes("internet")) {
         state.offerPageIndex = 1;
         renderCarouselPage();
-        postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+        if (shouldRenderInlineOfferFlow()) {
+          presentInlineOfferChoices("home internet");
+        } else {
+          postMessage("bot", `Moved to ${carouselPageLabel.textContent}.`);
+        }
         return;
       }
       if (lower.includes("landline") || lower.includes("home phone")) {
@@ -6621,6 +7261,59 @@ async function handleChatInput(message) {
       }
       return;
 
+    case FLOW_STEPS.BOOKING_SLOT_SELECTION: {
+      if (lower.includes("skip")) {
+        transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      const slots = state.context.booking?.slots || [];
+      const selectedSlot = slots.find((slot) => lower.includes(slot.date.toLowerCase()) || lower.includes(slot.window.toLowerCase()));
+      if (!selectedSlot) {
+        handleUnclearInput(message, "Please choose one listed slot or say skip booking.");
+        return;
+      }
+      applyContextPatch({ booking: { selectedSlot } });
+      logClient("info", "booking_slot_selected", { slotId: selectedSlot.slotId, viaChatInput: true });
+      transitionTo(FLOW_STEPS.BOOKING_SLOT_CONFIRM, {}, { pushHistory: true, enforceContract: false });
+      return;
+    }
+
+    case FLOW_STEPS.BOOKING_SLOT_CONFIRM:
+      if (lower.includes("change") || lower.includes("another")) {
+        transitionTo(FLOW_STEPS.BOOKING_SLOT_SELECTION, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      if (lower.includes("confirm") || lower.includes("yes")) {
+        applyContextPatch({ booking: { confirmed: true } });
+        transitionTo(FLOW_STEPS.REMINDER_OPT_IN, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      handleUnclearInput(message, "Please confirm this slot or choose another one.");
+      return;
+
+    case FLOW_STEPS.REMINDER_OPT_IN:
+      if (lower.includes("no")) {
+        logClient("info", "reminder_opt_in", { choice: "no", viaChatInput: true });
+        transitionTo(FLOW_STEPS.POST_CHAT_RATING, { activeTask: "post_order_rating" }, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      if (lower.includes("yes") || lower.includes("remind")) {
+        logClient("info", "reminder_opt_in", { choice: "yes", viaChatInput: true });
+        const reminderResult = await scheduleBrowserReminder(state.context.booking?.selectedSlot);
+        if (reminderResult.ok) {
+          transitionTo(FLOW_STEPS.REMINDER_SCHEDULED, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        transitionTo(FLOW_STEPS.POST_CHAT_RATING, { activeTask: "post_order_rating" }, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      handleUnclearInput(message, "Please reply yes for a reminder or no reminder.");
+      return;
+
+    case FLOW_STEPS.REMINDER_SCHEDULED:
+      transitionTo(FLOW_STEPS.POST_CHAT_RATING, { activeTask: "post_order_rating" }, { pushHistory: true, enforceContract: false });
+      return;
+
     default:
       logClient("info", "flow_clarify_prompt", { step: state.flowStep, message });
       handleUnclearInput(message, "I need a quick clarification before I proceed.");
@@ -6676,6 +7369,7 @@ function refreshChat() {
   resetSessionState();
   openChatWidget();
   state.chatStarted = false;
+  clearOfflineDraft();
   startConversation();
   logClient("info", "session_wiped", { restart: true });
 }
@@ -6684,7 +7378,22 @@ function endChat() {
   resetSessionState();
   closeChatWidget();
   state.chatStarted = false;
+  clearOfflineDraft();
   logClient("info", "session_wiped", { closeWidget: true, restart: false });
+}
+
+function setInstallPromptAvailable(installable) {
+  if (installAppBtn) {
+    installAppBtn.classList.toggle("hidden", !installable);
+  }
+  applyContextPatch({ pwa: { installable: Boolean(installable) } });
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("./sw.js").catch(() => {
+    // Non-blocking for local demo.
+  });
 }
 
 function runTopLoginFlow(mode) {
@@ -6708,39 +7417,9 @@ function runTopLoginFlow(mode) {
         }
       }
     });
-  } else {
-    transitionTo(FLOW_STEPS.GREETING_CONVERSATIONAL, {}, { pushHistory: true, enforceContract: false });
   }
-  state.pendingAuthMode = null;
-  if (mode === "auto") {
-    const user = mockUsers.find((candidate) => candidate.id === "u1001");
-    if (user) {
-      applyContextPatch({
-        customerType: "existing",
-        selectedService: "internet",
-        selectedEntryIntent: "Internet",
-        intent: "home internet",
-        activeTask: "sales",
-        customerStatusAsked: true
-      });
-      void finalizeExistingAuthentication(user, "auto", user.phone, { routeAfterAuth: false });
-      transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true, enforceContract: false });
-      return;
-    }
-  }
-  transitionTo(
-    FLOW_STEPS.EXISTING_AUTH_ENTRY,
-    {
-      customerType: "existing",
-      selectedService: "internet",
-      selectedEntryIntent: "Internet",
-      intent: "home internet",
-      activeTask: "sales",
-      customerStatusAsked: true
-    },
-    { pushHistory: true, enforceContract: false }
-  );
-  postMessage("bot", "Login selected. I’ll verify your existing account so we can continue with internet offers.");
+  state.pendingAuthMode = mode === "auto" ? "auto" : "manual";
+  transitionTo(FLOW_STEPS.GREETING_CONVERSATIONAL, {}, { pushHistory: true, enforceContract: false });
 }
 
 chatLauncher.addEventListener("click", () => {
@@ -6900,6 +7579,13 @@ muteChatBtn.addEventListener("click", () => {
   postMessage("bot", state.muted ? "Chat muted." : "Chat unmuted.", { force: true });
 });
 
+if (exportTranscriptBtn) {
+  exportTranscriptBtn.addEventListener("click", () => {
+    chatMenu.classList.add("hidden");
+    void exportTranscript();
+  });
+}
+
 refreshChatBtn.addEventListener("click", () => {
   chatMenu.classList.add("hidden");
   refreshChat();
@@ -6933,11 +7619,37 @@ if (languageInputs.length > 0) {
   });
 }
 
+if (themeInputs.length > 0) {
+  themeInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      applyTheme(input.value);
+    });
+  });
+}
+
+if (installAppBtn) {
+  installAppBtn.addEventListener("click", async () => {
+    if (!state.deferredInstallPrompt) return;
+    const promptEvent = state.deferredInstallPrompt;
+    state.deferredInstallPrompt = null;
+    setInstallPromptAvailable(false);
+    promptEvent.prompt();
+    try {
+      await promptEvent.userChoice;
+    } catch {
+      // ignored
+    }
+  });
+}
+
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const message = chatInput.value.trim();
   if (!message) return;
   chatInput.value = "";
+  applyContextPatch({ offlineDraft: { input: "" } });
+  clearOfflineDraft();
   let userMessage = message;
   if (state.flowStep === FLOW_STEPS.PAYMENT_CVV || state.flowStep === FLOW_STEPS.PAYMENT_CARD_CVC) {
     userMessage = "***";
@@ -6951,6 +7663,8 @@ chatForm.addEventListener("submit", async (event) => {
 });
 
 chatInput.addEventListener("input", () => {
+  applyContextPatch({ offlineDraft: { input: chatInput.value } });
+  saveOfflineDraft();
   queueAddressTypeahead(chatInput.value.trim());
 });
 
@@ -6974,16 +7688,32 @@ window.addEventListener("unhandledrejection", (event) => {
   });
 });
 
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  state.deferredInstallPrompt = event;
+  setInstallPromptAvailable(true);
+  logClient("info", "pwa_install_prompted");
+});
+
+window.addEventListener("appinstalled", () => {
+  setInstallPromptAvailable(false);
+  applyContextPatch({ pwa: { installed: true } });
+});
+
 function boot() {
+  const savedTheme = readStore(CHAT_THEME_STORE_KEY, { mode: "system" });
   resetSessionState();
   closeChatWidget();
   validateOfferCoverage();
   updateJourneyProgress(FLOW_STEPS.INIT_CONNECTING);
+  applyTheme(savedTheme?.mode || "system", { persist: false });
   updateLlmStatusUi({ configured: false, connected: false, model: null });
   refreshLlmStatus({ silent: true });
   setInterval(() => refreshLlmStatus({ silent: true }), 30000);
   refreshMetricsDashboard({ silent: true });
   setInterval(() => refreshMetricsDashboard({ silent: true }), 60000);
+  registerServiceWorker();
+  restoreOfflineDraft();
 }
 
 boot();
