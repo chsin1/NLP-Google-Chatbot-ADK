@@ -139,20 +139,6 @@ nav a {
   padding: 20px;
 }
 
-.appearance-bar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.appearance-label {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--muted);
-}
-
 .hero {
   border-radius: 18px;
   background: var(--hero-bg);
@@ -588,16 +574,6 @@ button {
   accent-color: #a9d5ff;
 }
 
-.theme-switcher-landing {
-  border-color: var(--line);
-  background: var(--surface);
-  color: var(--ink);
-}
-
-.theme-switcher-landing input[type="radio"] {
-  accent-color: var(--bell-blue);
-}
-
 .install-app-btn {
   border-radius: 999px;
   border: 1px solid #9bcbf7;
@@ -735,22 +711,6 @@ button {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.assistant-shortcuts {
-  padding: 0 12px 8px;
-  display: flex;
-  justify-content: flex-start;
-}
-
-.assistant-shortcuts button {
-  border: 1px solid #9fb2c8;
-  background: #f3f7fb;
-  color: var(--bell-blue-dark);
-  border-radius: 999px;
-  padding: 8px 14px;
-  font-weight: 600;
-  cursor: pointer;
 }
 
 .journey-progress {
@@ -1434,16 +1394,6 @@ button:disabled {
   .hero {
     grid-template-columns: 1fr;
     min-height: 0;
-  }
-
-  .appearance-bar {
-    justify-content: space-between;
-    flex-wrap: wrap;
-  }
-
-  .theme-switcher-landing {
-    width: 100%;
-    justify-content: space-between;
   }
 
   .hero-copy {

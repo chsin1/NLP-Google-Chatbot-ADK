@@ -175,3 +175,105 @@ test("quote builder is invokable globally and from inline offer flow", () => {
   assert.match(appCode, /quoteToggleBtn/);
   assert.match(appCode, /quote_builder_toggle_clicked/);
 });
+
+// --- Bug-fix regression tests ---
+
+test("canProceed internet steps accept authUser.prefilledAddress when serviceAddress is absent", () => {
+  // Simulates an existing customer who has only prefilledAddress on their profile.
+  // canProceed must allow progress for INTERNET_AVAILABILITY_RESULT,
+  // INTERNET_PRIORITY_CAPTURE, and INTERNET_PLAN_PITCH via the resolveAddress
+  // fallback chain — the bug was that only context.serviceAddress was checked.
+  const ctx = {
+    customerType: "existing",
+    intent: "home internet",
+    authUser: { id: "u999", prefilledAddress: "55 Profile Blvd, Montreal, QC" },
+    internetPreference: "speed",
+    serviceAddress: undefined,
+    serviceAddressValidated: false
+  };
+
+  // Steps that rely on resolveAddress (not just serviceAddress directly)
+  assert.equal(canProceed("INTERNET_AVAILABILITY_RESULT", ctx), true,
+    "INTERNET_AVAILABILITY_RESULT must pass when address is in authUser.prefilledAddress");
+  assert.equal(canProceed("INTERNET_PRIORITY_CAPTURE", ctx), true,
+    "INTERNET_PRIORITY_CAPTURE must pass when address is in authUser.prefilledAddress");
+  assert.equal(canProceed("INTERNET_PLAN_PITCH", ctx), true,
+    "INTERNET_PLAN_PITCH must pass when address is in authUser.prefilledAddress and internetPreference is set");
+
+  // Must still fail when internetPreference is absent
+  const ctxNoPreference = { ...ctx, internetPreference: null };
+  assert.equal(canProceed("INTERNET_PLAN_PITCH", ctxNoPreference), false,
+    "INTERNET_PLAN_PITCH must fail when internetPreference is null even with a valid address");
+
+  // Must still fail when no address is available at all
+  const ctxNoAddress = { ...ctx, authUser: { id: "u999", prefilledAddress: null } };
+  assert.equal(canProceed("INTERNET_AVAILABILITY_RESULT", ctxNoAddress), false,
+    "INTERNET_AVAILABILITY_RESULT must fail when no address is available in any fallback slot");
+  assert.equal(canProceed("INTERNET_PRIORITY_CAPTURE", ctxNoAddress), false,
+    "INTERNET_PRIORITY_CAPTURE must fail when no address is available in any fallback slot");
+});
+
+test("canProceed falls back to newOnboarding.address and shipping.address when serviceAddress absent", () => {
+  const base = {
+    customerType: "new",
+    intent: "home internet",
+    internetPreference: "value",
+    serviceAddress: undefined,
+    serviceAddressValidated: false
+  };
+
+  const ctxOnboarding = { ...base, newOnboarding: { address: "200 Onboard Ln, Calgary, AB" } };
+  assert.equal(canProceed("INTERNET_AVAILABILITY_RESULT", ctxOnboarding), true,
+    "resolveAddress should fall back to newOnboarding.address");
+
+  const ctxShipping = { ...base, shipping: { address: "300 Ship St, Vancouver, BC" } };
+  assert.equal(canProceed("INTERNET_AVAILABILITY_RESULT", ctxShipping), true,
+    "resolveAddress should fall back to shipping.address as last resort");
+});
+
+test("normalizeQuotePreferences redistribution fix is present in app.js", () => {
+  // The original bug: when budget+speed already exceeded 100, truncating each
+  // key individually left the total > 100.  The fix uses proportional scaling
+  // (divides each key by the real total) so the sum is always exactly 100.
+  const appCode = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  // Confirm the proportional-scaling pattern is present (key / total * 100)
+  assert.match(appCode, /Number\(next\[key\] \|\| 0\) \/ total\) \* 100/,
+    "normalizeQuotePreferences must use proportional scaling to fix overflow");
+  // Confirm the zero-total safety guard is present
+  assert.match(appCode, /if \(total <= 0\)/,
+    "normalizeQuotePreferences must guard against a zero-sum total");
+});
+
+test("service toggle resets service-specific context fields and preserves basket", () => {
+  // Both renderStep and handleChatInput SERVICE_SELECTION handlers must reset
+  // serviceAddress, serviceAddressValidated, addressCaptureRetries,
+  // internetPreference, selectedPlanId, checkout, and quoteBuilder on switch.
+  // Basket must NOT be reset (bundling feature).
+  const appCode = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+
+  // Service-address reset must appear in both handlers
+  const addressResetCount = (appCode.match(/serviceAddress: null/g) || []).length;
+  assert.ok(addressResetCount >= 2,
+    "serviceAddress: null reset must appear in both renderStep and handleChatInput SERVICE_SELECTION");
+
+  const validatedResetCount = (appCode.match(/serviceAddressValidated: false/g) || []).length;
+  assert.ok(validatedResetCount >= 2,
+    "serviceAddressValidated: false reset must appear in both SERVICE_SELECTION handlers");
+
+  // Basket must never be explicitly nulled inside a SERVICE_SELECTION handler.
+  // We verify by checking the source does NOT pair basket:null with selectedService patches.
+  assert.doesNotMatch(appCode, /selectedService: "internet"[\s\S]{0,300}basket: null/,
+    "basket must not be cleared when switching to internet service");
+  assert.doesNotMatch(appCode, /selectedService: "mobility"[\s\S]{0,300}basket: null/,
+    "basket must not be cleared when switching to mobility service");
+});
+
+test("mid-flow service switch guard intercepts new-service keywords mid-journey", () => {
+  const appCode = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(appCode, /MID_FLOW_SWITCH_STEPS/,
+    "mid-flow switch Set must be defined in handleChatInput");
+  assert.match(appCode, /mid_flow_service_switch_prompt/,
+    "mid-flow switch must emit a log event for observability");
+  assert.match(appCode, /Yes, switch[\s\S]{0,200}No, stay here/,
+    "mid-flow switch prompt must offer Yes/No confirmation buttons");
+});

@@ -282,6 +282,24 @@ const STEP_CONTRACT = {
     allowedNext: [FLOW_STEPS.ELIGIBILITY_CHECK],
     fallbackTarget: FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE
   },
+  // ELIGIBILITY_CHECK was previously missing from STEP_CONTRACT, causing
+  // transitionTo to find no allowedNext and fall into an infinite loop via
+  // renderStep → runEligibilityCheck → routeToCheckoutPaymentEntry →
+  // transitionTo(PAYMENT_CARD_NUMBER) → isStepValid fails →
+  // renderStep(ELIGIBILITY_CHECK) → repeat. The fallbackTarget is
+  // BASKET_REVIEW (not self) so a hard failure exits cleanly.
+  [FLOW_STEPS.ELIGIBILITY_CHECK]: {
+    validInputs: [],
+    requiredContext: ["basket"],
+    allowedNext: [
+      FLOW_STEPS.PAYMENT_CARD_NUMBER,
+      FLOW_STEPS.PAYMENT_METHOD,
+      FLOW_STEPS.BASKET_REVIEW,
+      FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE,
+      FLOW_STEPS.INTERNET_ADDRESS_REQUEST
+    ],
+    fallbackTarget: FLOW_STEPS.BASKET_REVIEW
+  },
   [FLOW_STEPS.BOOKING_SLOT_SELECTION]: {
     validInputs: ["slot selection"],
     requiredContext: [],
@@ -328,81 +346,297 @@ const LANGUAGE_LABELS = {
 const SUPPORTED_LANGUAGE_CODES = new Set(Object.keys(LANGUAGE_LABELS));
 const STATIC_UI_TRANSLATIONS = {
   fr: {
+    // Customer & service selection
     "New client": "Nouveau client",
     "Existing client": "Client existant",
     Internet: "Internet",
     Mobility: "Mobilité",
     Landline: "Ligne fixe",
     Bundle: "Forfait groupé",
+    Login: "Se connecter",
+    "Continue automatically": "Continuer automatiquement",
+    "Authenticate with phone/email": "S'authentifier par téléphone/courriel",
+    "Retry authentication": "Réessayer l'authentification",
+    // Internet priority & quote
     Speed: "Vitesse",
     Value: "Valeur",
     Performance: "Performance",
+    "Fastest speed": "Vitesse maximale",
+    "Balanced value": "Valeur équilibrée",
+    "Upload-intensive": "Intensif en téléversement",
     "Build my plan": "Créer mon offre",
+    "Generate quote": "Générer un devis",
+    "Hide quote": "Masquer le devis",
+    "Generate fresh quote": "Générer un nouveau devis",
+    // Plan & checkout
     "Confirm plan": "Confirmer le forfait",
     "Change plan": "Changer le forfait",
     "Checkout now": "Passer au paiement",
     "Add mobility offers": "Ajouter des offres mobilité",
     "Add internet offers": "Ajouter des offres Internet",
     "Add landline offers": "Ajouter des offres ligne fixe",
-    "Generate quote": "Générer un devis",
-    "Hide quote": "Masquer le devis",
     "No thanks": "Non merci",
-    "Confirm payment": "Confirmer le paiement",
-    "Start over": "Recommencer",
+    "Show mobility offers": "Voir les offres mobilité",
     "That is all, continue": "C'est tout, continuer",
-    "Retry authentication": "Réessayer l'authentification",
+    // Mobility BYOD & device
+    "Yes, bring my own phone": "Oui, j'apporte mon téléphone",
+    "No, I need a new phone": "Non, j'ai besoin d'un nouveau téléphone",
+    iPhone: "iPhone",
+    "Samsung Galaxy": "Samsung Galaxy",
+    "Google Pixel": "Google Pixel",
+    "Other device": "Autre appareil",
+    // Calling plan
+    Canada: "Canada",
+    "Canada + US": "Canada + États-Unis",
+    International: "International",
+    // Landline
+    "New line": "Nouvelle ligne",
+    "Keep existing number": "Conserver le numéro existant",
+    "Local calling": "Appels locaux",
+    "International minutes": "Minutes internationales",
+    // Bundle
+    "2 services": "2 services",
+    "3 services": "3 services",
+    // Payment & financing
+    "Confirm payment": "Confirmer le paiement",
+    "SmartPay 24 months": "SmartPay 24 mois",
+    "SmartPay 36 months": "SmartPay 36 mois",
+    "SmartPay with deferred balance": "SmartPay avec solde différé",
+    "Pay full device upfront": "Payer l'appareil en totalité",
+    "Confirm financing": "Confirmer le financement",
+    "Choose another payment method": "Choisir un autre mode de paiement",
+    "Yes, confirm": "Oui, confirmer",
+    "No, choose another method": "Non, choisir une autre méthode",
+    // Shipping & address
+    "Use my entered address": "Utiliser l'adresse saisie",
+    "Enter address manually": "Saisir l'adresse manuellement",
+    // Navigation & flow
+    Continue: "Continuer",
+    "Go back": "Retour",
+    Restart: "Recommencer",
+    "Agent assist": "Assistance agent",
+    "Yes, switch": "Oui, changer",
+    "No, stay here": "Non, rester ici",
+    // Support & helpdesk
+    "Internet issue": "Problème Internet",
+    "Billing issue": "Problème de facturation",
+    "Service outage": "Panne de service",
+    Resolved: "Résolu",
+    "Need specialist": "Besoin d'un spécialiste",
+    "Modem/Router": "Modem/Routeur",
+    "Phone device": "Appareil téléphonique",
+    "TV receiver": "Récepteur TV",
+    "Issue unresolved": "Problème non résolu",
+    "Product selection": "Sélection de produit",
+    "Offer assistance": "Aide aux offres",
+    Troubleshooting: "Dépannage",
+    "Login guidance": "Aide à la connexion",
+    "View business offers": "Voir les offres entreprise",
+    "Talk to corporate specialist": "Parler à un spécialiste entreprise",
+    // Ratings
+    "1 star": "1 étoile",
+    "2 stars": "2 étoiles",
+    "3 stars": "3 étoiles",
+    "4 stars": "4 étoiles",
+    "5 stars": "5 étoiles",
+    // General
+    "Start over": "Recommencer",
     "End chat": "Terminer le chat"
   },
   es: {
+    // Customer & service selection
     "New client": "Cliente nuevo",
     "Existing client": "Cliente existente",
     Internet: "Internet",
     Mobility: "Móvil",
     Landline: "Teléfono fijo",
     Bundle: "Paquete",
+    Login: "Iniciar sesión",
+    "Continue automatically": "Continuar automáticamente",
+    "Authenticate with phone/email": "Autenticar con teléfono/correo",
+    "Retry authentication": "Reintentar autenticación",
+    // Internet priority & quote
     Speed: "Velocidad",
     Value: "Valor",
     Performance: "Rendimiento",
+    "Fastest speed": "Velocidad máxima",
+    "Balanced value": "Valor equilibrado",
+    "Upload-intensive": "Intensivo en subida",
     "Build my plan": "Crear mi plan",
+    "Generate quote": "Generar cotización",
+    "Hide quote": "Ocultar cotización",
+    "Generate fresh quote": "Generar nueva cotización",
+    // Plan & checkout
     "Confirm plan": "Confirmar plan",
     "Change plan": "Cambiar plan",
     "Checkout now": "Ir al pago",
     "Add mobility offers": "Agregar ofertas móviles",
     "Add internet offers": "Agregar ofertas de internet",
     "Add landline offers": "Agregar ofertas de línea fija",
-    "Generate quote": "Generar cotización",
-    "Hide quote": "Ocultar cotización",
     "No thanks": "No gracias",
-    "Confirm payment": "Confirmar pago",
-    "Start over": "Comenzar de nuevo",
+    "Show mobility offers": "Ver ofertas móviles",
     "That is all, continue": "Eso es todo, continuar",
-    "Retry authentication": "Reintentar autenticación",
+    // Mobility BYOD & device
+    "Yes, bring my own phone": "Sí, traigo mi propio teléfono",
+    "No, I need a new phone": "No, necesito un teléfono nuevo",
+    iPhone: "iPhone",
+    "Samsung Galaxy": "Samsung Galaxy",
+    "Google Pixel": "Google Pixel",
+    "Other device": "Otro dispositivo",
+    // Calling plan
+    Canada: "Canadá",
+    "Canada + US": "Canadá + EE.UU.",
+    International: "Internacional",
+    // Landline
+    "New line": "Línea nueva",
+    "Keep existing number": "Conservar número existente",
+    "Local calling": "Llamadas locales",
+    "International minutes": "Minutos internacionales",
+    // Bundle
+    "2 services": "2 servicios",
+    "3 services": "3 servicios",
+    // Payment & financing
+    "Confirm payment": "Confirmar pago",
+    "SmartPay 24 months": "SmartPay 24 meses",
+    "SmartPay 36 months": "SmartPay 36 meses",
+    "SmartPay with deferred balance": "SmartPay con saldo diferido",
+    "Pay full device upfront": "Pagar dispositivo completo por adelantado",
+    "Confirm financing": "Confirmar financiación",
+    "Choose another payment method": "Elegir otro método de pago",
+    "Yes, confirm": "Sí, confirmar",
+    "No, choose another method": "No, elegir otro método",
+    // Shipping & address
+    "Use my entered address": "Usar la dirección ingresada",
+    "Enter address manually": "Ingresar dirección manualmente",
+    // Navigation & flow
+    Continue: "Continuar",
+    "Go back": "Volver",
+    Restart: "Reiniciar",
+    "Agent assist": "Ayuda de agente",
+    "Yes, switch": "Sí, cambiar",
+    "No, stay here": "No, quedarme",
+    // Support & helpdesk
+    "Internet issue": "Problema de internet",
+    "Billing issue": "Problema de facturación",
+    "Service outage": "Interrupción del servicio",
+    Resolved: "Resuelto",
+    "Need specialist": "Necesito especialista",
+    "Modem/Router": "Módem/Enrutador",
+    "Phone device": "Dispositivo de teléfono",
+    "TV receiver": "Receptor de TV",
+    "Issue unresolved": "Problema sin resolver",
+    "Product selection": "Selección de producto",
+    "Offer assistance": "Ayuda con ofertas",
+    Troubleshooting: "Solución de problemas",
+    "Login guidance": "Ayuda para iniciar sesión",
+    "View business offers": "Ver ofertas empresariales",
+    "Talk to corporate specialist": "Hablar con especialista empresarial",
+    // Ratings
+    "1 star": "1 estrella",
+    "2 stars": "2 estrellas",
+    "3 stars": "3 estrellas",
+    "4 stars": "4 estrellas",
+    "5 stars": "5 estrellas",
+    // General
+    "Start over": "Comenzar de nuevo",
     "End chat": "Finalizar chat"
   },
   zh: {
+    // Customer & service selection
     "New client": "新客户",
     "Existing client": "现有客户",
     Internet: "互联网",
     Mobility: "移动服务",
     Landline: "固定电话",
     Bundle: "套餐",
+    Login: "登录",
+    "Continue automatically": "自动继续",
+    "Authenticate with phone/email": "通过电话/邮箱验证",
+    "Retry authentication": "重试认证",
+    // Internet priority & quote
     Speed: "速度",
     Value: "性价比",
     Performance: "性能",
+    "Fastest speed": "极速优先",
+    "Balanced value": "均衡性价比",
+    "Upload-intensive": "上传密集型",
     "Build my plan": "创建我的方案",
+    "Generate quote": "生成报价",
+    "Hide quote": "隐藏报价",
+    "Generate fresh quote": "重新生成报价",
+    // Plan & checkout
     "Confirm plan": "确认方案",
     "Change plan": "更改方案",
     "Checkout now": "立即结账",
     "Add mobility offers": "添加移动服务优惠",
     "Add internet offers": "添加互联网优惠",
     "Add landline offers": "添加固话优惠",
-    "Generate quote": "生成报价",
-    "Hide quote": "隐藏报价",
     "No thanks": "不需要",
-    "Confirm payment": "确认付款",
-    "Start over": "重新开始",
+    "Show mobility offers": "查看移动服务优惠",
     "That is all, continue": "就这些，继续",
-    "Retry authentication": "重试认证",
+    // Mobility BYOD & device
+    "Yes, bring my own phone": "是，我自带手机",
+    "No, I need a new phone": "否，我需要新手机",
+    iPhone: "iPhone",
+    "Samsung Galaxy": "三星 Galaxy",
+    "Google Pixel": "谷歌 Pixel",
+    "Other device": "其他设备",
+    // Calling plan
+    Canada: "加拿大",
+    "Canada + US": "加拿大 + 美国",
+    International: "国际",
+    // Landline
+    "New line": "新线路",
+    "Keep existing number": "保留现有号码",
+    "Local calling": "本地通话",
+    "International minutes": "国际分钟",
+    // Bundle
+    "2 services": "2 项服务",
+    "3 services": "3 项服务",
+    // Payment & financing
+    "Confirm payment": "确认付款",
+    "SmartPay 24 months": "SmartPay 24 个月",
+    "SmartPay 36 months": "SmartPay 36 个月",
+    "SmartPay with deferred balance": "SmartPay 延迟余额方案",
+    "Pay full device upfront": "一次性全额付款",
+    "Confirm financing": "确认融资方案",
+    "Choose another payment method": "选择其他付款方式",
+    "Yes, confirm": "是，确认",
+    "No, choose another method": "否，选择其他方式",
+    // Shipping & address
+    "Use my entered address": "使用我输入的地址",
+    "Enter address manually": "手动输入地址",
+    // Navigation & flow
+    Continue: "继续",
+    "Go back": "返回",
+    Restart: "重新开始",
+    "Agent assist": "转接客服",
+    "Yes, switch": "是，切换",
+    "No, stay here": "否，留在此处",
+    // Support & helpdesk
+    "Internet issue": "互联网问题",
+    "Billing issue": "账单问题",
+    "Service outage": "服务中断",
+    Resolved: "已解决",
+    "Need specialist": "需要专家",
+    "Modem/Router": "调制解调器/路由器",
+    "Phone device": "电话设备",
+    "TV receiver": "电视接收器",
+    "Issue unresolved": "问题未解决",
+    "Product selection": "产品选择",
+    "Offer assistance": "优惠咨询",
+    Troubleshooting: "故障排除",
+    "Login guidance": "登录指引",
+    "View business offers": "查看企业优惠",
+    "Talk to corporate specialist": "联系企业专员",
+    // Ratings
+    "1 star": "1 星",
+    "2 stars": "2 星",
+    "3 stars": "3 星",
+    "4 stars": "4 星",
+    "5 stars": "5 星",
+    // General
+    "Start over": "重新开始",
     "End chat": "结束聊天"
   }
 };
@@ -869,12 +1103,9 @@ function validateOfferCoverage() {
 const chatLauncher = document.getElementById("chat-launcher");
 const chatWidget = document.getElementById("chat-widget");
 const closeChat = document.getElementById("close-chat");
-const llmStatusChip = document.getElementById("llm-status");
-const llmStatusText = document.getElementById("llm-status-text");
 const llmStatusChipSite = document.getElementById("llm-status-site");
 const llmStatusTextSite = document.getElementById("llm-status-text-site");
 const llmStatusTargets = [
-  [llmStatusChip, llmStatusText],
   [llmStatusChipSite, llmStatusTextSite]
 ].filter(([chip, text]) => chip && text);
 const languageSwitcher = document.getElementById("language-switcher");
@@ -1988,16 +2219,25 @@ function normalizeQuotePreferences(preferences = {}, changedKey = null) {
 
   const total = keys.reduce((sum, key) => sum + Number(next[key] || 0), 0);
   if (total !== 100) {
-    let running = 0;
-    keys.forEach((key, idx) => {
-      if (idx === keys.length - 1) {
-        next[key] = Math.max(0, 100 - running);
-        return;
-      }
-      const value = Math.max(0, Math.min(100, Math.round(Number(next[key] || 0))));
-      next[key] = value;
-      running += value;
-    });
+    if (total <= 0) {
+      // All zero — distribute with sensible defaults
+      next.budget = 34;
+      next.speed = 33;
+      next.deviceCost = 33;
+    } else {
+      // Proportionally scale every key so the result always sums to exactly 100,
+      // even when individual clamped values already exceed 100 in aggregate.
+      let running = 0;
+      keys.forEach((key, idx) => {
+        if (idx === keys.length - 1) {
+          next[key] = Math.max(0, 100 - running);
+          return;
+        }
+        const scaled = Math.round((Number(next[key] || 0) / total) * 100);
+        next[key] = Math.max(0, scaled);
+        running += next[key];
+      });
+    }
   } else {
     keys.forEach((key) => {
       next[key] = Math.round(Number(next[key] || 0));
@@ -2322,6 +2562,10 @@ function renderQuoteBuilderPanel() {
   if (!shouldShow) return;
 
   const preferences = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || {});
+  // preferenceTotal must be derived here; using it only from the outer template
+  // scope was a ReferenceError (strict-mode ES module) that crashed the entire
+  // function, preventing the sliders from ever rendering.
+  const preferenceTotal = Math.round(preferences.budget) + Math.round(preferences.speed) + Math.round(preferences.deviceCost);
   const quotes = state.context.quoteBuilder?.lastPreview || [];
   const savedAt = state.context.quoteBuilder?.savedAt || null;
   const diffNote = state.context.quoteBuilder?.lastDiff || null;
@@ -2619,6 +2863,17 @@ function postMessage(role, text, { force = false } = {}) {
   const isTranslatableUserChoice = role === "user" && state.activeQuickActionLabels?.has(sourceText);
   if (role === "bot" || isTranslatableUserChoice) {
     el.setAttribute("data-source-text", sourceText);
+    // Auto-translate immediately when the UI language is non-English so that
+    // every new message appears in the selected language without a manual
+    // language-switch refresh.
+    const currentLang = getCurrentUiLanguage();
+    if (currentLang !== "en" && sourceText) {
+      void translateForUi(sourceText, currentLang).then((translated) => {
+        if (!el.isConnected) return;
+        if (getCurrentUiLanguage() !== currentLang) return;
+        el.textContent = translated || sourceText;
+      });
+    }
   }
   chatWindow.appendChild(el);
   chatWindow.scrollTop = chatWindow.scrollHeight;
@@ -2937,6 +3192,12 @@ function setConversationLanguage(languageCode = "en", { announce = true } = {}) 
     const languageLabel = LANGUAGE_LABELS[normalizedLanguage] || normalizedLanguage;
     postMessage("bot", `Language switched to ${languageLabel}.`);
     postMessage("bot", getLanguageStatusPrompt(state.flowStep));
+    // Re-render the active choice buttons from scratch so labels appear in the
+    // new language immediately (the async translateForUi calls inside
+    // refreshQuickActionsLanguage will update any buttons not yet resolved).
+    refreshQuickActionsLanguage();
+    // Re-sweep all bot messages including the ones we just posted above.
+    refreshVisibleBotMessagesLanguage(normalizedLanguage);
   }
 }
 
@@ -3741,10 +4002,30 @@ function transitionTo(nextStep, patchContext = {}, { pushHistory = true, enforce
     sameStepCount: guard.sameStepCount
   };
   if (guard.stuck) {
-    logClient("info", "flow_loop_detected", {
+    logClient("error", "flow_loop_detected", {
       step: nextStep,
       sameStepCount: guard.sameStepCount
     });
+    // Hard-break the loop: send the user to a safe recovery step rather than
+    // allowing the call stack to overflow.  BASKET_REVIEW is a safe fallback
+    // for checkout-area loops; early funnel loops fall back to SERVICE_SELECTION.
+    const recoveryStep = [
+      FLOW_STEPS.ELIGIBILITY_CHECK,
+      FLOW_STEPS.PAYMENT_CARD_NUMBER,
+      FLOW_STEPS.PAYMENT_METHOD,
+      FLOW_STEPS.PAYMENT_CARD_ENTRY
+    ].includes(nextStep)
+      ? FLOW_STEPS.BASKET_REVIEW
+      : FLOW_STEPS.SERVICE_SELECTION;
+    if (nextStep !== recoveryStep) {
+      postMessage("bot", "I detected a flow issue and returned you to a safe step. Please continue from here.");
+      state.context.loopGuard = { lastStep: null, lastContextHash: null, sameStepCount: 0 };
+      state.flowStep = recoveryStep;
+      trackSlaTransition(recoveryStep);
+      logClient("info", "flow_transition", { from: nextStep, to: recoveryStep, patchContext: { loopRecovery: true } });
+      renderStep(recoveryStep);
+      return;
+    }
   }
   const prev = state.flowStep;
   state.flowStep = nextStep;
@@ -5503,6 +5784,8 @@ function renderStep(step) {
       postMessage("bot", "What service are you looking for today?");
       showChoiceButtons(["Internet", "Mobility", "Landline"], (choice) => {
         postMessage("user", choice);
+        // Close any open quote panel so it re-opens fresh for the new service.
+        state.quotePanelPinned = false;
         if (choice === "Internet") {
           setOfferPageForCategory("home internet");
           applyContextPatch({
@@ -5510,18 +5793,22 @@ function renderStep(step) {
             intent: "home internet",
             selectedEntryIntent: "Internet",
             activeTask: "sales",
+            // Reset plan/address fields so a clean internet flow begins.
+            // basket is intentionally kept for bundle cross-sell continuity.
             selectedPlanId: null,
-            checkout: {
-              primaryPlanId: null
-            },
+            checkout: { primaryPlanId: null },
             internetPreference: null,
+            serviceAddress: null,
+            serviceAddressValidated: false,
+            addressCaptureRetries: 0,
             quoteBuilder: {
               preferences: getQuoteDefaultsFromPreference("value"),
               lastPreview: [],
               lastPreviewAt: null,
               autoTriggeredForAddress: null,
               autoTriggeredForService: null
-            }
+            },
+            salesProfile: null
           });
           transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true });
           return;
@@ -5529,10 +5816,24 @@ function renderStep(step) {
         const mappedIntent = choice === "Mobility" ? "mobility" : "landline";
         setOfferPageForCategory(mappedIntent);
         applyContextPatch({
-          selectedService: mappedIntent === "mobility" ? "mobility" : "landline",
+          selectedService: mappedIntent,
           intent: mappedIntent,
           selectedEntryIntent: mappedIntent === "mobility" ? "Mobility" : "Landline",
           activeTask: "sales",
+          // Reset prior internet-specific fields; keep basket for bundling.
+          selectedPlanId: null,
+          checkout: { primaryPlanId: null },
+          internetPreference: null,
+          serviceAddress: null,
+          serviceAddressValidated: false,
+          addressCaptureRetries: 0,
+          quoteBuilder: {
+            preferences: getQuoteDefaultsFromPreference("value"),
+            lastPreview: [],
+            lastPreviewAt: null,
+            autoTriggeredForAddress: null,
+            autoTriggeredForService: null
+          },
           salesProfile: {
             serviceType: mappedIntent,
             speedPriority: null,
@@ -5603,8 +5904,16 @@ function renderStep(step) {
       showChoiceButtons(["Speed", "Value", "Performance", "Build my plan"], (choice) => {
         postMessage("user", choice);
         if (choice === "Build my plan") {
-          const defaultPrefs = getQuoteDefaultsFromPreference(state.context.internetPreference || "value");
-          applyContextPatch({ quoteBuilder: { preferences: defaultPrefs } });
+          // "custom" must be written to internetPreference BEFORE the async
+          // generateQuotePreview resolves, otherwise canProceed("INTERNET_PLAN_PITCH")
+          // fails (it requires Boolean(context.internetPreference)) and the
+          // subsequent transitionTo throws an invalid_flow_transition loop.
+          const resolvedPreference = state.context.internetPreference || "custom";
+          const defaultPrefs = getQuoteDefaultsFromPreference(resolvedPreference);
+          applyContextPatch({
+            internetPreference: resolvedPreference,
+            quoteBuilder: { preferences: defaultPrefs }
+          });
           void generateQuotePreview({ announce: true }).then(() => {
             transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
           });
@@ -5612,8 +5921,7 @@ function renderStep(step) {
         }
         const normalizedPreference = choice.toLowerCase();
         const defaultPrefs = getQuoteDefaultsFromPreference(normalizedPreference);
-        applyContextPatch({ internetPreference: choice.toLowerCase() });
-        applyContextPatch({ quoteBuilder: { preferences: defaultPrefs } });
+        applyContextPatch({ internetPreference: normalizedPreference, quoteBuilder: { preferences: defaultPrefs } });
         transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
       });
       break;
@@ -6145,7 +6453,16 @@ function renderStep(step) {
     }
 
     case FLOW_STEPS.ELIGIBILITY_CHECK:
-      runEligibilityCheck();
+      // Guard against re-entrant execution: if runEligibilityCheck triggers a
+      // failed transitionTo, the default fallback calls renderStep(ELIGIBILITY_CHECK)
+      // again, which without this guard would create infinite recursion.
+      if (state._eligibilityRunning) break;
+      state._eligibilityRunning = true;
+      try {
+        runEligibilityCheck();
+      } finally {
+        state._eligibilityRunning = false;
+      }
       break;
 
     case FLOW_STEPS.PAYMENT_METHOD:
@@ -6745,6 +7062,52 @@ async function handleChatInput(message) {
   const canonicalInput = normalizeUserInputForStep(trimmed, state.context.i18n?.parserLanguage || getCurrentUiLanguage());
   const lower = canonicalInput.toLowerCase();
 
+  // Mid-flow service switch detector — intercepts service-intent keywords typed
+  // while the user is already in an active service flow (not at the selection
+  // step itself).  Presents a confirmation prompt so basket items are preserved
+  // for bundling and the user is never silently dropped back to SERVICE_SELECTION.
+  const MID_FLOW_SWITCH_STEPS = new Set([
+    FLOW_STEPS.INTERNET_ADDRESS_REQUEST,
+    FLOW_STEPS.INTERNET_ADDRESS_VALIDATE,
+    FLOW_STEPS.INTERNET_AVAILABILITY_RESULT,
+    FLOW_STEPS.INTERNET_PRIORITY_CAPTURE,
+    FLOW_STEPS.INTERNET_PLAN_PITCH,
+    FLOW_STEPS.PLAN_CONFIRMATION,
+    FLOW_STEPS.INTENT_DISCOVERY,
+    FLOW_STEPS.OFFER_BROWSE
+  ]);
+  if (MID_FLOW_SWITCH_STEPS.has(state.flowStep)) {
+    const currentService = state.context.selectedService || "";
+    let detectedService = null;
+    if (/\b(internet|fibe|wifi)\b/i.test(lower) && currentService !== "internet") detectedService = "internet";
+    else if (/\b(mobility|cell|phone)\b/i.test(lower) && currentService !== "mobility") detectedService = "mobility";
+    else if (/\b(landline|home phone)\b/i.test(lower) && currentService !== "landline") detectedService = "landline";
+    if (detectedService) {
+      const hasBasketItems = Array.isArray(state.context.basket) && state.context.basket.length > 0;
+      const basketNote = hasBasketItems
+        ? ` Your existing basket (${state.context.basket.length} item${state.context.basket.length !== 1 ? "s" : ""}) will be kept.`
+        : "";
+      postMessage(
+        "bot",
+        `It looks like you want to switch to ${detectedService}.${basketNote} Do you want to switch services now?`
+      );
+      showChoiceButtons(["Yes, switch", "No, stay here"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "Yes, switch") {
+          transitionTo(FLOW_STEPS.SERVICE_SELECTION, { addServiceSwitchIntent: detectedService }, { pushHistory: true, enforceContract: false });
+        } else {
+          renderStep(state.flowStep);
+        }
+      });
+      logClient("info", "mid_flow_service_switch_prompt", {
+        from: currentService,
+        to: detectedService,
+        step: state.flowStep
+      });
+      return;
+    }
+  }
+
   switch (state.flowStep) {
     case FLOW_STEPS.INIT_CONNECTING:
       postMessage("bot", "We are still connecting you. Please hold for a moment.");
@@ -6785,6 +7148,8 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.SERVICE_SELECTION:
+      // Close any open quote panel so the new service starts fresh.
+      state.quotePanelPinned = false;
       if (lower.includes("internet")) {
         setOfferPageForCategory("home internet");
         applyContextPatch({
@@ -6797,13 +7162,17 @@ async function handleChatInput(message) {
             primaryPlanId: null
           },
           internetPreference: null,
+          serviceAddress: null,
+          serviceAddressValidated: false,
+          addressCaptureRetries: 0,
           quoteBuilder: {
             preferences: getQuoteDefaultsFromPreference("value"),
             lastPreview: [],
             lastPreviewAt: null,
             autoTriggeredForAddress: null,
             autoTriggeredForService: null
-          }
+          },
+          salesProfile: null
         });
         transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true });
         return;
@@ -6815,6 +7184,21 @@ async function handleChatInput(message) {
           intent: "mobility",
           selectedEntryIntent: "Mobility",
           activeTask: "sales",
+          selectedPlanId: null,
+          checkout: {
+            primaryPlanId: null
+          },
+          internetPreference: null,
+          serviceAddress: null,
+          serviceAddressValidated: false,
+          addressCaptureRetries: 0,
+          quoteBuilder: {
+            preferences: getQuoteDefaultsFromPreference("value"),
+            lastPreview: [],
+            lastPreviewAt: null,
+            autoTriggeredForAddress: null,
+            autoTriggeredForService: null
+          },
           salesProfile: {
             serviceType: "mobility",
             speedPriority: null,
@@ -6840,6 +7224,21 @@ async function handleChatInput(message) {
           intent: "landline",
           selectedEntryIntent: "Landline",
           activeTask: "sales",
+          selectedPlanId: null,
+          checkout: {
+            primaryPlanId: null
+          },
+          internetPreference: null,
+          serviceAddress: null,
+          serviceAddressValidated: false,
+          addressCaptureRetries: 0,
+          quoteBuilder: {
+            preferences: getQuoteDefaultsFromPreference("value"),
+            lastPreview: [],
+            lastPreviewAt: null,
+            autoTriggeredForAddress: null,
+            autoTriggeredForService: null
+          },
           salesProfile: {
             serviceType: "landline",
             speedPriority: null,
@@ -6954,8 +7353,12 @@ async function handleChatInput(message) {
 
     case FLOW_STEPS.INTERNET_PRIORITY_CAPTURE: {
       if (/(quote|build my plan|compare)/i.test(canonicalInput)) {
-        const defaults = getQuoteDefaultsFromPreference(state.context.internetPreference || "value");
-        applyContextPatch({ quoteBuilder: { preferences: defaults } });
+        // Same guard as the button path: internetPreference must be set before
+        // generateQuotePreview is awaited so canProceed("INTERNET_PLAN_PITCH")
+        // passes when transitionTo is called below.
+        const resolvedPreference = state.context.internetPreference || "custom";
+        const defaults = getQuoteDefaultsFromPreference(resolvedPreference);
+        applyContextPatch({ internetPreference: resolvedPreference, quoteBuilder: { preferences: defaults } });
         await generateQuotePreview({ announce: true });
         transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
         return;
@@ -6965,8 +7368,7 @@ async function handleChatInput(message) {
         handleUnclearInput(message, "Please tell me your internet priority: speed, value, or performance.");
         return;
       }
-      applyContextPatch({ internetPreference: preference });
-      applyContextPatch({ quoteBuilder: { preferences: getQuoteDefaultsFromPreference(preference) } });
+      applyContextPatch({ internetPreference: preference, quoteBuilder: { preferences: getQuoteDefaultsFromPreference(preference) } });
       transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
       return;
     }

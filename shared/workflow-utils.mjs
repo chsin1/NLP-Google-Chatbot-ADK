@@ -26,11 +26,16 @@ export function canProceed(step = "", context = {}) {
     case "INTERNET_ADDRESS_VALIDATE":
       return Boolean(context.serviceAddress) && Boolean(context.serviceAddressValidated);
     case "INTERNET_AVAILABILITY_RESULT":
-      return Boolean(context.serviceAddress);
+      return Boolean(resolveAddress(context));
     case "INTERNET_PRIORITY_CAPTURE":
-      return Boolean(context.serviceAddress);
+      // Allow entry when any resolvable address is present, not just the
+      // explicit serviceAddress field (existing customers may have address
+      // only in authUser.prefilledAddress at this stage of the flow).
+      return Boolean(resolveAddress(context));
     case "INTERNET_PLAN_PITCH":
-      return Boolean(context.serviceAddress) && Boolean(context.internetPreference);
+      // internetPreference may be "custom" when the Guided Quote Builder path
+      // is used instead of the speed/value/performance quick-pick buttons.
+      return Boolean(resolveAddress(context)) && Boolean(context.internetPreference);
     case "PLAN_CONFIRMATION":
       return Boolean(context.selectedPlanId);
     case "NEW_ONBOARD_COMBINED_CAPTURE":
@@ -133,9 +138,22 @@ function getFinancingAmount(basket = []) {
     .reduce((sum, item) => sum + item.devicePrice, 0);
 }
 
+// Mirrors the resolveServiceAddress fallback chain in app.js so canProceed
+// does not require the explicit serviceAddress field for auth'd customers
+// whose address lives in authUser.prefilledAddress.
+function resolveAddress(context = {}) {
+  return (
+    context.serviceAddress ||
+    context.newOnboarding?.address ||
+    context.authUser?.prefilledAddress ||
+    context.shipping?.address ||
+    null
+  );
+}
+
 function canAccessOfferBrowse(context = {}) {
   const hasAreaCode = Boolean(context.areaCode);
-  const hasValidatedAddress = Boolean(context.serviceAddressValidated);
+  const hasValidatedAddress = Boolean(context.serviceAddressValidated) || Boolean(resolveAddress(context));
   const hasIntent = Boolean(context.intent);
   const hasClarification = hasSalesClarification(context);
   if ((!hasAreaCode && !hasValidatedAddress) || !hasIntent || !hasClarification) return false;
