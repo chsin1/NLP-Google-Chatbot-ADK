@@ -342,7 +342,10 @@ const STATIC_UI_TRANSLATIONS = {
     "Change plan": "Changer le forfait",
     "Checkout now": "Passer au paiement",
     "Add mobility offers": "Ajouter des offres mobilité",
+    "Add internet offers": "Ajouter des offres Internet",
     "Add landline offers": "Ajouter des offres ligne fixe",
+    "Generate quote": "Générer un devis",
+    "Hide quote": "Masquer le devis",
     "No thanks": "Non merci",
     "Confirm payment": "Confirmer le paiement",
     "Start over": "Recommencer",
@@ -365,7 +368,10 @@ const STATIC_UI_TRANSLATIONS = {
     "Change plan": "Cambiar plan",
     "Checkout now": "Ir al pago",
     "Add mobility offers": "Agregar ofertas móviles",
+    "Add internet offers": "Agregar ofertas de internet",
     "Add landline offers": "Agregar ofertas de línea fija",
+    "Generate quote": "Generar cotización",
+    "Hide quote": "Ocultar cotización",
     "No thanks": "No gracias",
     "Confirm payment": "Confirmar pago",
     "Start over": "Comenzar de nuevo",
@@ -388,13 +394,141 @@ const STATIC_UI_TRANSLATIONS = {
     "Change plan": "更改方案",
     "Checkout now": "立即结账",
     "Add mobility offers": "添加移动服务优惠",
+    "Add internet offers": "添加互联网优惠",
     "Add landline offers": "添加固话优惠",
+    "Generate quote": "生成报价",
+    "Hide quote": "隐藏报价",
     "No thanks": "不需要",
     "Confirm payment": "确认付款",
     "Start over": "重新开始",
     "That is all, continue": "就这些，继续",
     "Retry authentication": "重试认证",
     "End chat": "结束聊天"
+  }
+};
+const HEURISTIC_UI_TRANSLATIONS = {
+  fr: {
+    "Language switched to English.": "Langue changée en anglais.",
+    "Language switched to Français.": "Langue changée en français.",
+    "Language switched to Español.": "Langue changée en espagnol.",
+    "Language switched to 中文.": "Langue changée en chinois.",
+    "How are you today, and how can I help?": "Comment allez-vous aujourd'hui, et comment puis-je vous aider ?",
+    "Are you a new client or an existing Bell client?": "Êtes-vous un nouveau client ou un client Bell existant ?",
+    "What service are you looking for today?": "Quel service recherchez-vous aujourd'hui ?",
+    "I will continue with the next service question in this language.": "Je vais continuer avec la prochaine question de service dans cette langue.",
+    "I will continue with your plan recommendations in this language.": "Je vais continuer avec vos recommandations de forfait dans cette langue.",
+    "I will continue with your offer selection in this language.": "Je vais continuer avec votre sélection d'offres dans cette langue.",
+    "I will continue with payment details in this language.": "Je vais continuer avec les détails de paiement dans cette langue.",
+    "Language updated. I will continue in your selected language.": "Langue mise à jour. Je continuerai dans la langue sélectionnée.",
+    "To confirm internet availability in your area, what service address should I use? I will suggest matches as you type.": "Pour confirmer la disponibilité d'Internet dans votre secteur, quelle adresse de service dois-je utiliser ? Je proposerai des correspondances pendant la saisie.",
+    "Great news. Internet offers are available at your address.": "Excellente nouvelle. Des offres Internet sont disponibles à votre adresse.",
+    "What is your top priority for internet: speed, value, or performance?": "Quelle est votre priorité pour Internet : vitesse, valeur ou performance ?",
+    "Please provide your full name, email, and phone number in one message.": "Veuillez fournir votre nom complet, votre courriel et votre numéro de téléphone dans un seul message.",
+    "Great, your new account has been created.": "Parfait, votre nouveau compte a été créé.",
+    "Would you like to checkout now? You can also add mobility, internet, or landline offers.": "Souhaitez-vous passer au paiement maintenant ? Vous pouvez aussi ajouter des offres mobilité, Internet ou ligne fixe.",
+    "Before I run validation, what service address should I use?": "Avant de lancer la validation, quelle adresse de service dois-je utiliser ?",
+    "Please enter your full service address.": "Veuillez entrer votre adresse de service complète.",
+    "Enter your card number using the 4 boxes below (16 digits total).": "Entrez votre numéro de carte dans les 4 cases ci-dessous (16 chiffres au total).",
+    "Accepted brands: Visa, MasterCard, and Amex.": "Marques acceptées : Visa, MasterCard et Amex.",
+    "Select shipping option: prefilled address, new address, or lookup address.": "Choisissez une option de livraison : adresse préremplie, nouvelle adresse ou recherche d'adresse.",
+    "Set up meeting": "Planifier une rencontre",
+    "Choose Monday-Thursday slot": "Choisir un créneau du lundi au jeudi",
+    "Skip booking": "Ignorer la réservation",
+    "Confirm booking": "Confirmer la réservation",
+    "Choose another slot": "Choisir un autre créneau",
+    "Yes, remind me": "Oui, me rappeler",
+    "No reminder": "Aucun rappel",
+    "Use prefilled address": "Utiliser l'adresse préremplie",
+    "Enter new address": "Entrer une nouvelle adresse",
+    "Lookup address": "Rechercher une adresse",
+    "Use profile address": "Utiliser l'adresse du profil",
+    "Use onboarding address": "Utiliser l'adresse d'inscription",
+    "Enter a new address": "Entrer une nouvelle adresse",
+    "Add internet offers": "Ajouter des offres Internet",
+    "Checkout now": "Passer au paiement",
+    "No thanks": "Non merci"
+  },
+  es: {
+    "Language switched to English.": "Idioma cambiado a inglés.",
+    "Language switched to Français.": "Idioma cambiado a francés.",
+    "Language switched to Español.": "Idioma cambiado a español.",
+    "Language switched to 中文.": "Idioma cambiado a chino.",
+    "How are you today, and how can I help?": "¿Cómo estás hoy y cómo puedo ayudarte?",
+    "Are you a new client or an existing Bell client?": "¿Eres un cliente nuevo o un cliente existente de Bell?",
+    "What service are you looking for today?": "¿Qué servicio estás buscando hoy?",
+    "I will continue with the next service question in this language.": "Continuaré con la siguiente pregunta de servicio en este idioma.",
+    "I will continue with your plan recommendations in this language.": "Continuaré con tus recomendaciones de plan en este idioma.",
+    "I will continue with your offer selection in this language.": "Continuaré con tu selección de ofertas en este idioma.",
+    "I will continue with payment details in this language.": "Continuaré con los detalles de pago en este idioma.",
+    "Language updated. I will continue in your selected language.": "Idioma actualizado. Continuaré en el idioma seleccionado.",
+    "To confirm internet availability in your area, what service address should I use? I will suggest matches as you type.": "Para confirmar la disponibilidad de Internet en tu zona, ¿qué dirección de servicio debo usar? Te sugeriré coincidencias mientras escribes.",
+    "Great news. Internet offers are available at your address.": "Buenas noticias. Hay ofertas de Internet disponibles en tu dirección.",
+    "What is your top priority for internet: speed, value, or performance?": "¿Cuál es tu prioridad para Internet: velocidad, valor o rendimiento?",
+    "Please provide your full name, email, and phone number in one message.": "Comparte tu nombre completo, correo y número de teléfono en un solo mensaje.",
+    "Great, your new account has been created.": "Perfecto, tu nueva cuenta ha sido creada.",
+    "Would you like to checkout now? You can also add mobility, internet, or landline offers.": "¿Quieres pagar ahora? También puedes agregar ofertas de móvil, Internet o línea fija.",
+    "Before I run validation, what service address should I use?": "Antes de ejecutar la validación, ¿qué dirección de servicio debo usar?",
+    "Please enter your full service address.": "Ingresa tu dirección de servicio completa.",
+    "Enter your card number using the 4 boxes below (16 digits total).": "Ingresa tu número de tarjeta usando las 4 casillas (16 dígitos en total).",
+    "Accepted brands: Visa, MasterCard, and Amex.": "Marcas aceptadas: Visa, MasterCard y Amex.",
+    "Select shipping option: prefilled address, new address, or lookup address.": "Selecciona la opción de envío: dirección prellenada, nueva dirección o buscar dirección.",
+    "Set up meeting": "Programar reunión",
+    "Choose Monday-Thursday slot": "Elegir turno de lunes a jueves",
+    "Skip booking": "Omitir reserva",
+    "Confirm booking": "Confirmar reserva",
+    "Choose another slot": "Elegir otro turno",
+    "Yes, remind me": "Sí, recuérdame",
+    "No reminder": "Sin recordatorio",
+    "Use prefilled address": "Usar dirección prellenada",
+    "Enter new address": "Ingresar nueva dirección",
+    "Lookup address": "Buscar dirección",
+    "Use profile address": "Usar dirección del perfil",
+    "Use onboarding address": "Usar dirección de registro",
+    "Enter a new address": "Ingresar una nueva dirección",
+    "Add internet offers": "Agregar ofertas de internet",
+    "Checkout now": "Ir al pago",
+    "No thanks": "No gracias"
+  },
+  zh: {
+    "Language switched to English.": "语言已切换为英语。",
+    "Language switched to Français.": "语言已切换为法语。",
+    "Language switched to Español.": "语言已切换为西班牙语。",
+    "Language switched to 中文.": "语言已切换为中文。",
+    "How are you today, and how can I help?": "您好，今天感觉如何？我可以如何帮助您？",
+    "Are you a new client or an existing Bell client?": "您是新客户还是 Bell 的现有客户？",
+    "What service are you looking for today?": "您今天想了解哪类服务？",
+    "I will continue with the next service question in this language.": "我将使用该语言继续下一步服务问题。",
+    "I will continue with your plan recommendations in this language.": "我将使用该语言继续提供方案推荐。",
+    "I will continue with your offer selection in this language.": "我将使用该语言继续进行优惠选择。",
+    "I will continue with payment details in this language.": "我将使用该语言继续支付信息步骤。",
+    "Language updated. I will continue in your selected language.": "语言已更新，我将使用您选择的语言继续。",
+    "To confirm internet availability in your area, what service address should I use? I will suggest matches as you type.": "为了确认您所在区域的网络可用性，请提供服务地址。您输入时我会给出匹配建议。",
+    "Great news. Internet offers are available at your address.": "好消息，您的地址可办理互联网优惠。",
+    "What is your top priority for internet: speed, value, or performance?": "您对互联网最看重什么：速度、性价比还是性能？",
+    "Please provide your full name, email, and phone number in one message.": "请在一条消息中提供您的姓名、邮箱和电话号码。",
+    "Great, your new account has been created.": "好的，您的新账户已创建。",
+    "Would you like to checkout now? You can also add mobility, internet, or landline offers.": "您现在要结账吗？您也可以继续添加移动、互联网或固话优惠。",
+    "Before I run validation, what service address should I use?": "在进行验证前，请确认要使用的服务地址。",
+    "Please enter your full service address.": "请输入完整的服务地址。",
+    "Enter your card number using the 4 boxes below (16 digits total).": "请在下方 4 个输入框中填写卡号（共 16 位）。",
+    "Accepted brands: Visa, MasterCard, and Amex.": "支持卡种：Visa、MasterCard、Amex。",
+    "Select shipping option: prefilled address, new address, or lookup address.": "请选择配送方式：预填地址、新地址或地址查询。",
+    "Set up meeting": "安排会议",
+    "Choose Monday-Thursday slot": "选择周一至周四时段",
+    "Skip booking": "跳过预约",
+    "Confirm booking": "确认预约",
+    "Choose another slot": "选择其他时段",
+    "Yes, remind me": "是，请提醒我",
+    "No reminder": "不用提醒",
+    "Use prefilled address": "使用预填地址",
+    "Enter new address": "输入新地址",
+    "Lookup address": "查询地址",
+    "Use profile address": "使用档案地址",
+    "Use onboarding address": "使用注册地址",
+    "Enter a new address": "输入新地址",
+    "Add internet offers": "添加互联网优惠",
+    "Checkout now": "立即结账",
+    "No thanks": "不需要"
   }
 };
 const translatedTextCache = new Map();
@@ -763,6 +897,7 @@ const endChatBtn = document.getElementById("end-chat-btn");
 
 const chatWindow = document.getElementById("chat-window");
 const quickActions = document.getElementById("quick-actions");
+const quoteToggleBtn = document.getElementById("quote-toggle-btn");
 const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
 const addressTypeahead = document.getElementById("address-typeahead");
@@ -815,6 +950,8 @@ const state = {
   metricsRefreshTimer: null,
   metricsRouteFilter: "all",
   pendingAuthMode: null,
+  activeQuickActionLabels: new Set(),
+  quotePanelPinned: false,
   context: {
     sessionId: null,
     areaCode: null,
@@ -964,7 +1101,9 @@ const state = {
       lastPreview: [],
       lastPreviewAt: null,
       savedAt: null,
-      lastDiff: null
+      lastDiff: null,
+      autoTriggeredForAddress: null,
+      autoTriggeredForService: null
     },
     newOnboarding: {
       fullName: null,
@@ -1890,15 +2029,114 @@ function getQuoteCandidatesForService(serviceType = "home internet") {
     }));
 }
 
+function normalizeQuoteServiceType(serviceType = "") {
+  const normalized = String(serviceType || "").toLowerCase().trim();
+  if (normalized === "internet") return "home internet";
+  if (normalized === "home internet" || normalized === "mobility" || normalized === "landline") return normalized;
+  if (normalized === "bundle") {
+    const fromSelection = String(state.context.selectedService || "").toLowerCase();
+    if (fromSelection === "internet") return "home internet";
+    if (fromSelection === "mobility" || fromSelection === "landline") return fromSelection;
+    const activeCategory = getActiveOfferCategory();
+    return activeCategory || "home internet";
+  }
+  if (state.context.intent) return normalizeQuoteServiceType(state.context.intent);
+  const activeCategory = getActiveOfferCategory();
+  return activeCategory || null;
+}
+
+function canInvokeQuoteBuilder() {
+  const quoteService = normalizeQuoteServiceType(state.context.intent || state.context.selectedService || "");
+  return ["home internet", "mobility", "landline"].includes(quoteService || "");
+}
+
+function autoTriggerQuoteBuilderAfterAddress({ source = "address_capture" } = {}) {
+  const quoteService = normalizeQuoteServiceType(state.context.intent || state.context.selectedService || "");
+  if (!["home internet", "mobility", "landline"].includes(quoteService || "")) return;
+  const address = (state.context.serviceAddress || state.context.newOnboarding?.address || "").trim();
+  if (!address) return;
+
+  const lastAddress = String(state.context.quoteBuilder?.autoTriggeredForAddress || "").trim().toLowerCase();
+  const lastService = String(state.context.quoteBuilder?.autoTriggeredForService || "").trim().toLowerCase();
+  const hasPreview = Array.isArray(state.context.quoteBuilder?.lastPreview) && state.context.quoteBuilder.lastPreview.length > 0;
+  if (lastAddress === address.toLowerCase() && lastService === quoteService && hasPreview) return;
+
+  const preferenceSeed =
+    quoteService === "home internet"
+      ? (state.context.internetPreference || resolveInternetPreference(state.context.salesProfile?.speedPriority || "") || "value")
+      : "value";
+  const defaults = getQuoteDefaultsFromPreference(preferenceSeed);
+  const preferences = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || defaults);
+  applyContextPatch({
+    quoteBuilder: {
+      preferences,
+      autoTriggeredForAddress: address,
+      autoTriggeredForService: quoteService
+    }
+  });
+
+  state.quotePanelPinned = true;
+  setPanelFocus("quote");
+  postMessage("bot", "Address confirmed. I’m generating quote options now.");
+  logClient("info", "quote_builder_auto_triggered", { source, serviceType: quoteService, address });
+  void generateQuotePreview({ announce: true, showSelectionButtons: true });
+}
+
+function refreshQuoteToggleButton() {
+  if (!quoteToggleBtn) return;
+  const visible = canInvokeQuoteBuilder();
+  quoteToggleBtn.classList.toggle("hidden", !visible);
+  const baseLabel = state.quotePanelPinned ? "Hide quote" : "Generate quote";
+  quoteToggleBtn.setAttribute("data-base-label", baseLabel);
+  localizeQuickActionButton(quoteToggleBtn, baseLabel, getCurrentUiLanguage());
+}
+
+function buildDeterministicQuoteFallback(serviceType = "home internet") {
+  const normalizedService = normalizeQuoteServiceType(serviceType) || "home internet";
+  let fallbackOffers = getFilteredOffersForCategory(normalizedService, { maxResults: 3 });
+  if (!fallbackOffers.length) {
+    fallbackOffers = offers.filter((offer) => offer.category === normalizedService).slice(0, 3);
+  }
+  return fallbackOffers.map((offer, idx) => ({
+    offerId: offer.id,
+    name: offer.name,
+    category: offer.category,
+    monthlyPrice: Number(offer.monthlyPrice || 0),
+    devicePrice: offer.devicePrice == null ? 0 : Number(offer.devicePrice || 0),
+    installationFee: getOfferInstallationFee(offer.category),
+    rank: idx + 1,
+    reasons: ["Deterministic recommendation based on your current service preferences."]
+  }));
+}
+
+function presentQuoteSelectionChoices(quotes = []) {
+  const ranked = (quotes || []).slice(0, 3);
+  if (!ranked.length) return;
+  postMessage("bot", "You can apply one of these quote options now:");
+  const labels = ranked.map((quote) => `Apply Quote ${quote.rank} - ${quote.name}`);
+  labels.push("Continue current flow");
+  showChoiceButtons(labels, (choice) => {
+    postMessage("user", choice);
+    if (choice === "Continue current flow") {
+      renderStep(state.flowStep);
+      return;
+    }
+    const selected = ranked.find((quote) => choice === `Apply Quote ${quote.rank} - ${quote.name}`);
+    if (!selected) return;
+    applyQuotedPlan(selected.offerId);
+  });
+}
+
 async function requestQuotePreview(preferences = {}, serviceType = "home internet", maxResults = 3) {
+  const normalizedService = normalizeQuoteServiceType(serviceType) || "home internet";
   const response = await fetch("/api/quote-preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      serviceType,
+      serviceType: normalizedService,
       preferences: normalizeQuotePreferences(preferences),
       maxResults,
-      offers: getQuoteCandidatesForService(serviceType)
+      offers: getQuoteCandidatesForService(normalizedService)
     })
   });
   if (!response.ok) {
@@ -1936,8 +2174,8 @@ function loadQuoteBuilderSnapshot() {
   return stored;
 }
 
-async function generateQuotePreview({ announce = true } = {}) {
-  const serviceType = state.context.intent || "home internet";
+async function generateQuotePreview({ announce = true, showSelectionButtons = false } = {}) {
+  const serviceType = normalizeQuoteServiceType(state.context.intent || state.context.selectedService || "home internet") || "home internet";
   const preferences = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || {});
   const preferenceTotal = Number(preferences.budget || 0) + Number(preferences.speed || 0) + Number(preferences.deviceCost || 0);
   const previousPreview = Array.isArray(state.context.quoteBuilder?.lastPreview) ? state.context.quoteBuilder.lastPreview : [];
@@ -1945,19 +2183,7 @@ async function generateQuotePreview({ announce = true } = {}) {
   try {
     const payload = await requestQuotePreview(preferences, serviceType, 3);
     const quotes = Array.isArray(payload.quotes) ? payload.quotes : [];
-    const finalQuotes =
-      quotes.length > 0
-        ? quotes
-        : getInternetOffersByPreference(state.context.internetPreference || "value").slice(0, 3).map((offer, idx) => ({
-            offerId: offer.id,
-            name: offer.name,
-            category: offer.category,
-            monthlyPrice: Number(offer.monthlyPrice || 0),
-            devicePrice: offer.devicePrice == null ? 0 : Number(offer.devicePrice || 0),
-            installationFee: getOfferInstallationFee(offer.category),
-            rank: idx + 1,
-            reasons: ["Deterministic fallback recommendation based on your preference."]
-          }));
+    const finalQuotes = quotes.length > 0 ? quotes : buildDeterministicQuoteFallback(serviceType);
     const nextTop = finalQuotes[0] || null;
     const diffText =
       previousTop && nextTop
@@ -1980,6 +2206,9 @@ async function generateQuotePreview({ announce = true } = {}) {
         );
       }
     }
+    if (showSelectionButtons) {
+      presentQuoteSelectionChoices(finalQuotes);
+    }
     logClient("info", "quote_preview_generated", {
       serviceType,
       quoteCount: finalQuotes.length,
@@ -1999,16 +2228,7 @@ async function generateQuotePreview({ announce = true } = {}) {
     renderQuoteBuilderPanel();
     return finalQuotes;
   } catch {
-    const fallbackQuotes = getInternetOffersByPreference(state.context.internetPreference || "value").slice(0, 3).map((offer, idx) => ({
-      offerId: offer.id,
-      name: offer.name,
-      category: offer.category,
-      monthlyPrice: Number(offer.monthlyPrice || 0),
-      devicePrice: offer.devicePrice == null ? 0 : Number(offer.devicePrice || 0),
-      installationFee: getOfferInstallationFee(offer.category),
-      rank: idx + 1,
-      reasons: ["Deterministic fallback recommendation based on your preference."]
-    }));
+    const fallbackQuotes = buildDeterministicQuoteFallback(serviceType);
     const nextTop = fallbackQuotes[0] || null;
     const diffText =
       previousTop && nextTop
@@ -2030,6 +2250,9 @@ async function generateQuotePreview({ announce = true } = {}) {
           `Top recommendation: ${fallbackQuotes[0].name} at ${currency(Number(fallbackQuotes[0].monthlyPrice || 0))}/month.`
         );
       }
+    }
+    if (showSelectionButtons) {
+      presentQuoteSelectionChoices(fallbackQuotes);
     }
     logClient("error", "quote_preview_failed", {
       serviceType,
@@ -2085,9 +2308,16 @@ function applyQuotedPlan(offerId) {
 
 function renderQuoteBuilderPanel() {
   if (!panelQuote || !quoteBuilderContent) return;
+  const quoteService = normalizeQuoteServiceType(state.context.intent || state.context.selectedService || "");
   const shouldShow =
-    state.context.intent === "home internet" &&
-    [FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, FLOW_STEPS.INTERNET_PLAN_PITCH].includes(state.flowStep);
+    ["home internet", "mobility", "landline"].includes(quoteService || "") &&
+    (state.quotePanelPinned ||
+      [
+        FLOW_STEPS.SERVICE_CLARIFICATION,
+        FLOW_STEPS.OFFER_BROWSE,
+        FLOW_STEPS.INTERNET_PRIORITY_CAPTURE,
+        FLOW_STEPS.INTERNET_PLAN_PITCH
+      ].includes(state.flowStep));
   panelQuote.classList.toggle("hidden", !shouldShow);
   if (!shouldShow) return;
 
@@ -2386,7 +2616,8 @@ function postMessage(role, text, { force = false } = {}) {
   el.className = `msg ${role}`;
   const sourceText = String(text || "");
   el.textContent = sourceText;
-  if (role === "bot") {
+  const isTranslatableUserChoice = role === "user" && state.activeQuickActionLabels?.has(sourceText);
+  if (role === "bot" || isTranslatableUserChoice) {
     el.setAttribute("data-source-text", sourceText);
   }
   chatWindow.appendChild(el);
@@ -2399,7 +2630,7 @@ function postMessage(role, text, { force = false } = {}) {
   if (state.transcript.length > 600) {
     state.transcript = state.transcript.slice(-600);
   }
-  if (role === "bot") {
+  if (role === "bot" || isTranslatableUserChoice) {
     const uiLanguage = getCurrentUiLanguage();
     if (uiLanguage !== "en") {
       const activeLanguage = uiLanguage;
@@ -2409,6 +2640,8 @@ function postMessage(role, text, { force = false } = {}) {
         el.textContent = translated || sourceText;
       });
     }
+  }
+  if (role === "bot") {
     trackSlaFirstReply();
   }
 }
@@ -2519,6 +2752,7 @@ async function logClient(level, event, details = {}) {
 
 function clearQuickActions() {
   quickActions.innerHTML = "";
+  state.activeQuickActionLabels = new Set();
 }
 
 function resetChatInputHint() {
@@ -2553,6 +2787,11 @@ async function translateForUi(text = "", languageCode = "en") {
   if (staticTranslation) return staticTranslation;
   const cacheKey = `${normalizedLanguage}::${sourceText}`;
   if (translatedTextCache.has(cacheKey)) return translatedTextCache.get(cacheKey);
+  const heuristic = getHeuristicTranslation(sourceText, normalizedLanguage);
+  if (heuristic !== sourceText) {
+    translatedTextCache.set(cacheKey, heuristic);
+    return heuristic;
+  }
 
   const translated = await requestChatAssist(
     "translate",
@@ -2570,9 +2809,37 @@ async function translateForUi(text = "", languageCode = "en") {
       minLength: 2
     }
   );
-  const finalized = String(translated || sourceText).trim() || sourceText;
+  let finalized = String(translated || sourceText).trim() || sourceText;
+  if (finalized === sourceText) {
+    const heuristicFallback = getHeuristicTranslation(sourceText, normalizedLanguage);
+    if (heuristicFallback !== sourceText) {
+      finalized = heuristicFallback;
+    }
+  }
   translatedTextCache.set(cacheKey, finalized);
   return finalized;
+}
+
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getHeuristicTranslation(text = "", languageCode = "en") {
+  const normalizedLanguage = normalizeLanguageCode(languageCode);
+  const sourceText = String(text || "");
+  if (!sourceText || normalizedLanguage === "en") return sourceText;
+  const table = HEURISTIC_UI_TRANSLATIONS[normalizedLanguage] || {};
+  if (table[sourceText]) return table[sourceText];
+
+  let translated = sourceText;
+  Object.keys(table)
+    .sort((a, b) => b.length - a.length)
+    .forEach((token) => {
+      if (!token) return;
+      translated = translated.replace(new RegExp(escapeRegExp(token), "gi"), table[token]);
+    });
+
+  return translated;
 }
 
 function localizeQuickActionButton(button, baseLabel, languageCode) {
@@ -2662,6 +2929,7 @@ function setConversationLanguage(languageCode = "en", { announce = true } = {}) 
   });
   syncLanguageSwitcherUi(normalizedLanguage);
   refreshQuickActionsLanguage();
+  refreshQuoteToggleButton();
   refreshVisibleBotMessagesLanguage(normalizedLanguage);
   logClient("info", "language_changed", { from: previousLanguage, to: normalizedLanguage });
 
@@ -2674,7 +2942,7 @@ function setConversationLanguage(languageCode = "en", { announce = true } = {}) 
 
 function refreshVisibleBotMessagesLanguage(languageCode = "en") {
   const normalizedLanguage = normalizeLanguageCode(languageCode);
-  chatWindow.querySelectorAll(".msg.bot").forEach((el) => {
+  chatWindow.querySelectorAll(".msg[data-source-text]").forEach((el) => {
     const sourceText = el.getAttribute("data-source-text") || el.textContent || "";
     el.setAttribute("data-source-text", sourceText);
     if (normalizedLanguage === "en") {
@@ -2705,6 +2973,9 @@ const NORMALIZED_INPUT_MAP = {
     [/\bvitesse\b/gi, "speed"],
     [/\bvaleur\b/gi, "value"],
     [/\bperformance\b/gi, "performance"],
+    [/\bdevis\b/gi, "quote"],
+    [/\bcr[ée]er mon offre\b/gi, "build my plan"],
+    [/\bcomparer\b/gi, "compare"],
     [/\biphone\b/gi, "iphone"],
     [/\bsamsung\b/gi, "samsung"],
     [/\bpixel\b/gi, "pixel"],
@@ -2727,6 +2998,9 @@ const NORMALIZED_INPUT_MAP = {
     [/\bvelocidad\b/gi, "speed"],
     [/\bvalor\b/gi, "value"],
     [/\brendimiento\b/gi, "performance"],
+    [/\bcotizaci[oó]n\b/gi, "quote"],
+    [/\bcrear mi plan\b/gi, "build my plan"],
+    [/\bcomparar\b/gi, "compare"],
     [/\biphone\b/gi, "iphone"],
     [/\bsamsung\b/gi, "samsung"],
     [/\bpixel\b/gi, "pixel"],
@@ -2749,6 +3023,9 @@ const NORMALIZED_INPUT_MAP = {
     [/速度/g, "speed"],
     [/性价比|价值/g, "value"],
     [/性能/g, "performance"],
+    [/报价/g, "quote"],
+    [/创建我的方案/g, "build my plan"],
+    [/比较/g, "compare"],
     [/苹果|iPhone/gi, "iphone"],
     [/三星/g, "samsung"],
     [/谷歌|Pixel/gi, "pixel"],
@@ -2783,6 +3060,7 @@ function normalizeUserInputForStep(message = "", languageCode = getCurrentUiLang
 
 function showChoiceButtons(labels, onPick) {
   clearQuickActions();
+  state.activeQuickActionLabels = new Set(labels);
   const languageCode = getCurrentUiLanguage();
   labels.forEach((label) => {
     const button = document.createElement("button");
@@ -3057,6 +3335,7 @@ function resetSessionState() {
   state.historyStack = [];
   state.offerPageIndex = 0;
   state.pendingAuthMode = null;
+  state.quotePanelPinned = false;
   state.transcript = [];
   state.context = {
     sessionId: generateSessionId(),
@@ -3608,11 +3887,17 @@ function presentInlineOfferChoices(category = getActiveOfferCategory()) {
     );
   });
   const labels = filtered.map((offer) => `Add ${offer.name}`);
+  labels.push("Build my plan");
   if (state.context.basket.length > 0) {
     labels.push("That is all, continue");
   }
   showChoiceButtons(labels, (choice) => {
     postMessage("user", choice);
+    if (choice === "Build my plan") {
+      setPanelFocus("quote");
+      void generateQuotePreview({ announce: true, showSelectionButtons: true });
+      return;
+    }
     if (choice === "That is all, continue") {
       handleOfferContinuationChoice(choice);
       return;
@@ -4669,6 +4954,7 @@ function presentAddressConfirmation(addressInput, suggestions = []) {
     postMessage("user", choice);
     if (choice === "Use my entered address") {
       finalizeServiceAddress(addressInput, "manual_confirmed");
+      autoTriggerQuoteBuilderAfterAddress({ source: "address_typeahead_manual_confirmed" });
       transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
       return;
     }
@@ -4678,6 +4964,7 @@ function presentAddressConfirmation(addressInput, suggestions = []) {
       return;
     }
     finalizeServiceAddress(normalizeAddressSuggestionLabel(matched), "typeahead_suggestion");
+    autoTriggerQuoteBuilderAfterAddress({ source: "address_typeahead_suggestion" });
     transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
   });
 }
@@ -5074,8 +5361,14 @@ function renderStep(step) {
   updateJourneyProgress(step);
   setStatus();
   resetChatInputHint();
+  refreshQuoteToggleButton();
+  if (!canInvokeQuoteBuilder()) {
+    state.quotePanelPinned = false;
+  }
   if (![FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE].includes(step)) clearAddressTypeahead();
-  if ([FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, FLOW_STEPS.INTERNET_PLAN_PITCH].includes(step)) {
+  if (state.quotePanelPinned && canInvokeQuoteBuilder()) {
+    setPanelFocus("quote");
+  } else if ([FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, FLOW_STEPS.INTERNET_PLAN_PITCH].includes(step)) {
     setPanelFocus("quote");
   } else if ([FLOW_STEPS.INTENT_DISCOVERY, FLOW_STEPS.SERVICE_CLARIFICATION, FLOW_STEPS.OFFER_BROWSE].includes(step)) {
     if (step === FLOW_STEPS.OFFER_BROWSE && shouldRenderInlineOfferFlow()) {
@@ -5225,7 +5518,9 @@ function renderStep(step) {
             quoteBuilder: {
               preferences: getQuoteDefaultsFromPreference("value"),
               lastPreview: [],
-              lastPreviewAt: null
+              lastPreviewAt: null,
+              autoTriggeredForAddress: null,
+              autoTriggeredForService: null
             }
           });
           transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true });
@@ -6303,6 +6598,20 @@ function handleGlobalCommands(message) {
     }
   }
 
+  if (/(build my plan|generate quote|quote|compare|devis|cotizaci[oó]n|comparer|comparar|报价|创建我的方案|比较)/i.test(cmd)) {
+    const quoteService = normalizeQuoteServiceType(state.context.intent || state.context.selectedService || "");
+    if (!quoteService || !["home internet", "mobility", "landline"].includes(quoteService)) {
+      postMessage("bot", "Please choose Internet, Mobility, or Landline first, then I can generate a quote.");
+      return true;
+    }
+    const defaults = getQuoteDefaultsFromPreference(state.context.internetPreference || "value");
+    const preferences = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || defaults);
+    applyContextPatch({ quoteBuilder: { preferences } });
+    setPanelFocus("quote");
+    void generateQuotePreview({ announce: true, showSelectionButtons: true });
+    return true;
+  }
+
   if (cmd.includes("go back") || cmd === "back" || cmd.includes("previous step")) {
     if (state.flowStep === FLOW_STEPS.PAYMENT_FINANCING_CONFIRM) {
       transitionTo(FLOW_STEPS.PAYMENT_FINANCING_TERM, {}, { pushHistory: false });
@@ -6491,7 +6800,9 @@ async function handleChatInput(message) {
           quoteBuilder: {
             preferences: getQuoteDefaultsFromPreference("value"),
             lastPreview: [],
-            lastPreviewAt: null
+            lastPreviewAt: null,
+            autoTriggeredForAddress: null,
+            autoTriggeredForService: null
           }
         });
         transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true });
@@ -6586,6 +6897,7 @@ async function handleChatInput(message) {
         const normalized = lower.trim();
         if (normalized.includes("use my entered") || normalized.includes("manual")) {
           finalizeServiceAddress(pending, "manual_confirmed");
+          autoTriggerQuoteBuilderAfterAddress({ source: "address_typed_manual_confirmed" });
           transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
           return;
         }
@@ -6593,12 +6905,14 @@ async function handleChatInput(message) {
         if (!Number.isNaN(indexedChoice) && indexedChoice >= 1 && indexedChoice <= suggestions.length) {
           const pick = suggestions[indexedChoice - 1];
           finalizeServiceAddress(normalizeAddressSuggestionLabel(pick), "typeahead_suggestion");
+          autoTriggerQuoteBuilderAfterAddress({ source: "address_typed_index_selection" });
           transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
           return;
         }
         const matched = suggestions.find((item) => normalizeAddressSuggestionLabel(item).toLowerCase() === normalized);
         if (matched) {
           finalizeServiceAddress(normalizeAddressSuggestionLabel(matched), "typeahead_suggestion");
+          autoTriggerQuoteBuilderAfterAddress({ source: "address_typed_exact_match" });
           transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
           return;
         }
@@ -6618,8 +6932,10 @@ async function handleChatInput(message) {
           return;
         }
         finalizeServiceAddress(trimmed, "manual_confirmed_no_suggestions");
+        autoTriggerQuoteBuilderAfterAddress({ source: "address_manual_no_suggestions" });
       } catch {
         finalizeServiceAddress(trimmed, "manual_confirmed_lookup_error");
+        autoTriggerQuoteBuilderAfterAddress({ source: "address_manual_lookup_error" });
       }
       transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true });
       return;
@@ -6637,14 +6953,14 @@ async function handleChatInput(message) {
       return;
 
     case FLOW_STEPS.INTERNET_PRIORITY_CAPTURE: {
-      if (/(quote|build my plan|compare)/i.test(trimmed)) {
+      if (/(quote|build my plan|compare)/i.test(canonicalInput)) {
         const defaults = getQuoteDefaultsFromPreference(state.context.internetPreference || "value");
         applyContextPatch({ quoteBuilder: { preferences: defaults } });
         await generateQuotePreview({ announce: true });
         transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
         return;
       }
-      const preference = resolveInternetPreference(trimmed);
+      const preference = resolveInternetPreference(canonicalInput);
       if (!preference) {
         handleUnclearInput(message, "Please tell me your internet priority: speed, value, or performance.");
         return;
@@ -7114,6 +7430,7 @@ async function handleChatInput(message) {
         return;
       }
       applyContextPatch({ newOnboarding: { address: trimmed }, serviceAddress: trimmed, serviceAddressValidated: false });
+      autoTriggerQuoteBuilderAfterAddress({ source: "onboarding_address_capture" });
       transitionTo(FLOW_STEPS.NEW_AREA_CODE_ENTRY, {}, { pushHistory: true });
       return;
 
@@ -8133,6 +8450,27 @@ if (themeInputs.length > 0) {
       if (!input.checked) return;
       applyTheme(input.value);
     });
+  });
+}
+
+if (quoteToggleBtn) {
+  quoteToggleBtn.addEventListener("click", () => {
+    if (!canInvokeQuoteBuilder()) {
+      postMessage("bot", "Please choose Internet, Mobility, or Landline first, then I can generate a quote.");
+      return;
+    }
+    state.quotePanelPinned = !state.quotePanelPinned;
+    logClient("info", "quote_builder_toggle_clicked", { open: state.quotePanelPinned, step: state.flowStep });
+    if (!state.quotePanelPinned) {
+      renderStep(state.flowStep);
+      return;
+    }
+    const defaults = getQuoteDefaultsFromPreference(state.context.internetPreference || "value");
+    const preferences = normalizeQuotePreferences(state.context.quoteBuilder?.preferences || defaults);
+    applyContextPatch({ quoteBuilder: { preferences } });
+    setPanelFocus("quote");
+    renderQuoteBuilderPanel();
+    void generateQuotePreview({ announce: true, showSelectionButtons: true });
   });
 }
 

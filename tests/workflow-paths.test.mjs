@@ -154,3 +154,24 @@ test("quote builder enforces 100-point allocation in UI", () => {
   assert.match(appCode, /Total: \$\{preferenceTotal\}\/100/);
   assert.match(appCode, /normalizeQuotePreferences\(\{[\s\S]*\}, key\)/);
 });
+
+test("language switch updates translatable bot and selected user messages", () => {
+  const appCode = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(appCode, /chatWindow\.querySelectorAll\("\.msg\[data-source-text\]"\)/);
+  assert.match(appCode, /state\.activeQuickActionLabels = new Set\(labels\)/);
+});
+
+test("internet priority quote trigger uses canonical normalized input", () => {
+  const appCode = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(appCode, /INTERNET_PRIORITY_CAPTURE[\s\S]*\/\(quote\|build my plan\|compare\)\/i\.test\(canonicalInput\)/);
+  assert.match(appCode, /INTERNET_PRIORITY_CAPTURE[\s\S]*resolveInternetPreference\(canonicalInput\)/);
+});
+
+test("quote builder is invokable globally and from inline offer flow", () => {
+  const appCode = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(appCode, /build my plan\|generate quote\|quote\|compare/);
+  assert.match(appCode, /labels\.push\("Build my plan"\)/);
+  assert.match(appCode, /generateQuotePreview\(\{ announce: true, showSelectionButtons: true \}\)/);
+  assert.match(appCode, /quoteToggleBtn/);
+  assert.match(appCode, /quote_builder_toggle_clicked/);
+});

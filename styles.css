@@ -737,6 +737,22 @@ button {
   flex-wrap: wrap;
 }
 
+.assistant-shortcuts {
+  padding: 0 12px 8px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.assistant-shortcuts button {
+  border: 1px solid #9fb2c8;
+  background: #f3f7fb;
+  color: var(--bell-blue-dark);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .journey-progress {
   padding: 6px 12px 8px;
   display: flex;
