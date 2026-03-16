@@ -481,6 +481,23 @@ button {
   justify-self: end;
 }
 
+.bill-download-btn {
+  border: 1px solid rgba(135, 214, 167, 0.9);
+  border-radius: 999px;
+  background: rgba(51, 181, 119, 0.2);
+  color: #e8fff3;
+  padding: 7px 12px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bill-download-btn:hover {
+  background: rgba(51, 181, 119, 0.32);
+}
+
 .chat-brand {
   font-size: 1.6rem;
   font-weight: 700;
@@ -1094,6 +1111,12 @@ button {
 
 .quote-builder-grid input[type="range"] {
   width: 100%;
+  accent-color: #0f4b8d;
+  transition: filter 120ms ease;
+}
+
+.quote-builder-grid input[type="range"]:active {
+  filter: brightness(0.95);
 }
 
 .quote-builder-actions {

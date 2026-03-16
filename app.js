@@ -1125,6 +1125,7 @@ const muteChatBtn = document.getElementById("mute-chat-btn");
 const exportTranscriptBtn = document.getElementById("export-transcript-btn");
 const refreshChatBtn = document.getElementById("refresh-chat-btn");
 const endChatBtn = document.getElementById("end-chat-btn");
+const billDownloadBtn = document.getElementById("bill-download-btn");
 
 const chatWindow = document.getElementById("chat-window");
 const quickActions = document.getElementById("quick-actions");
@@ -1291,6 +1292,14 @@ const state = {
     },
     handoffPacket: null,
     transcriptExportMeta: null,
+    billReceipt: {
+      available: false,
+      orderId: null,
+      fileName: null,
+      categories: [],
+      payload: null,
+      createdAt: null
+    },
     theme: "system",
     pwa: {
       installable: false,
@@ -2331,6 +2340,45 @@ function refreshQuoteToggleButton() {
   localizeQuickActionButton(quoteToggleBtn, baseLabel, getCurrentUiLanguage());
 }
 
+function refreshBillDownloadButton() {
+  if (!billDownloadBtn) return;
+  const bill = state.context.billReceipt || {};
+  const available = Boolean(bill.available && bill.payload);
+  billDownloadBtn.classList.toggle("hidden", !available);
+  if (!available) return;
+  billDownloadBtn.textContent = "Bill available";
+  if (bill.orderId) {
+    billDownloadBtn.setAttribute("title", `Download bill for ${bill.orderId}`);
+  } else {
+    billDownloadBtn.removeAttribute("title");
+  }
+}
+
+function downloadAvailableBill() {
+  const bill = state.context.billReceipt || {};
+  if (!bill.available || !bill.payload) {
+    postMessage("bot", "Your bill is not available yet. It appears after order confirmation.");
+    return;
+  }
+
+  const fileName = bill.fileName || `Bell-Bill-${bill.orderId || Date.now()}.html`;
+  const html = buildReceiptHtml(bill.payload);
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1200);
+  logClient("info", "bill_downloaded", {
+    orderId: bill.orderId || null,
+    categories: bill.categories || [],
+    fileName
+  });
+}
+
 function buildDeterministicQuoteFallback(serviceType = "home internet") {
   const normalizedService = normalizeQuoteServiceType(serviceType) || "home internet";
   let fallbackOffers = getFilteredOffersForCategory(normalizedService, { maxResults: 3 });
@@ -2540,6 +2588,8 @@ function applyQuotedPlan(offerId) {
     selectedPlanId: selectedPlan.id,
     checkout: { primaryPlanId: selectedPlan.id }
   });
+  state.quotePanelPinned = false;
+  setPanelFocus("conversation");
   postMessage("user", `Apply quote for ${selectedPlan.name}`);
   postMessage("bot", `Perfect. I selected ${selectedPlan.name} at ${currency(selectedPlan.monthlyPrice)}/month.`);
   logClient("info", "quote_plan_applied", { offerId: selectedPlan.id });
@@ -2606,16 +2656,16 @@ function renderQuoteBuilderPanel() {
 
   quoteBuilderContent.innerHTML = `
     <div class="quote-builder-grid">
-      <label>Budget focus <span>${Math.round(preferences.budget)}</span>
-        <input type="range" min="0" max="100" value="${preferences.budget}" data-quote-slider="budget" />
+      <label>Budget focus <span data-quote-value="budget">${Math.round(preferences.budget)}</span>
+        <input type="range" min="0" max="100" step="1" value="${preferences.budget}" data-quote-slider="budget" />
       </label>
-      <label>Speed focus <span>${Math.round(preferences.speed)}</span>
-        <input type="range" min="0" max="100" value="${preferences.speed}" data-quote-slider="speed" />
+      <label>Speed focus <span data-quote-value="speed">${Math.round(preferences.speed)}</span>
+        <input type="range" min="0" max="100" step="1" value="${preferences.speed}" data-quote-slider="speed" />
       </label>
-      <label>Device cost focus <span>${Math.round(preferences.deviceCost)}</span>
-        <input type="range" min="0" max="100" value="${preferences.deviceCost}" data-quote-slider="deviceCost" />
+      <label>Device cost focus <span data-quote-value="deviceCost">${Math.round(preferences.deviceCost)}</span>
+        <input type="range" min="0" max="100" step="1" value="${preferences.deviceCost}" data-quote-slider="deviceCost" />
       </label>
-      <div class="quote-total ${preferenceTotal === 100 ? "ok" : "warn"}">Total: ${preferenceTotal}/100</div>
+      <div class="quote-total ${preferenceTotal === 100 ? "ok" : "warn"}" data-quote-total>Total: ${preferenceTotal}/100</div>
     </div>
     <div class="quote-builder-actions">
       <button type="button" id="quote-generate-btn">Generate quote</button>
@@ -2628,6 +2678,30 @@ function renderQuoteBuilderPanel() {
     <div class="quote-cards">${quoteCards}</div>
   `;
 
+  const sliderEls = {};
+  quoteBuilderContent.querySelectorAll("[data-quote-slider]").forEach((slider) => {
+    sliderEls[String(slider.dataset.quoteSlider || "")] = slider;
+  });
+  const valueEls = {};
+  quoteBuilderContent.querySelectorAll("[data-quote-value]").forEach((el) => {
+    valueEls[String(el.dataset.quoteValue || "")] = el;
+  });
+  const totalEl = quoteBuilderContent.querySelector("[data-quote-total]");
+
+  const updateQuoteUiFromPreferences = (nextPreferences) => {
+    ["budget", "speed", "deviceCost"].forEach((key) => {
+      const nextValue = Math.round(Number(nextPreferences[key] || 0));
+      if (sliderEls[key]) sliderEls[key].value = String(nextValue);
+      if (valueEls[key]) valueEls[key].textContent = String(nextValue);
+    });
+    const total = Math.round(nextPreferences.budget) + Math.round(nextPreferences.speed) + Math.round(nextPreferences.deviceCost);
+    if (totalEl) {
+      totalEl.textContent = `Total: ${total}/100`;
+      totalEl.classList.toggle("ok", total === 100);
+      totalEl.classList.toggle("warn", total !== 100);
+    }
+  };
+
   quoteBuilderContent.querySelectorAll("[data-quote-slider]").forEach((slider) => {
     slider.addEventListener("input", (event) => {
       const target = event.currentTarget;
@@ -2638,7 +2712,7 @@ function renderQuoteBuilderPanel() {
         [key]: value
       }, key);
       applyContextPatch({ quoteBuilder: { preferences: nextPreferences } });
-      renderQuoteBuilderPanel();
+      updateQuoteUiFromPreferences(nextPreferences);
     });
   });
 
@@ -3188,15 +3262,10 @@ function setConversationLanguage(languageCode = "en", { announce = true } = {}) 
   refreshVisibleBotMessagesLanguage(normalizedLanguage);
   logClient("info", "language_changed", { from: previousLanguage, to: normalizedLanguage });
 
+  // Keep language switching silent in-chat. We just translate the currently
+  // visible conversation blocks and active actions in place.
   if (announce) {
-    const languageLabel = LANGUAGE_LABELS[normalizedLanguage] || normalizedLanguage;
-    postMessage("bot", `Language switched to ${languageLabel}.`);
-    postMessage("bot", getLanguageStatusPrompt(state.flowStep));
-    // Re-render the active choice buttons from scratch so labels appear in the
-    // new language immediately (the async translateForUi calls inside
-    // refreshQuickActionsLanguage will update any buttons not yet resolved).
     refreshQuickActionsLanguage();
-    // Re-sweep all bot messages including the ones we just posted above.
     refreshVisibleBotMessagesLanguage(normalizedLanguage);
   }
 }
@@ -3706,6 +3775,14 @@ function resetSessionState() {
     },
     handoffPacket: null,
     transcriptExportMeta: null,
+    billReceipt: {
+      available: false,
+      orderId: null,
+      fileName: null,
+      categories: [],
+      payload: null,
+      createdAt: null
+    },
     theme: selectedTheme,
     pwa: {
       installable: false,
@@ -3818,6 +3895,7 @@ function resetSessionState() {
   syncLanguageSwitcherUi(selectedLanguage);
   syncThemeSwitcherUi(selectedTheme);
   refreshQuickActionsLanguage();
+  refreshBillDownloadButton();
   setStatus();
 }
 
@@ -3883,6 +3961,7 @@ function getPatchedContext(patch = {}) {
   if (patch.reminders) next.reminders = { ...next.reminders, ...patch.reminders };
   if (patch.handoffPacket !== undefined) next.handoffPacket = patch.handoffPacket;
   if (patch.transcriptExportMeta !== undefined) next.transcriptExportMeta = patch.transcriptExportMeta;
+  if (patch.billReceipt) next.billReceipt = { ...next.billReceipt, ...patch.billReceipt };
   if (patch.theme !== undefined) next.theme = patch.theme;
   if (patch.pwa) next.pwa = { ...next.pwa, ...patch.pwa };
   if (patch.offlineDraft) next.offlineDraft = { ...next.offlineDraft, ...patch.offlineDraft };
@@ -4332,11 +4411,8 @@ function addOfferToBasket(offer, { fromAlternative = false } = {}) {
     checkout: { primaryPlanId }
   });
   renderBasket();
-  if (state.flowStep === FLOW_STEPS.OFFER_BROWSE && shouldRenderInlineOfferFlow()) {
-    setPanelFocus("conversation");
-  } else {
-    setPanelFocus("offers_basket");
-  }
+  state.quotePanelPinned = false;
+  setPanelFocus("conversation");
   postMessage("bot", `Added ${offer.name} to your basket.`);
   logClient("info", "basket_item_added", { offerId: offer.id, basketSize: basket.length, fromAlternative });
   announceDiscountQualification(previousCount, basket.length);
@@ -4353,6 +4429,22 @@ function getRemainingCrossSellCategories(selectedCategory = null) {
   const remaining = CATEGORY_PAGES.filter((category) => !selected.has(category));
   if (remaining.length > 0) return remaining;
   return CATEGORY_PAGES.filter((category) => category !== selectedCategory);
+}
+
+function getCheckoutAddOnCategories() {
+  const selected = new Set((state.context.basket || []).map((item) => item.category));
+  return CATEGORY_PAGES.filter((category) => !selected.has(category));
+}
+
+function getPreferredPrefilledAddress(context = state.context) {
+  return (
+    context.serviceAddress ||
+    context.newOnboarding?.address ||
+    context.shipping?.address ||
+    context.authUser?.prefilledAddress ||
+    getEligibilityProfile(context)?.prefilledAddress ||
+    "100 Default St, Toronto, ON"
+  );
 }
 
 function presentCrossSellChoices() {
@@ -5421,6 +5513,9 @@ function queueAddressTypeahead(query) {
 
 function confirmOrder() {
   trackSlaCheckoutCompletion();
+  const orderedCategories = [...new Set((state.context.basket || []).map((item) => item.category).filter(Boolean))];
+  const billEligibleCategories = ["home internet", "mobility", "landline"];
+  const billAvailable = orderedCategories.some((category) => billEligibleCategories.includes(category));
   const { serviceMonthlyBase, bundleDiscount, serviceMonthly, financingMonthly, combinedMonthly, installationFees, chargeToday } = getCheckoutTotals();
   const estimatedTaxToday = 0;
   const estimatedTaxMonthly = 0;
@@ -5459,6 +5554,9 @@ function confirmOrder() {
     "bot",
     `Order confirmed. Order ID ${orderId}, confirmation ${confirmationCode}. Client type ${clientType}. Total due today ${currency(todayTotal)}. Monthly total going forward ${currency(monthlyTotal)}.`
   );
+  if (billAvailable) {
+    postMessage("bot", "Bill available. Use the header button to download your bill.");
+  }
 
   const receiptPayload = {
     brand: {
@@ -5605,6 +5703,14 @@ function confirmOrder() {
     },
     handoffPacket: null,
     transcriptExportMeta: null,
+    billReceipt: {
+      available: billAvailable,
+      orderId: billAvailable ? orderId : null,
+      fileName: billAvailable ? `Bell-Bill-${orderId}.html` : null,
+      categories: orderedCategories,
+      payload: billAvailable ? receiptPayload : null,
+      createdAt: new Date().toISOString()
+    },
     salesProfile: {
       byodChoice: null,
       phoneBrand: null,
@@ -5643,6 +5749,7 @@ function renderStep(step) {
   setStatus();
   resetChatInputHint();
   refreshQuoteToggleButton();
+  refreshBillDownloadButton();
   if (!canInvokeQuoteBuilder()) {
     state.quotePanelPinned = false;
   }
@@ -5960,6 +6067,8 @@ function renderStep(step) {
           selectedPlanId: selected.id,
           checkout: { primaryPlanId: selected.id }
         });
+        state.quotePanelPinned = false;
+        setPanelFocus("conversation");
         transitionTo(FLOW_STEPS.PLAN_CONFIRMATION, {}, { pushHistory: true });
       });
       break;
@@ -6003,30 +6112,37 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.CHECKOUT_INTENT_PROMPT:
-      postMessage("bot", "Would you like to checkout now? You can also add mobility, internet, or landline offers.");
-      showChoiceButtons(["Checkout now", "Add mobility offers", "Add internet offers", "Add landline offers", "No thanks"], (choice) => {
-        postMessage("user", choice);
-        if (choice === "Checkout now") {
-          routeToCheckoutPaymentEntry({ pushHistory: true });
-          return;
-        }
-        if (choice === "Add mobility offers") {
-          routeToCrossSellCategory("mobility");
+      {
+        const addOnCategories = getCheckoutAddOnCategories();
+        const addOnPrompt =
+          addOnCategories.length > 0
+            ? `You can also add ${addOnCategories.map((category) => CATEGORY_LABELS[category]).join(" or ")} offers.`
+            : "You already have all available service categories in your basket.";
+        postMessage("bot", `Would you like to checkout now? ${addOnPrompt}`);
+      }
+      {
+        const addOnCategories = getCheckoutAddOnCategories();
+        const addOnChoices = addOnCategories.map((category) => CATEGORY_CHOICE_LABELS[category]);
+        const choices = ["Checkout now", ...addOnChoices, "No thanks"];
+        showChoiceButtons(choices, (choice) => {
+          postMessage("user", choice);
+          if (choice === "Checkout now") {
+            routeToCheckoutPaymentEntry({ pushHistory: true });
+            return;
+          }
+          if (choice === "No thanks") {
+            transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
+            return;
+          }
+          const chosenCategory = addOnCategories.find((category) => CATEGORY_CHOICE_LABELS[category] === choice);
+          if (!chosenCategory) {
+            postMessage("bot", "Please choose checkout, one of the add-on services shown, or no thanks.");
+            return;
+          }
+          routeToCrossSellCategory(chosenCategory);
           transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
-          return;
-        }
-        if (choice === "Add internet offers") {
-          routeToCrossSellCategory("home internet");
-          transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
-          return;
-        }
-        if (choice === "Add landline offers") {
-          routeToCrossSellCategory("landline");
-          transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
-          return;
-        }
-        transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
-      });
+        });
+      }
       break;
 
     case FLOW_STEPS.PAYMENT_CARD_ENTRY:
@@ -6650,7 +6766,7 @@ function renderStep(step) {
       showChoiceButtons(["Use prefilled address", "Enter new address", "Lookup address"], (choice) => {
         postMessage("user", choice);
         if (choice === "Use prefilled address") {
-          const address = getEligibilityProfile(state.context)?.prefilledAddress || "100 Default St, Toronto, ON";
+          const address = getPreferredPrefilledAddress();
           applyContextPatch({ shipping: { mode: "prefilled", address } });
           logClient("info", "shipping_prefilled_selected", { address });
           transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
@@ -6797,7 +6913,11 @@ function renderStep(step) {
     }
 
     case FLOW_STEPS.ORDER_CONFIRMED:
-      postMessage("bot", "Thank you for contacting Bell. Your request is complete. You can continue shopping or start a fresh session.");
+      if (state.context.sessionFlags?.orderCompleted) {
+        postMessage("bot", "Your order flow is complete. Please type 'confirm' in the chat to acknowledge completion.");
+      } else {
+        postMessage("bot", "Thank you for contacting Bell. Your request is complete.");
+      }
       break;
 
     case FLOW_STEPS.AUXILIARY_ASSIST:
@@ -7398,6 +7518,8 @@ async function handleChatInput(message) {
         selectedPlanId: selected.id,
         checkout: { primaryPlanId: selected.id }
       });
+      state.quotePanelPinned = false;
+      setPanelFocus("conversation");
       transitionTo(FLOW_STEPS.PLAN_CONFIRMATION, {}, { pushHistory: true });
       return;
     }
@@ -7468,17 +7590,31 @@ async function handleChatInput(message) {
         routeToCheckoutPaymentEntry({ pushHistory: true });
         return;
       }
+      const addOnCategories = getCheckoutAddOnCategories();
+      const hasInternetInBasket = !addOnCategories.includes("home internet");
       if (lower.includes("mobility")) {
+        if (!addOnCategories.includes("mobility")) {
+          postMessage("bot", "Mobility is already in your basket. You can checkout now or add another available service.");
+          return;
+        }
         routeToCrossSellCategory("mobility");
         transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
         return;
       }
       if (lower.includes("internet")) {
+        if (hasInternetInBasket) {
+          postMessage("bot", "You already selected an internet product. You can add mobility or landline, or proceed to checkout.");
+          return;
+        }
         routeToCrossSellCategory("home internet");
         transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
         return;
       }
       if (lower.includes("landline") || lower.includes("home phone")) {
+        if (!addOnCategories.includes("landline")) {
+          postMessage("bot", "Landline is already in your basket. You can checkout now or add another available service.");
+          return;
+        }
         routeToCrossSellCategory("landline");
         transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
         return;
@@ -7487,7 +7623,13 @@ async function handleChatInput(message) {
         transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
         return;
       }
-      handleUnclearInput(message, "Reply with checkout, add mobility, add internet, add landline, or no thanks.");
+      const dynamicAddOns = addOnCategories.map((category) => CATEGORY_LABELS[category]).join(", ");
+      handleUnclearInput(
+        message,
+        dynamicAddOns
+          ? `Reply with checkout, add ${dynamicAddOns}, or no thanks.`
+          : "Reply with checkout or no thanks."
+      );
       return;
 
     case FLOW_STEPS.PAYMENT_CARD_ENTRY:
@@ -8140,6 +8282,23 @@ async function handleChatInput(message) {
       postMessage("bot", "Please say 'place order' to complete, or 'go back' to revise payment/shipping.");
       return;
 
+    case FLOW_STEPS.ORDER_CONFIRMED:
+      if (state.context.sessionFlags?.orderCompleted) {
+        if (lower.includes("confirm")) {
+          postMessage("bot", "Thank you. Your completed order has been acknowledged.");
+          transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "post_order_follow_up" }, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        handleUnclearInput(message, "Please type 'confirm' to acknowledge your completed order.");
+        return;
+      }
+      if (lower.includes("confirm") || lower.includes("ok") || lower.includes("done")) {
+        transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "post_session_follow_up" }, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      handleUnclearInput(message, "Please type 'confirm' to continue.");
+      return;
+
     case FLOW_STEPS.POST_AGENT_RATING: {
       const rating = Number((trimmed.match(/[1-5]/) || [])[0]);
       if (!rating) {
@@ -8364,7 +8523,7 @@ async function handleChatInput(message) {
 
     case FLOW_STEPS.SHIPPING_SELECTION:
       if (lower.includes("prefilled")) {
-        const address = getEligibilityProfile(state.context)?.prefilledAddress || "100 Default St, Toronto, ON";
+        const address = getPreferredPrefilledAddress();
         applyContextPatch({ shipping: { mode: "prefilled", address } });
         logClient("info", "shipping_prefilled_selected", { address, viaChatInput: true });
         transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
@@ -8810,6 +8969,12 @@ if (exportTranscriptBtn) {
   exportTranscriptBtn.addEventListener("click", () => {
     chatMenu.classList.add("hidden");
     void exportTranscript();
+  });
+}
+
+if (billDownloadBtn) {
+  billDownloadBtn.addEventListener("click", () => {
+    downloadAvailableBill();
   });
 }
 
