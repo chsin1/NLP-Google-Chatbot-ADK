@@ -10,8 +10,14 @@ import {
   isValidAddress,
   isValidCanadianAreaCode,
   isValidCanadianPhone,
+  isValidCanadianPostalCode,
   isValidEmail,
   normalizeCanadianPhone,
+  parseCombinedOnboardingInput,
+  detectCardBrand,
+  isValidCardLengthByBrand,
+  isValidCardNumberLuhn,
+  isValidCvcByBrand,
   getFinancingAmount,
   getFinancingEligibleItems,
   getEligibilityProfile,
@@ -33,7 +39,26 @@ import { composePrompt } from "./shared/conversation-style-utils.mjs";
 
 const FLOW_STEPS = {
   INIT_CONNECTING: "INIT_CONNECTING",
+  GREETING_CONVERSATIONAL: "GREETING_CONVERSATIONAL",
   CUSTOMER_STATUS_SELECTION: "CUSTOMER_STATUS_SELECTION",
+  SERVICE_SELECTION: "SERVICE_SELECTION",
+  INTERNET_ADDRESS_REQUEST: "INTERNET_ADDRESS_REQUEST",
+  INTERNET_ADDRESS_VALIDATE: "INTERNET_ADDRESS_VALIDATE",
+  INTERNET_AVAILABILITY_RESULT: "INTERNET_AVAILABILITY_RESULT",
+  INTERNET_PRIORITY_CAPTURE: "INTERNET_PRIORITY_CAPTURE",
+  INTERNET_PLAN_PITCH: "INTERNET_PLAN_PITCH",
+  PLAN_CONFIRMATION: "PLAN_CONFIRMATION",
+  NEW_ONBOARD_COMBINED_CAPTURE: "NEW_ONBOARD_COMBINED_CAPTURE",
+  NEW_ACCOUNT_CREATED_CONFIRM: "NEW_ACCOUNT_CREATED_CONFIRM",
+  CHECKOUT_INTENT_PROMPT: "CHECKOUT_INTENT_PROMPT",
+  PAYMENT_CARD_ENTRY: "PAYMENT_CARD_ENTRY",
+  PAYMENT_CARD_NUMBER: "PAYMENT_CARD_NUMBER",
+  PAYMENT_CARD_CVC: "PAYMENT_CARD_CVC",
+  PAYMENT_CARD_POSTAL: "PAYMENT_CARD_POSTAL",
+  PAYMENT_CARD_CONFIRM: "PAYMENT_CARD_CONFIRM",
+  EXISTING_AUTH_ENTRY: "EXISTING_AUTH_ENTRY",
+  EXISTING_AUTH_VALIDATE: "EXISTING_AUTH_VALIDATE",
+  EXISTING_AUTH_FAILURE_HARD_STOP: "EXISTING_AUTH_FAILURE_HARD_STOP",
   EXISTING_AREA_CODE_CHECK: "EXISTING_AREA_CODE_CHECK",
   NEW_AREA_CODE_ENTRY: "NEW_AREA_CODE_ENTRY",
   EXISTING_AUTH_MODE: "EXISTING_AUTH_MODE",
@@ -53,6 +78,8 @@ const FLOW_STEPS = {
   AUXILIARY_ASSIST: "AUXILIARY_ASSIST",
   POST_AGENT_RATING: "POST_AGENT_RATING",
   POST_AGENT_FEEDBACK: "POST_AGENT_FEEDBACK",
+  POST_CHAT_RATING: "POST_CHAT_RATING",
+  POST_CHAT_FEEDBACK: "POST_CHAT_FEEDBACK",
   INTENT_DISCOVERY: "INTENT_DISCOVERY",
   OFFER_BROWSE: "OFFER_BROWSE",
   BASKET_REVIEW: "BASKET_REVIEW",
@@ -73,6 +100,120 @@ const FLOW_STEPS = {
 };
 
 const STEP_CONTRACT = {
+  [FLOW_STEPS.GREETING_CONVERSATIONAL]: {
+    validInputs: ["conversation start"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.CUSTOMER_STATUS_SELECTION],
+    fallbackTarget: FLOW_STEPS.GREETING_CONVERSATIONAL
+  },
+  [FLOW_STEPS.CUSTOMER_STATUS_SELECTION]: {
+    validInputs: ["new client", "existing client"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.SERVICE_SELECTION, FLOW_STEPS.EXISTING_AUTH_ENTRY],
+    fallbackTarget: FLOW_STEPS.CUSTOMER_STATUS_SELECTION
+  },
+  [FLOW_STEPS.SERVICE_SELECTION]: {
+    validInputs: ["internet", "mobility", "landline"],
+    requiredContext: ["customerType"],
+    allowedNext: [FLOW_STEPS.INTERNET_ADDRESS_REQUEST, FLOW_STEPS.INTENT_DISCOVERY],
+    fallbackTarget: FLOW_STEPS.SERVICE_SELECTION
+  },
+  [FLOW_STEPS.EXISTING_AUTH_ENTRY]: {
+    validInputs: ["name/email/phone"],
+    requiredContext: ["customerType"],
+    allowedNext: [FLOW_STEPS.EXISTING_AUTH_VALIDATE, FLOW_STEPS.EXISTING_AUTH_FAILURE_HARD_STOP, FLOW_STEPS.INTERNET_ADDRESS_REQUEST],
+    fallbackTarget: FLOW_STEPS.EXISTING_AUTH_ENTRY
+  },
+  [FLOW_STEPS.INTERNET_ADDRESS_REQUEST]: {
+    validInputs: ["address"],
+    requiredContext: ["selectedService"],
+    allowedNext: [FLOW_STEPS.INTERNET_ADDRESS_VALIDATE],
+    fallbackTarget: FLOW_STEPS.INTERNET_ADDRESS_REQUEST
+  },
+  [FLOW_STEPS.INTERNET_ADDRESS_VALIDATE]: {
+    validInputs: ["confirm address"],
+    requiredContext: ["serviceAddress"],
+    allowedNext: [FLOW_STEPS.INTERNET_AVAILABILITY_RESULT],
+    fallbackTarget: FLOW_STEPS.INTERNET_ADDRESS_VALIDATE
+  },
+  [FLOW_STEPS.INTERNET_AVAILABILITY_RESULT]: {
+    validInputs: ["continue"],
+    requiredContext: ["serviceAddress"],
+    allowedNext: [FLOW_STEPS.INTERNET_PRIORITY_CAPTURE],
+    fallbackTarget: FLOW_STEPS.INTERNET_AVAILABILITY_RESULT
+  },
+  [FLOW_STEPS.INTERNET_PRIORITY_CAPTURE]: {
+    validInputs: ["speed", "value", "performance"],
+    requiredContext: ["serviceAddress"],
+    allowedNext: [FLOW_STEPS.INTERNET_PLAN_PITCH],
+    fallbackTarget: FLOW_STEPS.INTERNET_PRIORITY_CAPTURE
+  },
+  [FLOW_STEPS.INTERNET_PLAN_PITCH]: {
+    validInputs: ["select plan"],
+    requiredContext: ["internetPreference"],
+    allowedNext: [FLOW_STEPS.PLAN_CONFIRMATION],
+    fallbackTarget: FLOW_STEPS.INTERNET_PLAN_PITCH
+  },
+  [FLOW_STEPS.PLAN_CONFIRMATION]: {
+    validInputs: ["confirm plan", "change plan"],
+    requiredContext: ["selectedPlanId"],
+    allowedNext: [FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE, FLOW_STEPS.CHECKOUT_INTENT_PROMPT, FLOW_STEPS.INTERNET_PLAN_PITCH],
+    fallbackTarget: FLOW_STEPS.PLAN_CONFIRMATION
+  },
+  [FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE]: {
+    validInputs: ["full name, email, phone"],
+    requiredContext: ["selectedPlanId"],
+    allowedNext: [FLOW_STEPS.NEW_ACCOUNT_CREATED_CONFIRM],
+    fallbackTarget: FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE
+  },
+  [FLOW_STEPS.NEW_ACCOUNT_CREATED_CONFIRM]: {
+    validInputs: ["continue"],
+    requiredContext: ["newOnboarding"],
+    allowedNext: [FLOW_STEPS.CHECKOUT_INTENT_PROMPT],
+    fallbackTarget: FLOW_STEPS.NEW_ACCOUNT_CREATED_CONFIRM
+  },
+  [FLOW_STEPS.CHECKOUT_INTENT_PROMPT]: {
+    validInputs: ["checkout", "add mobility", "add landline", "not now"],
+    requiredContext: ["selectedPlanId"],
+    allowedNext: [FLOW_STEPS.PAYMENT_CARD_NUMBER, FLOW_STEPS.PAYMENT_CARD_ENTRY, FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.ORDER_CONFIRMED],
+    fallbackTarget: FLOW_STEPS.CHECKOUT_INTENT_PROMPT
+  },
+  [FLOW_STEPS.PAYMENT_CARD_ENTRY]: {
+    validInputs: ["card details"],
+    requiredContext: ["selectedPlanId"],
+    allowedNext: [FLOW_STEPS.PAYMENT_CARD_NUMBER, FLOW_STEPS.SHIPPING_SELECTION],
+    fallbackTarget: FLOW_STEPS.PAYMENT_CARD_ENTRY
+  },
+  [FLOW_STEPS.PAYMENT_CARD_NUMBER]: {
+    validInputs: ["card number"],
+    requiredContext: ["selectedPlanId"],
+    allowedNext: [FLOW_STEPS.PAYMENT_CARD_CVC],
+    fallbackTarget: FLOW_STEPS.PAYMENT_CARD_NUMBER
+  },
+  [FLOW_STEPS.PAYMENT_CARD_CVC]: {
+    validInputs: ["card cvc"],
+    requiredContext: ["selectedPlanId"],
+    allowedNext: [FLOW_STEPS.PAYMENT_CARD_POSTAL],
+    fallbackTarget: FLOW_STEPS.PAYMENT_CARD_CVC
+  },
+  [FLOW_STEPS.PAYMENT_CARD_POSTAL]: {
+    validInputs: ["postal code"],
+    requiredContext: ["selectedPlanId"],
+    allowedNext: [FLOW_STEPS.PAYMENT_CARD_CONFIRM],
+    fallbackTarget: FLOW_STEPS.PAYMENT_CARD_POSTAL
+  },
+  [FLOW_STEPS.PAYMENT_CARD_CONFIRM]: {
+    validInputs: ["confirm payment", "start over"],
+    requiredContext: ["selectedPlanId"],
+    allowedNext: [FLOW_STEPS.SHIPPING_SELECTION],
+    fallbackTarget: FLOW_STEPS.PAYMENT_CARD_CONFIRM
+  },
+  [FLOW_STEPS.EXISTING_AUTH_FAILURE_HARD_STOP]: {
+    validInputs: ["retry", "end chat"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.EXISTING_AUTH_ENTRY, FLOW_STEPS.ORDER_CONFIRMED],
+    fallbackTarget: FLOW_STEPS.EXISTING_AUTH_FAILURE_HARD_STOP
+  },
   [FLOW_STEPS.HELPDESK_ENTRY]: {
     validInputs: ["mobility", "internet", "landline", "bundle"],
     requiredContext: [],
@@ -90,12 +231,6 @@ const STEP_CONTRACT = {
     requiredContext: ["intent"],
     allowedNext: [FLOW_STEPS.NEW_ONBOARD_NAME, FLOW_STEPS.OFFER_BROWSE],
     fallbackTarget: FLOW_STEPS.SERVICE_CLARIFICATION
-  },
-  [FLOW_STEPS.CUSTOMER_STATUS_SELECTION]: {
-    validInputs: ["new client", "existing bell client"],
-    requiredContext: ["selectedEntryIntent"],
-    allowedNext: [FLOW_STEPS.EXISTING_AREA_CODE_CHECK, FLOW_STEPS.NEW_ONBOARD_NAME],
-    fallbackTarget: FLOW_STEPS.HELPDESK_ENTRY
   },
   [FLOW_STEPS.EXISTING_AREA_CODE_CHECK]: {
     validInputs: ["3-digit area code"],
@@ -162,8 +297,8 @@ const CATEGORY_CHOICE_LABELS = {
 const mockUsers = [
   {
     id: "u1001",
-    name: "Alex Carter",
-    email: "alex.test@gmail.com",
+    name: "Robert",
+    email: "robert@test.gmail.com",
     phone: "4165511192",
     locale: "en-CA",
     authenticated: false,
@@ -177,8 +312,9 @@ const mockUsers = [
   },
   {
     id: "u1002",
-    name: "Maya Singh",
-    email: "maya.singh@gmail.com",
+    name: "George",
+    email: "geroge@test.gmail.com",
+    emailAliases: ["george@test.gmail.com"],
     phone: "6474432288",
     locale: "en-CA",
     authenticated: false,
@@ -192,8 +328,8 @@ const mockUsers = [
   },
   {
     id: "u1003",
-    name: "Daniel Roy",
-    email: "daniel.roy@gmail.com",
+    name: "Samantha",
+    email: "samantha@test.gmail.com",
     phone: "9867783321",
     locale: "fr-CA",
     authenticated: false,
@@ -465,7 +601,12 @@ const phonePrefixToUser = {
   "647": "u1002",
   "986": "u1003"
 };
-const alexEmail = "alex.test@gmail.com";
+const existingNameToUser = {
+  robert: "u1001",
+  george: "u1002",
+  geroge: "u1002",
+  samantha: "u1003"
+};
 
 function validateOfferCoverage() {
   const coverage = CATEGORY_PAGES.map((category) => ({
@@ -483,6 +624,8 @@ function validateOfferCoverage() {
 const chatLauncher = document.getElementById("chat-launcher");
 const chatWidget = document.getElementById("chat-widget");
 const closeChat = document.getElementById("close-chat");
+const llmStatusChip = document.getElementById("llm-status");
+const llmStatusText = document.getElementById("llm-status-text");
 const openChatHeader = document.getElementById("open-chat-header");
 const openChatOffers = document.getElementById("open-chat-offers");
 const autoLoginBtn = document.getElementById("auto-login-btn");
@@ -579,6 +722,23 @@ const state = {
     clientType: null,
     authUser: null,
     intent: null,
+    selectedService: null,
+    internetPreference: null,
+    selectedPlanId: null,
+    onboardingCombinedRaw: null,
+    existingAuthAttempt: {
+      name: null,
+      email: null,
+      phone: null,
+      status: null
+    },
+    cardEntry: {
+      brand: null,
+      maskedLast4: null,
+      cvcValidated: false,
+      postalValidated: false,
+      tokenized: false
+    },
     clarifyRetries: 0,
     activeTask: null,
     escalatedToAgent: false,
@@ -614,6 +774,27 @@ const state = {
       suggestions: []
     },
     serviceAddress: null,
+    serviceAddressValidated: false,
+    addressAuth: {
+      pendingInput: null,
+      suggestions: [],
+      awaitingConfirmation: false
+    },
+    llmStatus: {
+      configured: false,
+      connected: false,
+      model: null,
+      lastCheckedAt: null
+    },
+    paymentDraft: {
+      brand: null,
+      last4: null,
+      cardValidated: false,
+      cvc: null,
+      cvcValidated: false,
+      postal: null,
+      postalValidated: false
+    },
     newOnboarding: {
       fullName: null,
       email: null,
@@ -945,6 +1126,17 @@ function renderSlaBreachSeries(rows = []) {
 function stepToJourneyStage(step) {
   if (
     [
+      FLOW_STEPS.GREETING_CONVERSATIONAL,
+      FLOW_STEPS.SERVICE_SELECTION,
+      FLOW_STEPS.EXISTING_AUTH_ENTRY,
+      FLOW_STEPS.EXISTING_AUTH_VALIDATE,
+      FLOW_STEPS.EXISTING_AUTH_FAILURE_HARD_STOP,
+      FLOW_STEPS.INTERNET_ADDRESS_REQUEST,
+      FLOW_STEPS.INTERNET_ADDRESS_VALIDATE,
+      FLOW_STEPS.INTERNET_AVAILABILITY_RESULT,
+      FLOW_STEPS.INTERNET_PRIORITY_CAPTURE,
+      FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE,
+      FLOW_STEPS.NEW_ACCOUNT_CREATED_CONFIRM,
       FLOW_STEPS.HELPDESK_ENTRY,
       FLOW_STEPS.CUSTOMER_STATUS_SELECTION,
       FLOW_STEPS.EXISTING_AREA_CODE_CHECK,
@@ -959,10 +1151,15 @@ function stepToJourneyStage(step) {
       FLOW_STEPS.SERVICE_CLARIFICATION
     ].includes(step)
   ) return 0;
-  if (step === FLOW_STEPS.OFFER_BROWSE) return 1;
-  if ([FLOW_STEPS.BASKET_REVIEW, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, FLOW_STEPS.ELIGIBILITY_CHECK].includes(step)) return 2;
+  if ([FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.INTERNET_PLAN_PITCH, FLOW_STEPS.PLAN_CONFIRMATION].includes(step)) return 1;
+  if ([FLOW_STEPS.BASKET_REVIEW, FLOW_STEPS.CHECKOUT_INTENT_PROMPT, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, FLOW_STEPS.ELIGIBILITY_CHECK].includes(step)) return 2;
   if (
     [
+      FLOW_STEPS.PAYMENT_CARD_ENTRY,
+      FLOW_STEPS.PAYMENT_CARD_NUMBER,
+      FLOW_STEPS.PAYMENT_CARD_CVC,
+      FLOW_STEPS.PAYMENT_CARD_POSTAL,
+      FLOW_STEPS.PAYMENT_CARD_CONFIRM,
       FLOW_STEPS.PAYMENT_METHOD,
       FLOW_STEPS.PAYMENT_CONFIRM_LAST4,
       FLOW_STEPS.PAYMENT_CVV,
@@ -975,7 +1172,7 @@ function stepToJourneyStage(step) {
   if (
     [FLOW_STEPS.SHIPPING_SELECTION, FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.SHIPPING_LOOKUP].includes(step)
   ) return 4;
-  if ([FLOW_STEPS.ORDER_REVIEW, FLOW_STEPS.ORDER_CONFIRMED, FLOW_STEPS.AUXILIARY_ASSIST].includes(step)) return 5;
+  if ([FLOW_STEPS.ORDER_REVIEW, FLOW_STEPS.ORDER_CONFIRMED, FLOW_STEPS.POST_CHAT_RATING, FLOW_STEPS.POST_CHAT_FEEDBACK, FLOW_STEPS.AUXILIARY_ASSIST].includes(step)) return 5;
   return -1;
 }
 
@@ -993,6 +1190,15 @@ function updateJourneyProgress(step) {
 
 function renderMetricsDashboard(metrics = {}, { fromCache = false } = {}) {
   const kpiList = metrics.businessKpis?.length ? metrics.businessKpis : DEFAULT_BUSINESS_KPIS;
+  const llmUsage = metrics.llmUsage || null;
+  const mergedKpis = llmUsage
+    ? [
+        ...kpiList,
+        { key: "llm_total_calls", label: "LLM Calls", value: llmUsage.totalCalls || 0 },
+        { key: "llm_avg_tokens_session", label: "Avg Tokens / Session", value: llmUsage.avgTokensPerSession || 0 },
+        { key: "llm_fallback_rate", label: "LLM Fallback Rate (%)", value: llmUsage.fallbackRatePercent || 0 }
+      ]
+    : kpiList;
   const monthlyRows = (metrics.monthlySnapshots && metrics.monthlySnapshots.length)
     ? metrics.monthlySnapshots
     : readStore(KPI_SNAPSHOT_STORE_KEY, []).length
@@ -1005,7 +1211,7 @@ function renderMetricsDashboard(metrics = {}, { fromCache = false } = {}) {
       : getDefaultSessionInteractions();
   const routeRows = metrics.routeBreakdown || [];
   const sla = metrics.sla || { overallHealthScore: 100, breachCount: 0, monthlyBreachSeries: [] };
-  renderMetricsCards(kpiList);
+  renderMetricsCards(mergedKpis);
   renderMonthlySnapshotTable(monthlyRows);
   renderSessionInteractionsTable(sessionRows);
   renderRouteBreakdownTable(routeRows);
@@ -1050,6 +1256,87 @@ function queueMetricsDashboardRefresh(delayMs = 1200) {
     state.metricsRefreshTimer = null;
     refreshMetricsDashboard({ silent: true });
   }, delayMs);
+}
+
+function updateLlmStatusUi(status = {}) {
+  if (!llmStatusChip || !llmStatusText) return;
+  llmStatusChip.classList.remove("llm-online", "llm-degraded", "llm-offline");
+  const configured = Boolean(status.configured);
+  const connected = Boolean(status.connected);
+  if (connected) {
+    llmStatusChip.classList.add("llm-online");
+    llmStatusText.textContent = `ChatGPT: Connected${status.model ? ` (${status.model})` : ""}`;
+    return;
+  }
+  if (configured) {
+    llmStatusChip.classList.add("llm-degraded");
+    llmStatusText.textContent = "ChatGPT: Degraded";
+    return;
+  }
+  llmStatusChip.classList.add("llm-offline");
+  llmStatusText.textContent = "ChatGPT: Not configured";
+}
+
+async function refreshLlmStatus({ silent = true } = {}) {
+  try {
+    const response = await fetch("/api/llm-health");
+    if (!response.ok) throw new Error("health unavailable");
+    const payload = await response.json();
+    applyContextPatch({
+      llmStatus: {
+        configured: Boolean(payload.configured),
+        connected: Boolean(payload.connected),
+        model: payload.model || null,
+        lastCheckedAt: payload.lastCheckedAt || null
+      }
+    });
+    updateLlmStatusUi(payload);
+  } catch (error) {
+    applyContextPatch({
+      llmStatus: {
+        configured: false,
+        connected: false,
+        model: null,
+        lastCheckedAt: new Date().toISOString()
+      }
+    });
+    updateLlmStatusUi({ configured: false, connected: false, model: null });
+    if (!silent) {
+      postMessage("bot", "ChatGPT connection check is unavailable right now. Continuing with deterministic responses.");
+    }
+  }
+}
+
+async function requestChatAssist(task, payload = {}, { fallbackText = "", minLength = 8 } = {}) {
+  try {
+    const response = await fetch("/api/chat-assist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task,
+        sessionId: state.context.sessionId,
+        step: state.flowStep,
+        context: {
+          sessionId: state.context.sessionId,
+          customerType: state.context.customerType,
+          intent: state.context.intent,
+          selectedService: state.context.selectedService
+        },
+        ...payload
+      })
+    });
+    if (!response.ok) throw new Error("assist unavailable");
+    const data = await response.json();
+    if (data?.mode === "llm") {
+      applyContextPatch({ llmStatus: { configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" } });
+      updateLlmStatusUi({ ...state.context.llmStatus, configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" });
+    }
+    const text = String(data?.text || "").trim();
+    if (text.length >= minLength) return text;
+    return fallbackText;
+  } catch {
+    return fallbackText;
+  }
 }
 
 function clearAddressTypeahead() {
@@ -1321,6 +1608,23 @@ function resetSessionState() {
     clientType: null,
     authUser: null,
     intent: null,
+    selectedService: null,
+    internetPreference: null,
+    selectedPlanId: null,
+    onboardingCombinedRaw: null,
+    existingAuthAttempt: {
+      name: null,
+      email: null,
+      phone: null,
+      status: null
+    },
+    cardEntry: {
+      brand: null,
+      maskedLast4: null,
+      cvcValidated: false,
+      postalValidated: false,
+      tokenized: false
+    },
     clarifyRetries: 0,
     activeTask: null,
     escalatedToAgent: false,
@@ -1356,6 +1660,27 @@ function resetSessionState() {
       suggestions: []
     },
     serviceAddress: null,
+    serviceAddressValidated: false,
+    addressAuth: {
+      pendingInput: null,
+      suggestions: [],
+      awaitingConfirmation: false
+    },
+    llmStatus: {
+      configured: false,
+      connected: false,
+      model: null,
+      lastCheckedAt: null
+    },
+    paymentDraft: {
+      brand: null,
+      last4: null,
+      cardValidated: false,
+      cvc: null,
+      cvcValidated: false,
+      postal: null,
+      postalValidated: false
+    },
     newOnboarding: {
       fullName: null,
       email: null,
@@ -1448,6 +1773,12 @@ function getPatchedContext(patch = {}) {
   if (patch.clientType !== undefined) next.clientType = patch.clientType;
   if (patch.authUser !== undefined) next.authUser = patch.authUser;
   if (patch.intent !== undefined) next.intent = patch.intent;
+  if (patch.selectedService !== undefined) next.selectedService = patch.selectedService;
+  if (patch.internetPreference !== undefined) next.internetPreference = patch.internetPreference;
+  if (patch.selectedPlanId !== undefined) next.selectedPlanId = patch.selectedPlanId;
+  if (patch.onboardingCombinedRaw !== undefined) next.onboardingCombinedRaw = patch.onboardingCombinedRaw;
+  if (patch.existingAuthAttempt) next.existingAuthAttempt = { ...next.existingAuthAttempt, ...patch.existingAuthAttempt };
+  if (patch.cardEntry) next.cardEntry = { ...next.cardEntry, ...patch.cardEntry };
   if (patch.activeTask !== undefined) next.activeTask = patch.activeTask;
   if (patch.clarifyRetries !== undefined) next.clarifyRetries = patch.clarifyRetries;
   if (patch.escalatedToAgent !== undefined) next.escalatedToAgent = patch.escalatedToAgent;
@@ -1456,6 +1787,10 @@ function getPatchedContext(patch = {}) {
   if (patch.addressCaptureRetries !== undefined) next.addressCaptureRetries = patch.addressCaptureRetries;
   if (patch.basket !== undefined) next.basket = patch.basket;
   if (patch.serviceAddress !== undefined) next.serviceAddress = patch.serviceAddress;
+  if (patch.serviceAddressValidated !== undefined) next.serviceAddressValidated = patch.serviceAddressValidated;
+  if (patch.addressAuth) next.addressAuth = { ...next.addressAuth, ...patch.addressAuth };
+  if (patch.llmStatus) next.llmStatus = { ...next.llmStatus, ...patch.llmStatus };
+  if (patch.paymentDraft) next.paymentDraft = { ...next.paymentDraft, ...patch.paymentDraft };
   if (patch.payment) next.payment = { ...next.payment, ...patch.payment };
   if (patch.financing) next.financing = { ...next.financing, ...patch.financing };
   if (patch.shipping) next.shipping = { ...next.shipping, ...patch.shipping };
@@ -1558,7 +1893,11 @@ function goBack() {
     logClient("info", "flow_clarify_prompt", { reason: "back_no_history", current: state.flowStep });
     showChoiceButtons(["Login", "Restart", "Continue"], (choice) => {
       if (choice === "Login") {
-        transitionTo(FLOW_STEPS.EXISTING_AREA_CODE_CHECK, { customerType: "existing" }, { pushHistory: false, enforceContract: false });
+        transitionTo(
+          FLOW_STEPS.EXISTING_AUTH_ENTRY,
+          { customerType: "existing", selectedService: "internet", intent: "home internet" },
+          { pushHistory: false, enforceContract: false }
+        );
         return;
       }
       if (choice === "Restart") {
@@ -1943,7 +2282,11 @@ async function detectIntent(message) {
     const response = await fetch("/api/intent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message })
+      body: JSON.stringify({
+        message,
+        sessionId: state.context.sessionId,
+        step: state.flowStep
+      })
     });
     if (!response.ok) throw new Error("intent endpoint failed");
     const payload = await response.json();
@@ -1953,6 +2296,13 @@ async function detectIntent(message) {
         confidence: Number(payload.confidence || 0),
         intent: payload.intent || null
       });
+    }
+    if (payload.mode === "llm") {
+      applyContextPatch({ llmStatus: { configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" } });
+      updateLlmStatusUi({ ...state.context.llmStatus, configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" });
+    } else if (String(payload.mode || "").includes("fallback")) {
+      applyContextPatch({ llmStatus: { configured: true, connected: false } });
+      updateLlmStatusUi({ ...state.context.llmStatus, configured: true, connected: false });
     }
     if (payload.fallbackUsed) {
       logClient("info", "llm_fallback_used", {
@@ -1980,13 +2330,25 @@ async function detectIntent(message) {
 }
 
 function resolveUserFromIdentifier(raw) {
-  const value = raw.trim().toLowerCase();
+  const value = String(raw || "").trim().toLowerCase();
   if (!value) return null;
-  if (value === alexEmail) return mockUsers.find((u) => u.id === "u1001") || null;
 
-  const digits = value.replace(/\D/g, "");
-  const prefix = digits.slice(0, 3);
-  const userId = phonePrefixToUser[prefix];
+  if (value.includes("@")) {
+    return (
+      mockUsers.find(
+        (user) =>
+          user.email.toLowerCase() === value ||
+          (Array.isArray(user.emailAliases) && user.emailAliases.some((alias) => alias.toLowerCase() === value))
+      ) || null
+    );
+  }
+
+  const nameId = existingNameToUser[value];
+  if (nameId) return mockUsers.find((u) => u.id === nameId) || null;
+
+  const digits = normalizeCanadianPhone(value);
+  if (!digits) return null;
+  const userId = phonePrefixToUser[digits.slice(0, 3)];
   if (!userId) return null;
   return mockUsers.find((u) => u.id === userId) || null;
 }
@@ -2126,7 +2488,7 @@ function routeAfterSalesClarification({ pushHistory = true } = {}) {
   );
 }
 
-async function finalizeExistingAuthentication(user, mode, rawIdentifier = "") {
+async function finalizeExistingAuthentication(user, mode, rawIdentifier = "", { routeAfterAuth = true } = {}) {
   const contact = inferAuthContact(user, rawIdentifier);
   user.authenticated = true;
   const derivedAreaCode = deriveAreaCodeFromProfile(user, contact.phone);
@@ -2138,6 +2500,7 @@ async function finalizeExistingAuthentication(user, mode, rawIdentifier = "") {
     areaCode: state.context.areaCode || derivedAreaCode,
     areaCodeSource: state.context.areaCode ? state.context.areaCodeSource || "user_input" : (derivedAreaCode ? "profile" : null),
     serviceAddress: state.context.serviceAddress || user.prefilledAddress || null,
+    serviceAddressValidated: Boolean(state.context.serviceAddressValidated && state.context.serviceAddress),
     authMeta: {
       mode,
       phone: contact.phone,
@@ -2151,7 +2514,9 @@ async function finalizeExistingAuthentication(user, mode, rawIdentifier = "") {
     "bot",
     `Authentication successful. ${user.name} verified. ${contactLabel}.`
   );
-  continueFromSelectedIntent({ pushHistory: true });
+  if (routeAfterAuth) {
+    continueFromSelectedIntent({ pushHistory: true });
+  }
   logClient("info", "auth_success", { mode, userId: user.id, secureRef });
 }
 
@@ -2435,6 +2800,172 @@ function announceDiscountQualification(previousCount, currentCount) {
   applyContextPatch({ discountNotice: { lastTierAnnounced: currentTier } });
 }
 
+function getInternetOffersByPreference(preference = "value") {
+  const internetOffers = offers.filter((offer) => offer.category === "home internet");
+  const pref = String(preference || "").toLowerCase();
+  if (pref.includes("speed")) {
+    return [...internetOffers].sort((a, b) => b.monthlyPrice - a.monthlyPrice).slice(0, 3);
+  }
+  if (pref.includes("performance") || pref.includes("upload")) {
+    return [
+      ...internetOffers.filter((offer) => /upload|balanced|hybrid/i.test(offer.description || "")),
+      ...internetOffers
+    ]
+      .filter((offer, idx, arr) => arr.findIndex((candidate) => candidate.id === offer.id) === idx)
+      .slice(0, 3);
+  }
+  return [...internetOffers].sort((a, b) => a.monthlyPrice - b.monthlyPrice).slice(0, 3);
+}
+
+function resolveInternetPreference(raw = "") {
+  const value = String(raw || "").toLowerCase();
+  if (/(speed|fast|fastest)/i.test(value)) return "speed";
+  if (/(value|budget|cheap|afford)/i.test(value)) return "value";
+  if (/(performance|upload|balanced|work)/i.test(value)) return "performance";
+  return null;
+}
+
+function getOfferByIdSafe(offerId) {
+  return offers.find((offer) => offer.id === offerId) || null;
+}
+
+function parseExistingAuthInput(raw = "") {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  const combined = parseCombinedOnboardingInput(text);
+  if (combined) {
+    return {
+      name: combined.fullName || null,
+      email: combined.email || null,
+      phone: combined.phone || null
+    };
+  }
+  if (text.includes("@")) return { name: null, email: text.toLowerCase(), phone: null };
+  const phone = normalizeCanadianPhone(text);
+  if (phone) return { name: null, email: null, phone };
+  return { name: text, email: null, phone: null };
+}
+
+async function processExistingAuthAttempt() {
+  const attempt = state.context.existingAuthAttempt || {};
+  let authUser = null;
+
+  if (attempt.email) {
+    if (!isValidEmail(attempt.email)) {
+      logClient("error", "validation_email_failed", { value: attempt.email, step: FLOW_STEPS.EXISTING_AUTH_VALIDATE });
+    } else {
+      authUser = resolveUserFromIdentifier(attempt.email);
+    }
+  } else if (attempt.phone) {
+    if (!isValidCanadianPhone(attempt.phone)) {
+      logClient("error", "validation_phone_failed", { value: attempt.phone, step: FLOW_STEPS.EXISTING_AUTH_VALIDATE });
+    } else {
+      authUser = resolveUserFromIdentifier(attempt.phone);
+    }
+  } else if (attempt.name) {
+    authUser = resolveUserFromIdentifier(attempt.name);
+  }
+
+  if (!authUser) {
+    applyContextPatch({ existingAuthAttempt: { status: "failed" } });
+    transitionTo(FLOW_STEPS.EXISTING_AUTH_FAILURE_HARD_STOP, {}, { pushHistory: true, enforceContract: false });
+    return;
+  }
+
+  applyContextPatch({
+    existingAuthAttempt: { status: "ok" },
+    selectedService: "internet",
+    intent: "home internet",
+    customerType: "existing"
+  });
+
+  await finalizeExistingAuthentication(
+    authUser,
+    "existing-whitelist",
+    attempt.email || attempt.phone || attempt.name || "",
+    { routeAfterAuth: false }
+  );
+  transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true, enforceContract: false });
+}
+
+function parseCardEntryInput(raw = "") {
+  const text = String(raw || "").trim();
+  const compact = text.replace(/\s+/g, " ");
+  const segments = compact.split(",").map((part) => part.trim()).filter(Boolean);
+
+  let cardNumber = "";
+  let cvc = "";
+  let postal = "";
+
+  const cardFromSegments = segments.find((segment) => /\d[\d\s-]{12,22}\d/.test(segment));
+  if (cardFromSegments) {
+    cardNumber = cardFromSegments.replace(/\D/g, "");
+  } else {
+    const cardMatch = compact.match(/\d[\d\s-]{12,22}\d/);
+    cardNumber = cardMatch ? cardMatch[0].replace(/\D/g, "") : "";
+  }
+
+  const cvcLabeled = compact.match(/(?:cvc|cvv)\s*[:=-]?\s*(\d{3,4})/i);
+  if (cvcLabeled) {
+    cvc = cvcLabeled[1];
+  } else if (segments.length >= 2 && /^\d{3,4}$/.test(segments[1].replace(/\D/g, ""))) {
+    cvc = segments[1].replace(/\D/g, "");
+  } else {
+    const matches = compact.match(/\b\d{3,4}\b/g) || [];
+    cvc = matches.find((candidate) => candidate !== cardNumber.slice(0, candidate.length)) || "";
+  }
+
+  const postalMatch = compact.toUpperCase().match(/[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z][ -]?\d[ABCEGHJ-NPRSTV-Z]\d/);
+  postal = postalMatch ? postalMatch[0].toUpperCase().replace(/\s+/g, "") : "";
+
+  return { cardNumber, cvc, postal };
+}
+
+function normalizeAddressSuggestionLabel(item = {}) {
+  return [item.line1, item.city, item.province, item.postalCode].filter(Boolean).join(", ").trim();
+}
+
+function finalizeServiceAddress(address, source = "manual") {
+  applyContextPatch({
+    serviceAddress: address,
+    serviceAddressValidated: true,
+    addressAuth: {
+      pendingInput: null,
+      suggestions: [],
+      awaitingConfirmation: false
+    }
+  });
+  logClient("info", "address_authenticated", { source, address });
+}
+
+function presentAddressConfirmation(addressInput, suggestions = []) {
+  const topSuggestions = (suggestions || []).slice(0, 3);
+  const labels = topSuggestions.map((suggestion) => `Use ${normalizeAddressSuggestionLabel(suggestion)}`);
+  applyContextPatch({
+    addressAuth: {
+      pendingInput: addressInput,
+      suggestions: topSuggestions,
+      awaitingConfirmation: true
+    }
+  });
+  postMessage("bot", "I found these address matches. Select one, or use the address you entered.");
+  showChoiceButtons([...labels, "Use my entered address"], (choice) => {
+    postMessage("user", choice);
+    if (choice === "Use my entered address") {
+      finalizeServiceAddress(addressInput, "manual_confirmed");
+      transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
+      return;
+    }
+    const matched = topSuggestions.find((suggestion) => choice === `Use ${normalizeAddressSuggestionLabel(suggestion)}`);
+    if (!matched) {
+      handleUnclearInput(choice, "Please choose one of the suggested addresses or use your entered address.");
+      return;
+    }
+    finalizeServiceAddress(normalizeAddressSuggestionLabel(matched), "typeahead_suggestion");
+    transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
+  });
+}
+
 function resolveServiceAddress(context = state.context) {
   return (
     context.serviceAddress ||
@@ -2458,6 +2989,11 @@ function runEligibilityCheck() {
     logClient("info", "validation_address_requested", { reason: "missing_service_address" });
     logClient("info", "address_capture_prompted", { source: "eligibility_check" });
     transitionTo(FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, { addressCaptureRetries: 0 }, { pushHistory: true });
+    return;
+  }
+  if ((state.context.selectedService === "internet" || state.context.intent === "home internet") && !state.context.serviceAddressValidated) {
+    postMessage("bot", "I still need to validate your service address before checkout.");
+    transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true, enforceContract: false });
     return;
   }
   if (!state.context.serviceAddress) {
@@ -2539,7 +3075,7 @@ function renderAddressTypeaheadSuggestions(suggestions = []) {
 }
 
 function queueAddressTypeahead(query) {
-  if (![FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE].includes(state.flowStep)) {
+  if (![FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, FLOW_STEPS.INTERNET_ADDRESS_REQUEST].includes(state.flowStep)) {
     clearAddressTypeahead();
     return;
   }
@@ -2751,7 +3287,7 @@ function confirmOrder() {
   });
   renderBasket();
   resetCheckoutPanel();
-  transitionTo(FLOW_STEPS.AUXILIARY_ASSIST, { activeTask: "order_complete" }, { pushHistory: true });
+  transitionTo(FLOW_STEPS.POST_CHAT_RATING, { activeTask: "post_order_rating" }, { pushHistory: true, enforceContract: false });
 }
 
 function renderStep(step) {
@@ -2781,6 +3317,11 @@ function renderStep(step) {
       FLOW_STEPS.PAYMENT_FINANCING_UPFRONT,
       FLOW_STEPS.PAYMENT_FINANCING_APPROVAL,
       FLOW_STEPS.PAYMENT_FINANCING_CONFIRM,
+      FLOW_STEPS.PAYMENT_CARD_ENTRY,
+      FLOW_STEPS.PAYMENT_CARD_NUMBER,
+      FLOW_STEPS.PAYMENT_CARD_CVC,
+      FLOW_STEPS.PAYMENT_CARD_POSTAL,
+      FLOW_STEPS.PAYMENT_CARD_CONFIRM,
       FLOW_STEPS.SHIPPING_SELECTION,
       FLOW_STEPS.SHIPPING_LOOKUP,
       FLOW_STEPS.SHIPPING_MANUAL_ENTRY,
@@ -2798,7 +3339,7 @@ function renderStep(step) {
       const t1 = setTimeout(() => {
         postMessage("bot", "We are connecting you, please hold.");
         const t2 = setTimeout(() => {
-          transitionTo(FLOW_STEPS.HELPDESK_ENTRY, {}, { pushHistory: false });
+          transitionTo(FLOW_STEPS.GREETING_CONVERSATIONAL, {}, { pushHistory: false });
         }, 700);
         state.timers.push(t2);
       }, 400);
@@ -2806,16 +3347,26 @@ function renderStep(step) {
       break;
     }
 
+    case FLOW_STEPS.GREETING_CONVERSATIONAL:
+      hideAvailabilityCard();
+      postMessage("bot", "Hi, I’m Belinda from Bell. How are you today, and how can I help?");
+      transitionTo(FLOW_STEPS.CUSTOMER_STATUS_SELECTION, {}, { pushHistory: false });
+      break;
+
     case FLOW_STEPS.CUSTOMER_STATUS_SELECTION:
       hideAvailabilityCard();
-      stepPrompt(FLOW_STEPS.CUSTOMER_STATUS_SELECTION, "Quick check before I personalize this for you: are you new to Bell, or already a Bell client?");
-      showChoiceButtons(["New client", "Existing Bell client"], (choice) => {
+      postMessage("bot", "Are you a new client or an existing Bell client?");
+      showChoiceButtons(["New client", "Existing client"], (choice) => {
         postMessage("user", choice);
-        if (choice === "Existing Bell client") {
+        if (choice === "Existing client") {
           transitionTo(
-            FLOW_STEPS.EXISTING_AREA_CODE_CHECK,
+            FLOW_STEPS.EXISTING_AUTH_ENTRY,
             {
               customerType: "existing",
+              selectedService: "internet",
+              selectedEntryIntent: "Internet",
+              intent: "home internet",
+              activeTask: "sales",
               customerStatusAsked: true
             },
             { pushHistory: true }
@@ -2823,13 +3374,264 @@ function renderStep(step) {
           return;
         }
         transitionTo(
-          FLOW_STEPS.NEW_ONBOARD_NAME,
+          FLOW_STEPS.SERVICE_SELECTION,
           {
             customerType: "new",
             customerStatusAsked: true
           },
           { pushHistory: true }
         );
+      });
+      break;
+
+    case FLOW_STEPS.SERVICE_SELECTION:
+      postMessage("bot", "What service are you looking for today?");
+      showChoiceButtons(["Internet", "Mobility", "Landline"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "Internet") {
+          applyContextPatch({
+            selectedService: "internet",
+            intent: "home internet",
+            selectedEntryIntent: "Internet",
+            activeTask: "sales",
+            selectedPlanId: null,
+            internetPreference: null
+          });
+          transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true });
+          return;
+        }
+        const mappedIntent = choice === "Mobility" ? "mobility" : "landline";
+        applyContextPatch({
+          selectedService: mappedIntent === "mobility" ? "mobility" : "landline",
+          intent: mappedIntent,
+          selectedEntryIntent: mappedIntent === "mobility" ? "Mobility" : "Landline",
+          activeTask: "sales"
+        });
+        transitionTo(FLOW_STEPS.INTENT_DISCOVERY, {}, { pushHistory: true, enforceContract: false });
+      });
+      break;
+
+    case FLOW_STEPS.EXISTING_AUTH_ENTRY:
+      postMessage("bot", "Please authenticate with your name, email, or 10-digit Canadian phone number.");
+      setChatInputHint("Example: Robert, robert@test.gmail.com, or 4165511192");
+      break;
+
+    case FLOW_STEPS.EXISTING_AUTH_VALIDATE:
+      postMessage("bot", "Thanks, validating your existing account now.");
+      void processExistingAuthAttempt();
+      break;
+
+    case FLOW_STEPS.EXISTING_AUTH_FAILURE_HARD_STOP:
+      postMessage("bot", "I’m unable to proceed with this user account.");
+      showChoiceButtons(["Retry authentication", "End chat"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "Retry authentication") {
+          transitionTo(FLOW_STEPS.EXISTING_AUTH_ENTRY, {}, { pushHistory: true });
+          return;
+        }
+        endChat();
+      });
+      break;
+
+    case FLOW_STEPS.INTERNET_ADDRESS_REQUEST:
+      if (state.context.addressAuth.awaitingConfirmation) {
+        postMessage("bot", "Please confirm one of the suggested addresses, or choose to use your entered address.");
+        break;
+      }
+      postMessage("bot", "To confirm internet availability in your area, what service address should I use? I will suggest matches as you type.");
+      setChatInputHint("Example: 210 - 100 Galt Ave, Toronto, ON");
+      break;
+
+    case FLOW_STEPS.INTERNET_ADDRESS_VALIDATE:
+      if (!state.context.serviceAddress || !state.context.serviceAddressValidated) {
+        transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: false, enforceContract: false });
+        break;
+      }
+      postMessage("bot", `Thanks. I validated this service address: ${state.context.serviceAddress}.`);
+      transitionTo(FLOW_STEPS.INTERNET_AVAILABILITY_RESULT, {}, { pushHistory: false });
+      break;
+
+    case FLOW_STEPS.INTERNET_AVAILABILITY_RESULT:
+      postMessage("bot", "Great news. Internet offers are available at your address.");
+      transitionTo(FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, {}, { pushHistory: false });
+      break;
+
+    case FLOW_STEPS.INTERNET_PRIORITY_CAPTURE:
+      postMessage("bot", "What is your top priority for internet: speed, value, or performance?");
+      showChoiceButtons(["Speed", "Value", "Performance"], (choice) => {
+        postMessage("user", choice);
+        applyContextPatch({ internetPreference: choice.toLowerCase() });
+        transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
+      });
+      break;
+
+    case FLOW_STEPS.INTERNET_PLAN_PITCH: {
+      const plans = getInternetOffersByPreference(state.context.internetPreference || "value");
+      postMessage("bot", "Based on your preference, here are recommended internet plans:");
+      void requestChatAssist(
+        "explain_recommendation",
+        {
+          userMessage: state.context.internetPreference || "value",
+          deterministicData: {
+            preference: state.context.internetPreference || "value",
+            plans: plans.map((plan) => ({ name: plan.name, monthlyPrice: plan.monthlyPrice }))
+          }
+        },
+        {
+          fallbackText: "I prioritized these plans based on your stated preference, while keeping available service tiers aligned to your needs.",
+          minLength: 20
+        }
+      ).then((assistText) => {
+        if (assistText) postMessage("bot", assistText);
+      });
+      const labels = plans.map((plan) => `Select ${plan.name} - ${currency(plan.monthlyPrice)}/month`);
+      showChoiceButtons(labels, (choice) => {
+        postMessage("user", choice);
+        const selected = plans.find((plan) => choice.includes(plan.name));
+        if (!selected) return;
+        applyContextPatch({ selectedPlanId: selected.id });
+        transitionTo(FLOW_STEPS.PLAN_CONFIRMATION, {}, { pushHistory: true });
+      });
+      break;
+    }
+
+    case FLOW_STEPS.PLAN_CONFIRMATION: {
+      const selectedPlan = getOfferByIdSafe(state.context.selectedPlanId);
+      if (!selectedPlan) {
+        transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: false });
+        break;
+      }
+      postMessage("bot", `Please confirm: ${selectedPlan.name} at ${currency(selectedPlan.monthlyPrice)}/month.`);
+      showChoiceButtons(["Confirm plan", "Change plan"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "Change plan") {
+          transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
+          return;
+        }
+        if (!(state.context.basket || []).some((item) => item.id === selectedPlan.id)) {
+          const basket = [...(state.context.basket || []), selectedPlan];
+          applyContextPatch({ basket });
+          renderBasket();
+        }
+        if (state.context.customerType === "new") {
+          transitionTo(FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE, {}, { pushHistory: true });
+          return;
+        }
+        transitionTo(FLOW_STEPS.CHECKOUT_INTENT_PROMPT, {}, { pushHistory: true });
+      });
+      break;
+    }
+
+    case FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE:
+      postMessage("bot", "Please provide your full name, email, and phone number in one message.");
+      setChatInputHint("Example: Jane Doe, jane@test.com, 4165551234");
+      break;
+
+    case FLOW_STEPS.NEW_ACCOUNT_CREATED_CONFIRM:
+      postMessage("bot", "Great, your new account has been created.");
+      transitionTo(FLOW_STEPS.CHECKOUT_INTENT_PROMPT, {}, { pushHistory: false });
+      break;
+
+    case FLOW_STEPS.CHECKOUT_INTENT_PROMPT:
+      postMessage("bot", "Would you like to checkout now? You can also add mobility or landline offers.");
+      showChoiceButtons(["Checkout now", "Add mobility offers", "Add landline offers", "No thanks"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "Checkout now") {
+          transitionTo(
+            FLOW_STEPS.PAYMENT_CARD_NUMBER,
+            {
+              paymentDraft: {
+                brand: null,
+                last4: null,
+                cardValidated: false,
+                cvc: null,
+                cvcValidated: false,
+                postal: null,
+                postalValidated: false
+              }
+            },
+            { pushHistory: true, enforceContract: false }
+          );
+          return;
+        }
+        if (choice === "Add mobility offers") {
+          routeToCrossSellCategory("mobility");
+          transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        if (choice === "Add landline offers") {
+          routeToCrossSellCategory("landline");
+          transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
+      });
+      break;
+
+    case FLOW_STEPS.PAYMENT_CARD_ENTRY:
+      transitionTo(FLOW_STEPS.PAYMENT_CARD_NUMBER, {}, { pushHistory: false, enforceContract: false });
+      break;
+
+    case FLOW_STEPS.PAYMENT_CARD_NUMBER:
+      postMessage("bot", "Enter your card number (Visa, MasterCard, or Amex).");
+      setChatInputHint("Card number");
+      break;
+
+    case FLOW_STEPS.PAYMENT_CARD_CVC:
+      postMessage("bot", state.context.paymentDraft.brand === "amex" ? "Enter your 4-digit Amex CVC." : "Enter your 3-digit card CVC.");
+      setChatInputHint(state.context.paymentDraft.brand === "amex" ? "4-digit CVC" : "3-digit CVC");
+      break;
+
+    case FLOW_STEPS.PAYMENT_CARD_POSTAL:
+      postMessage("bot", "Enter your Canadian billing postal code (example: M5V 2T6).");
+      setChatInputHint("Canadian postal code");
+      break;
+
+    case FLOW_STEPS.PAYMENT_CARD_CONFIRM:
+      postMessage(
+        "bot",
+        `Please confirm payment with ${String(state.context.paymentDraft.brand || "").toUpperCase()} ending in ${state.context.paymentDraft.last4}.`
+      );
+      showChoiceButtons(["Confirm payment", "Start over"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "Start over") {
+          transitionTo(
+            FLOW_STEPS.PAYMENT_CARD_NUMBER,
+            {
+              paymentDraft: {
+                brand: null,
+                last4: null,
+                cardValidated: false,
+                cvc: null,
+                cvcValidated: false,
+                postal: null,
+                postalValidated: false
+              }
+            },
+            { pushHistory: true, enforceContract: false }
+          );
+          return;
+        }
+        const token = `tok_${Date.now()}`;
+        applyContextPatch({
+          cardEntry: {
+            brand: state.context.paymentDraft.brand,
+            maskedLast4: `**** **** **** ${state.context.paymentDraft.last4}`,
+            cvcValidated: true,
+            postalValidated: true,
+            tokenized: true
+          },
+          payment: {
+            method: state.context.paymentDraft.brand,
+            expectedLast4: state.context.paymentDraft.last4,
+            last4Confirmed: true,
+            cvvValidated: true,
+            verified: true,
+            token
+          }
+        });
+        postMessage("bot", "Payment details confirmed and tokenized. Proceeding to shipping.");
+        transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true, enforceContract: false });
       });
       break;
 
@@ -2913,7 +3715,7 @@ function renderStep(step) {
 
     case FLOW_STEPS.EXISTING_AUTH_IDENTIFIER:
       postMessage("bot", "Enter your phone or email to authenticate.");
-      setChatInputHint("416-555-1111 or alex.test@gmail.com");
+      setChatInputHint("416-555-1111 or robert@test.gmail.com");
       break;
 
     case FLOW_STEPS.NEW_ONBOARD_NAME:
@@ -3011,6 +3813,25 @@ function renderStep(step) {
 
     case FLOW_STEPS.WARM_AGENT_ROUTING:
       postMessage("bot", "I’m stepping in to help directly. Let’s sort this out together. What do you need right now?");
+      void requestChatAssist(
+        "handoff_summary",
+        {
+          userMessage: "Agent handoff requested",
+          deterministicData: {
+            flowStep: state.flowStep,
+            activeTask: state.context.activeTask,
+            intent: state.context.intent
+          }
+        },
+        {
+          fallbackText: "",
+          minLength: 24
+        }
+      ).then((assistSummary) => {
+        if (assistSummary) {
+          postMessage("bot", assistSummary);
+        }
+      });
       showChoiceButtons(["Product selection", "Offer assistance", "Troubleshooting", "Login guidance"], (choice) => {
         postMessage("user", choice);
         transitionTo(FLOW_STEPS.AGENT_ASSIST_CLARIFY, { activeTask: choice.toLowerCase(), escalatedToAgent: true }, { pushHistory: true });
@@ -3163,13 +3984,13 @@ function renderStep(step) {
       showChoiceButtons(options, (choice) => {
         postMessage("user", choice);
         if (choice === "Use profile address" && profileAddress) {
-          applyContextPatch({ serviceAddress: profileAddress, addressCaptureRetries: 0 });
+          applyContextPatch({ serviceAddress: profileAddress, serviceAddressValidated: true, addressCaptureRetries: 0 });
           postMessage("bot", `Using profile service address: ${profileAddress}.`);
           transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
           return;
         }
         if (choice === "Use onboarding address" && onboardingAddress) {
-          applyContextPatch({ serviceAddress: onboardingAddress, addressCaptureRetries: 0 });
+          applyContextPatch({ serviceAddress: onboardingAddress, serviceAddressValidated: true, addressCaptureRetries: 0 });
           postMessage("bot", `Using onboarding service address: ${onboardingAddress}.`);
           transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
           return;
@@ -3474,6 +4295,27 @@ function renderStep(step) {
       setChatInputHint("Share your feedback");
       break;
 
+    case FLOW_STEPS.POST_CHAT_RATING:
+      postMessage("bot", "Before you go, please rate your checkout experience from 1 to 5 stars.");
+      showChoiceButtons(["1 star", "2 stars", "3 stars", "4 stars", "5 stars"], (choice) => {
+        postMessage("user", choice);
+        const rating = Number(choice[0]);
+        applyContextPatch({ agentRating: rating });
+        logClient("info", "agent_rating_submitted", { rating, scope: "post_checkout" });
+        if (rating < 3) {
+          transitionTo(FLOW_STEPS.POST_CHAT_FEEDBACK, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        postMessage("bot", "Thank you for your rating.");
+        transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
+      });
+      break;
+
+    case FLOW_STEPS.POST_CHAT_FEEDBACK:
+      postMessage("bot", "Thanks for the rating. What could we improve?");
+      setChatInputHint("Share your feedback");
+      break;
+
     default:
       break;
   }
@@ -3501,7 +4343,11 @@ function handleGlobalCommands(message) {
   }
 
   if (cmd.includes("re-login") || cmd.includes("login again")) {
-    transitionTo(FLOW_STEPS.EXISTING_AREA_CODE_CHECK, { customerType: "existing" }, { pushHistory: true, enforceContract: false });
+    transitionTo(
+      FLOW_STEPS.EXISTING_AUTH_ENTRY,
+      { customerType: "existing", selectedService: "internet", intent: "home internet" },
+      { pushHistory: true, enforceContract: false }
+    );
     return true;
   }
 
@@ -3531,13 +4377,13 @@ function routeFromAgentAssist(task = "") {
   if (t.includes("product")) return FLOW_STEPS.INTENT_DISCOVERY;
   if (t.includes("offer")) return FLOW_STEPS.OFFER_BROWSE;
   if (t.includes("troubleshoot")) return FLOW_STEPS.SUPPORT_DISCOVERY;
-  if (t.includes("login") || t.includes("auth")) return FLOW_STEPS.EXISTING_AREA_CODE_CHECK;
+  if (t.includes("login") || t.includes("auth")) return FLOW_STEPS.EXISTING_AUTH_ENTRY;
   return FLOW_STEPS.HELPDESK_ENTRY;
 }
 
 function getRoutePatchForStep(nextStep) {
-  if (nextStep === FLOW_STEPS.EXISTING_AREA_CODE_CHECK) {
-    return { customerType: "existing" };
+  if (nextStep === FLOW_STEPS.EXISTING_AUTH_ENTRY) {
+    return { customerType: "existing", selectedService: "internet", intent: "home internet" };
   }
   return {};
 }
@@ -3611,12 +4457,20 @@ async function handleChatInput(message) {
       postMessage("bot", "We are still connecting you. Please hold for a moment.");
       return;
 
+    case FLOW_STEPS.GREETING_CONVERSATIONAL:
+      transitionTo(FLOW_STEPS.CUSTOMER_STATUS_SELECTION, {}, { pushHistory: true, enforceContract: false });
+      return;
+
     case FLOW_STEPS.CUSTOMER_STATUS_SELECTION:
       if (lower.includes("existing")) {
         transitionTo(
-          FLOW_STEPS.EXISTING_AREA_CODE_CHECK,
+          FLOW_STEPS.EXISTING_AUTH_ENTRY,
           {
             customerType: "existing",
+            selectedService: "internet",
+            selectedEntryIntent: "Internet",
+            intent: "home internet",
+            activeTask: "sales",
             customerStatusAsked: true
           },
           { pushHistory: true }
@@ -3625,7 +4479,7 @@ async function handleChatInput(message) {
       }
       if (lower.includes("new")) {
         transitionTo(
-          FLOW_STEPS.NEW_ONBOARD_NAME,
+          FLOW_STEPS.SERVICE_SELECTION,
           {
             customerType: "new",
             customerStatusAsked: true
@@ -3634,8 +4488,382 @@ async function handleChatInput(message) {
         );
         return;
       }
-      handleUnclearInput(message, "Please choose new client or existing Bell client.");
+      handleUnclearInput(message, "Please choose new client or existing client.");
       return;
+
+    case FLOW_STEPS.SERVICE_SELECTION:
+      if (lower.includes("internet")) {
+        applyContextPatch({
+          selectedService: "internet",
+          intent: "home internet",
+          selectedEntryIntent: "Internet",
+          activeTask: "sales",
+          selectedPlanId: null,
+          internetPreference: null
+        });
+        transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("mobility")) {
+        applyContextPatch({
+          selectedService: "mobility",
+          intent: "mobility",
+          selectedEntryIntent: "Mobility",
+          activeTask: "sales"
+        });
+        transitionTo(FLOW_STEPS.INTENT_DISCOVERY, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      if (lower.includes("landline") || lower.includes("home phone")) {
+        applyContextPatch({
+          selectedService: "landline",
+          intent: "landline",
+          selectedEntryIntent: "Landline",
+          activeTask: "sales"
+        });
+        transitionTo(FLOW_STEPS.INTENT_DISCOVERY, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      handleUnclearInput(message, "Please choose Internet, Mobility, or Landline.");
+      return;
+
+    case FLOW_STEPS.EXISTING_AUTH_ENTRY: {
+      const parsed = parseExistingAuthInput(trimmed);
+      if (!parsed) {
+        transitionTo(FLOW_STEPS.EXISTING_AUTH_FAILURE_HARD_STOP, { existingAuthAttempt: { status: "failed" } }, { pushHistory: true });
+        return;
+      }
+      applyContextPatch({ existingAuthAttempt: { ...parsed, status: "pending" } });
+      transitionTo(FLOW_STEPS.EXISTING_AUTH_VALIDATE, {}, { pushHistory: true });
+      return;
+    }
+
+    case FLOW_STEPS.EXISTING_AUTH_VALIDATE: {
+      await processExistingAuthAttempt();
+      return;
+    }
+
+    case FLOW_STEPS.EXISTING_AUTH_FAILURE_HARD_STOP:
+      postMessage("bot", "I’m unable to proceed with this user account.");
+      if (lower.includes("retry")) {
+        transitionTo(FLOW_STEPS.EXISTING_AUTH_ENTRY, {}, { pushHistory: true });
+        return;
+      }
+      if (lower.includes("end") || lower.includes("close") || lower.includes("stop")) {
+        endChat();
+        return;
+      }
+      handleUnclearInput(message, "Reply with 'retry' or 'end chat'.");
+      return;
+
+    case FLOW_STEPS.INTERNET_ADDRESS_REQUEST:
+      if (state.context.addressAuth.awaitingConfirmation) {
+        const pending = state.context.addressAuth.pendingInput || "";
+        const suggestions = state.context.addressAuth.suggestions || [];
+        const normalized = lower.trim();
+        if (normalized.includes("use my entered") || normalized.includes("manual")) {
+          finalizeServiceAddress(pending, "manual_confirmed");
+          transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        const indexedChoice = Number(normalized);
+        if (!Number.isNaN(indexedChoice) && indexedChoice >= 1 && indexedChoice <= suggestions.length) {
+          const pick = suggestions[indexedChoice - 1];
+          finalizeServiceAddress(normalizeAddressSuggestionLabel(pick), "typeahead_suggestion");
+          transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        const matched = suggestions.find((item) => normalizeAddressSuggestionLabel(item).toLowerCase() === normalized);
+        if (matched) {
+          finalizeServiceAddress(normalizeAddressSuggestionLabel(matched), "typeahead_suggestion");
+          transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        handleUnclearInput(message, "Please select a suggested address or reply 'use my entered address'.");
+        return;
+      }
+      if (!isValidAddress(trimmed)) {
+        logClient("error", "validation_address_failed", { value: trimmed, step: FLOW_STEPS.INTERNET_ADDRESS_REQUEST });
+        handleUnclearInput(message, "Please provide a valid service address (example: 210 - 100 Galt Ave, Toronto, ON).");
+        return;
+      }
+      try {
+        const payload = await lookupAddresses(trimmed);
+        const suggestions = payload?.suggestions || [];
+        if (suggestions.length > 0) {
+          presentAddressConfirmation(trimmed, suggestions);
+          return;
+        }
+        finalizeServiceAddress(trimmed, "manual_confirmed_no_suggestions");
+      } catch {
+        finalizeServiceAddress(trimmed, "manual_confirmed_lookup_error");
+      }
+      transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true });
+      return;
+
+    case FLOW_STEPS.INTERNET_ADDRESS_VALIDATE:
+      if (!state.context.serviceAddress || !state.context.serviceAddressValidated) {
+        transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      transitionTo(FLOW_STEPS.INTERNET_AVAILABILITY_RESULT, {}, { pushHistory: true, enforceContract: false });
+      return;
+
+    case FLOW_STEPS.INTERNET_AVAILABILITY_RESULT:
+      transitionTo(FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, {}, { pushHistory: true, enforceContract: false });
+      return;
+
+    case FLOW_STEPS.INTERNET_PRIORITY_CAPTURE: {
+      const preference = resolveInternetPreference(trimmed);
+      if (!preference) {
+        handleUnclearInput(message, "Please tell me your internet priority: speed, value, or performance.");
+        return;
+      }
+      applyContextPatch({ internetPreference: preference });
+      transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
+      return;
+    }
+
+    case FLOW_STEPS.INTERNET_PLAN_PITCH: {
+      const plans = getInternetOffersByPreference(state.context.internetPreference || "value");
+      const selected = plans.find(
+        (plan) => lower.includes(plan.name.toLowerCase()) || lower.includes(plan.id.toLowerCase()) || lower.includes(String(plan.monthlyPrice))
+      );
+      if (!selected) {
+        handleUnclearInput(message, "Please select one of the internet plans shown.");
+        return;
+      }
+      applyContextPatch({ selectedPlanId: selected.id });
+      transitionTo(FLOW_STEPS.PLAN_CONFIRMATION, {}, { pushHistory: true });
+      return;
+    }
+
+    case FLOW_STEPS.PLAN_CONFIRMATION: {
+      if (lower.includes("change")) {
+        transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true });
+        return;
+      }
+      if (!/(confirm|yes|ok|proceed)/i.test(lower)) {
+        handleUnclearInput(message, "Please confirm the plan or say 'change plan'.");
+        return;
+      }
+      const selectedPlan = getOfferByIdSafe(state.context.selectedPlanId);
+      if (!selectedPlan) {
+        transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      if (!(state.context.basket || []).some((item) => item.id === selectedPlan.id)) {
+        const basket = [...(state.context.basket || []), selectedPlan];
+        const previousCount = state.context.basket.length;
+        applyContextPatch({ basket });
+        renderBasket();
+        announceDiscountQualification(previousCount, basket.length);
+      }
+      if (state.context.customerType === "new") {
+        transitionTo(FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE, {}, { pushHistory: true });
+        return;
+      }
+      transitionTo(FLOW_STEPS.CHECKOUT_INTENT_PROMPT, {}, { pushHistory: true });
+      return;
+    }
+
+    case FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE: {
+      const parsed = parseCombinedOnboardingInput(trimmed);
+      if (!parsed || !isValidEmail(parsed.email) || !isValidCanadianPhone(parsed.phone) || !parsed.fullName) {
+        postMessage("bot", "Please provide full name, valid email, and 10-digit Canadian phone in one message.");
+        return;
+      }
+      const normalizedPhone = normalizeCanadianPhone(parsed.phone);
+      const hash = await createIdentityHash(`${parsed.fullName}|${parsed.email}|${normalizedPhone}|${Date.now()}`);
+      const secureRef = `${generateSecureRef()}-${hash}`;
+      applyContextPatch({
+        onboardingCombinedRaw: trimmed,
+        newOnboarding: {
+          fullName: parsed.fullName,
+          email: parsed.email.toLowerCase(),
+          phone: normalizedPhone,
+          leadId: `lead_${Date.now()}`
+        },
+        authMeta: {
+          mode: "new-client",
+          phone: normalizedPhone,
+          email: parsed.email.toLowerCase(),
+          secureRef
+        }
+      });
+      transitionTo(FLOW_STEPS.NEW_ACCOUNT_CREATED_CONFIRM, {}, { pushHistory: true });
+      return;
+    }
+
+    case FLOW_STEPS.NEW_ACCOUNT_CREATED_CONFIRM:
+      transitionTo(FLOW_STEPS.CHECKOUT_INTENT_PROMPT, {}, { pushHistory: true, enforceContract: false });
+      return;
+
+    case FLOW_STEPS.CHECKOUT_INTENT_PROMPT:
+      if (lower.includes("checkout") || lower.includes("yes") || lower.includes("continue")) {
+        transitionTo(FLOW_STEPS.PAYMENT_CARD_NUMBER, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      if (lower.includes("mobility")) {
+        routeToCrossSellCategory("mobility");
+        transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      if (lower.includes("landline") || lower.includes("home phone")) {
+        routeToCrossSellCategory("landline");
+        transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      if (lower.includes("no") || lower.includes("not now")) {
+        transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      handleUnclearInput(message, "Reply with checkout, add mobility, add landline, or no thanks.");
+      return;
+
+    case FLOW_STEPS.PAYMENT_CARD_ENTRY:
+      transitionTo(FLOW_STEPS.PAYMENT_CARD_NUMBER, {}, { pushHistory: false, enforceContract: false });
+      return;
+
+    case FLOW_STEPS.PAYMENT_CARD_NUMBER: {
+      const { cardNumber, cvc, postal } = parseCardEntryInput(trimmed);
+      const brand = detectCardBrand(cardNumber);
+      if (brand && isValidCardNumberLuhn(cardNumber) && isValidCardLengthByBrand(cardNumber, brand) && cvc && postal) {
+        if (!isValidCvcByBrand(cvc, brand)) {
+          postMessage("bot", brand === "amex" ? "Please enter a valid 4-digit Amex CVC." : "Please enter a valid 3-digit card CVC.");
+          transitionTo(FLOW_STEPS.PAYMENT_CARD_CVC, { paymentDraft: { brand, last4: cardNumber.slice(-4), cardValidated: true } }, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        if (!isValidCanadianPostalCode(postal)) {
+          postMessage("bot", "Please enter a valid Canadian postal code (example: M5V 2T6).");
+          transitionTo(
+            FLOW_STEPS.PAYMENT_CARD_POSTAL,
+            { paymentDraft: { brand, last4: cardNumber.slice(-4), cardValidated: true, cvc, cvcValidated: true } },
+            { pushHistory: true, enforceContract: false }
+          );
+          return;
+        }
+        applyContextPatch({
+          paymentDraft: {
+            brand,
+            last4: cardNumber.slice(-4),
+            cardValidated: true,
+            cvc,
+            cvcValidated: true,
+            postal,
+            postalValidated: true
+          }
+        });
+        transitionTo(FLOW_STEPS.PAYMENT_CARD_CONFIRM, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+
+      const digitsOnly = trimmed.replace(/\D/g, "");
+      const parsedBrand = detectCardBrand(digitsOnly);
+      if (!parsedBrand || !isValidCardNumberLuhn(digitsOnly) || !isValidCardLengthByBrand(digitsOnly, parsedBrand)) {
+        postMessage("bot", "Card number is invalid. Please enter a valid Visa, MasterCard, or Amex number.");
+        return;
+      }
+      applyContextPatch({
+        paymentDraft: {
+          brand: parsedBrand,
+          last4: digitsOnly.slice(-4),
+          cardValidated: true,
+          cvc: null,
+          cvcValidated: false,
+          postal: null,
+          postalValidated: false
+        }
+      });
+      transitionTo(FLOW_STEPS.PAYMENT_CARD_CVC, {}, { pushHistory: true, enforceContract: false });
+      return;
+    }
+
+    case FLOW_STEPS.PAYMENT_CARD_CVC: {
+      const brand = state.context.paymentDraft.brand;
+      const cvcDigits = trimmed.replace(/\D/g, "");
+      if (!brand) {
+        transitionTo(FLOW_STEPS.PAYMENT_CARD_NUMBER, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      if (!isValidCvcByBrand(cvcDigits, brand)) {
+        postMessage("bot", brand === "amex" ? "Please enter a valid 4-digit Amex CVC." : "Please enter a valid 3-digit card CVC.");
+        return;
+      }
+      applyContextPatch({
+        paymentDraft: {
+          cvc: cvcDigits,
+          cvcValidated: true
+        }
+      });
+      transitionTo(FLOW_STEPS.PAYMENT_CARD_POSTAL, {}, { pushHistory: true, enforceContract: false });
+      return;
+    }
+
+    case FLOW_STEPS.PAYMENT_CARD_POSTAL: {
+      const normalizedPostal = trimmed.toUpperCase().replace(/\s+/g, "");
+      if (!isValidCanadianPostalCode(normalizedPostal)) {
+        postMessage("bot", "Please enter a valid Canadian postal code (example: M5V 2T6).");
+        return;
+      }
+      applyContextPatch({
+        paymentDraft: {
+          postal: normalizedPostal,
+          postalValidated: true
+        }
+      });
+      transitionTo(FLOW_STEPS.PAYMENT_CARD_CONFIRM, {}, { pushHistory: true, enforceContract: false });
+      return;
+    }
+
+    case FLOW_STEPS.PAYMENT_CARD_CONFIRM:
+      if (lower.includes("start over") || lower.includes("restart")) {
+        transitionTo(
+          FLOW_STEPS.PAYMENT_CARD_NUMBER,
+          {
+            paymentDraft: {
+              brand: null,
+              last4: null,
+              cardValidated: false,
+              cvc: null,
+              cvcValidated: false,
+              postal: null,
+              postalValidated: false
+            }
+          },
+          { pushHistory: true, enforceContract: false }
+        );
+        return;
+      }
+      if (!(lower.includes("confirm") || lower.includes("yes"))) {
+        handleUnclearInput(message, "Please confirm payment or say start over.");
+        return;
+      }
+      if (!state.context.paymentDraft.cardValidated || !state.context.paymentDraft.cvcValidated || !state.context.paymentDraft.postalValidated) {
+        transitionTo(FLOW_STEPS.PAYMENT_CARD_NUMBER, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      applyContextPatch({
+        cardEntry: {
+          brand: state.context.paymentDraft.brand,
+          maskedLast4: `**** **** **** ${state.context.paymentDraft.last4}`,
+          cvcValidated: true,
+          postalValidated: true,
+          tokenized: true
+        },
+        payment: {
+          method: state.context.paymentDraft.brand,
+          expectedLast4: state.context.paymentDraft.last4,
+          last4Confirmed: true,
+          cvvValidated: true,
+          verified: true,
+          token: `tok_${Date.now()}`
+        }
+      });
+      postMessage("bot", `${String(state.context.paymentDraft.brand || "").toUpperCase()} card validated and tokenized. Proceeding to shipping.`);
+      transitionTo(FLOW_STEPS.SHIPPING_SELECTION, {}, { pushHistory: true, enforceContract: false });
+      return;
+    
 
     case FLOW_STEPS.EXISTING_AREA_CODE_CHECK:
       if (!/^\d{3}$/.test(trimmed) || !isValidCanadianAreaCode(trimmed)) {
@@ -3694,7 +4922,7 @@ async function handleChatInput(message) {
       logClient("info", "auth_attempt", { identifier: normalizedIdentifier, viaChatInput: true });
       const user = resolveUserFromIdentifier(normalizedIdentifier);
       if (!user) {
-        postMessage("bot", "Authentication failed. Use phone starting 416/647/986 or alex.test@gmail.com.");
+        postMessage("bot", "Authentication failed. Please use a whitelisted profile: Robert, George, or Samantha.");
         logClient("error", "auth_failure", { identifier: trimmed, viaChatInput: true });
         return;
       }
@@ -3875,7 +5103,7 @@ async function handleChatInput(message) {
         postMessage("bot", "Please enter a full address (example: 210 - 100 Galt Ave, Toronto, ON).");
         return;
       }
-      applyContextPatch({ newOnboarding: { address: trimmed }, serviceAddress: trimmed });
+      applyContextPatch({ newOnboarding: { address: trimmed }, serviceAddress: trimmed, serviceAddressValidated: false });
       transitionTo(FLOW_STEPS.NEW_AREA_CODE_ENTRY, {}, { pushHistory: true });
       return;
 
@@ -3883,13 +5111,13 @@ async function handleChatInput(message) {
       const profileAddress = state.context.authUser?.prefilledAddress || null;
       const onboardingAddress = state.context.newOnboarding?.address || null;
       if (lower.includes("profile") && profileAddress) {
-        applyContextPatch({ serviceAddress: profileAddress, addressCaptureRetries: 0 });
+        applyContextPatch({ serviceAddress: profileAddress, serviceAddressValidated: true, addressCaptureRetries: 0 });
         postMessage("bot", `Using profile service address: ${profileAddress}.`);
         transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
         return;
       }
       if ((lower.includes("onboarding") || lower.includes("signup")) && onboardingAddress) {
-        applyContextPatch({ serviceAddress: onboardingAddress, addressCaptureRetries: 0 });
+        applyContextPatch({ serviceAddress: onboardingAddress, serviceAddressValidated: true, addressCaptureRetries: 0 });
         postMessage("bot", `Using onboarding service address: ${onboardingAddress}.`);
         transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
         return;
@@ -3907,12 +5135,12 @@ async function handleChatInput(message) {
           showChoiceButtons(options, (choice) => {
             postMessage("user", choice);
             if (choice === "Use profile address" && profileAddress) {
-              applyContextPatch({ serviceAddress: profileAddress, addressCaptureRetries: 0 });
+              applyContextPatch({ serviceAddress: profileAddress, serviceAddressValidated: true, addressCaptureRetries: 0 });
               transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
               return;
             }
             if (choice === "Use onboarding address" && onboardingAddress) {
-              applyContextPatch({ serviceAddress: onboardingAddress, addressCaptureRetries: 0 });
+              applyContextPatch({ serviceAddress: onboardingAddress, serviceAddressValidated: true, addressCaptureRetries: 0 });
               transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
               return;
             }
@@ -3924,7 +5152,7 @@ async function handleChatInput(message) {
         postMessage("bot", "Please enter a full service address (street, city, province).");
         return;
       }
-      applyContextPatch({ serviceAddress: trimmed, addressCaptureRetries: 0 });
+      applyContextPatch({ serviceAddress: trimmed, serviceAddressValidated: true, addressCaptureRetries: 0 });
       postMessage("bot", `Thanks. I will validate service at: ${trimmed}.`);
       transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
       return;
@@ -4186,6 +5414,34 @@ async function handleChatInput(message) {
       logClient("info", "agent_feedback_submitted", { feedback: trimmed, rating: state.context.agentRating });
       postMessage("bot", "Thank you for the feedback. We appreciate your time.");
       transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true });
+      return;
+
+    case FLOW_STEPS.POST_CHAT_RATING: {
+      const rating = Number((trimmed.match(/[1-5]/) || [])[0]);
+      if (!rating) {
+        handleUnclearInput(message, "Please provide a rating from 1 to 5 stars.");
+        return;
+      }
+      applyContextPatch({ agentRating: rating });
+      logClient("info", "agent_rating_submitted", { rating, scope: "post_checkout", viaChatInput: true });
+      if (rating < 3) {
+        transitionTo(FLOW_STEPS.POST_CHAT_FEEDBACK, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      postMessage("bot", "Thank you for your rating.");
+      transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
+      return;
+    }
+
+    case FLOW_STEPS.POST_CHAT_FEEDBACK:
+      if (!trimmed) {
+        handleUnclearInput(message, "Please share what we could improve.");
+        return;
+      }
+      applyContextPatch({ agentFeedback: trimmed });
+      logClient("info", "agent_feedback_submitted", { feedback: trimmed, rating: state.context.agentRating, scope: "post_checkout" });
+      postMessage("bot", "Thanks for the feedback. We appreciate it.");
+      transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
       return;
 
     case FLOW_STEPS.PAYMENT_CVV:
@@ -4456,7 +5712,7 @@ function startConversation({ skipConnecting = false } = {}) {
     }
   });
   if (skipConnecting) {
-    transitionTo(FLOW_STEPS.HELPDESK_ENTRY, {}, { pushHistory: false });
+    transitionTo(FLOW_STEPS.GREETING_CONVERSATIONAL, {}, { pushHistory: false, enforceContract: false });
     return;
   }
   transitionTo(FLOW_STEPS.INIT_CONNECTING, {}, { pushHistory: false });
@@ -4490,21 +5746,56 @@ function runTopLoginFlow(mode) {
   clearTimers();
   openChatWidget();
   if (!state.chatStarted) {
-    startConversation({ skipConnecting: true });
+    state.chatStarted = true;
+    applyContextPatch({
+      sla: {
+        chatOpenedAt: Date.now(),
+        firstReplyAt: null,
+        intentLockedAt: null,
+        offerPresentedAt: null,
+        checkoutStartedAt: null,
+        orderConfirmedAt: null,
+        breachFlags: {
+          firstReply: false,
+          intentLock: false,
+          offerTime: false,
+          checkoutTime: false
+        }
+      }
+    });
   } else {
-    transitionTo(FLOW_STEPS.HELPDESK_ENTRY, {}, { pushHistory: true, enforceContract: false });
+    transitionTo(FLOW_STEPS.GREETING_CONVERSATIONAL, {}, { pushHistory: true, enforceContract: false });
   }
-  state.pendingAuthMode = mode;
+  state.pendingAuthMode = null;
+  if (mode === "auto") {
+    const user = mockUsers.find((candidate) => candidate.id === "u1001");
+    if (user) {
+      applyContextPatch({
+        customerType: "existing",
+        selectedService: "internet",
+        selectedEntryIntent: "Internet",
+        intent: "home internet",
+        activeTask: "sales",
+        customerStatusAsked: true
+      });
+      void finalizeExistingAuthentication(user, "auto", user.phone, { routeAfterAuth: false });
+      transitionTo(FLOW_STEPS.INTERNET_ADDRESS_REQUEST, {}, { pushHistory: true, enforceContract: false });
+      return;
+    }
+  }
   transitionTo(
-    FLOW_STEPS.CUSTOMER_STATUS_SELECTION,
+    FLOW_STEPS.EXISTING_AUTH_ENTRY,
     {
-      selectedEntryIntent: "Help Desk",
-      activeTask: "support",
-      areaCodeRequiredForTask: true
+      customerType: "existing",
+      selectedService: "internet",
+      selectedEntryIntent: "Internet",
+      intent: "home internet",
+      activeTask: "sales",
+      customerStatusAsked: true
     },
     { pushHistory: true, enforceContract: false }
   );
-  postMessage("bot", "Login selected. I will guide you through existing-client verification.");
+  postMessage("bot", "Login selected. I’ll verify your existing account so we can continue with internet offers.");
 }
 
 chatLauncher.addEventListener("click", () => {
@@ -4528,15 +5819,33 @@ manualLoginBtn.addEventListener("click", () => runTopLoginFlow("manual"));
 
 newCustomerBtn.addEventListener("click", () => {
   openChatWidget();
-  if (!state.chatStarted) startConversation({ skipConnecting: true });
+  if (!state.chatStarted) {
+    state.chatStarted = true;
+    applyContextPatch({
+      sla: {
+        chatOpenedAt: Date.now(),
+        firstReplyAt: null,
+        intentLockedAt: null,
+        offerPresentedAt: null,
+        checkoutStartedAt: null,
+        orderConfirmedAt: null,
+        breachFlags: {
+          firstReply: false,
+          intentLock: false,
+          offerTime: false,
+          checkoutTime: false
+        }
+      }
+    });
+  }
   postMessage("user", "New client");
   transitionTo(
-    FLOW_STEPS.NEW_ONBOARD_NAME,
+    FLOW_STEPS.SERVICE_SELECTION,
     {
       customerType: "new",
-      selectedEntryIntent: "New Products / Upgrades",
+      selectedEntryIntent: "Internet",
       activeTask: "sales",
-      areaCodeRequiredForTask: true
+      customerStatusAsked: true
     },
     { pushHistory: true, enforceContract: false }
   );
@@ -4544,15 +5853,35 @@ newCustomerBtn.addEventListener("click", () => {
 
 existingCustomerBtn.addEventListener("click", () => {
   openChatWidget();
-  if (!state.chatStarted) startConversation({ skipConnecting: true });
+  if (!state.chatStarted) {
+    state.chatStarted = true;
+    applyContextPatch({
+      sla: {
+        chatOpenedAt: Date.now(),
+        firstReplyAt: null,
+        intentLockedAt: null,
+        offerPresentedAt: null,
+        checkoutStartedAt: null,
+        orderConfirmedAt: null,
+        breachFlags: {
+          firstReply: false,
+          intentLock: false,
+          offerTime: false,
+          checkoutTime: false
+        }
+      }
+    });
+  }
   postMessage("user", "Existing Bell client");
   transitionTo(
-    FLOW_STEPS.EXISTING_AREA_CODE_CHECK,
+    FLOW_STEPS.EXISTING_AUTH_ENTRY,
     {
       customerType: "existing",
-      selectedEntryIntent: "New Products / Upgrades",
+      selectedService: "internet",
+      selectedEntryIntent: "Internet",
+      intent: "home internet",
       activeTask: "sales",
-      areaCodeRequiredForTask: true
+      customerStatusAsked: true
     },
     { pushHistory: true, enforceContract: false }
   );
@@ -4682,6 +6011,9 @@ function boot() {
   closeChatWidget();
   validateOfferCoverage();
   updateJourneyProgress(FLOW_STEPS.INIT_CONNECTING);
+  updateLlmStatusUi({ configured: false, connected: false, model: null });
+  refreshLlmStatus({ silent: true });
+  setInterval(() => refreshLlmStatus({ silent: true }), 30000);
   refreshMetricsDashboard({ silent: true });
   setInterval(() => refreshMetricsDashboard({ silent: true }), 60000);
 }

@@ -12,8 +12,14 @@ import {
   isValidAddress,
   isValidCanadianAreaCode,
   isValidCanadianPhone,
+  isValidCanadianPostalCode,
   isValidEmail,
   normalizeCanadianPhone,
+  parseCombinedOnboardingInput,
+  detectCardBrand,
+  isValidCardNumberLuhn,
+  isValidCardLengthByBrand,
+  isValidCvcByBrand,
   getFinancingAmount,
   getFinancingEligibleItems,
   getEligibilityProfile,
@@ -89,6 +95,55 @@ test("isValidEmail validates standard format", () => {
   assert.equal(isValidEmail("a+b.c@test-domain.ca"), true);
   assert.equal(isValidEmail("invalid-email"), false);
   assert.equal(isValidEmail("missing@domain"), false);
+});
+
+test("isValidCanadianPostalCode validates standard postal format", () => {
+  assert.equal(isValidCanadianPostalCode("M5V 2T6"), true);
+  assert.equal(isValidCanadianPostalCode("m5v2t6"), true);
+  assert.equal(isValidCanadianPostalCode("12345"), false);
+});
+
+test("parseCombinedOnboardingInput extracts full name, email, and phone", () => {
+  const parsed = parseCombinedOnboardingInput("Jane Doe, jane@test.com, (416) 555-1234");
+  assert.deepEqual(parsed, {
+    fullName: "Jane Doe",
+    email: "jane@test.com",
+    phone: "4165551234"
+  });
+});
+
+test("parseCombinedOnboardingInput supports labeled input", () => {
+  const parsed = parseCombinedOnboardingInput("Name: Jane Doe Email: jane@test.com Phone: 6475551122");
+  assert.deepEqual(parsed, {
+    fullName: "Jane Doe",
+    email: "jane@test.com",
+    phone: "6475551122"
+  });
+});
+
+test("parseCombinedOnboardingInput rejects incomplete input", () => {
+  assert.equal(parseCombinedOnboardingInput("Jane Doe, jane@test.com"), null);
+});
+
+test("card brand + luhn + length validations are enforced", () => {
+  const visa = "4111111111111111";
+  const mc = "5555555555554444";
+  const amex = "378282246310005";
+  assert.equal(detectCardBrand(visa), "visa");
+  assert.equal(detectCardBrand(mc), "mastercard");
+  assert.equal(detectCardBrand(amex), "amex");
+  assert.equal(isValidCardNumberLuhn(visa), true);
+  assert.equal(isValidCardNumberLuhn("4111111111111112"), false);
+  assert.equal(isValidCardLengthByBrand(visa, "visa"), true);
+  assert.equal(isValidCardLengthByBrand(amex, "amex"), true);
+  assert.equal(isValidCardLengthByBrand("411111111111111", "visa"), false);
+});
+
+test("isValidCvcByBrand applies brand-specific length", () => {
+  assert.equal(isValidCvcByBrand("123", "visa"), true);
+  assert.equal(isValidCvcByBrand("1234", "visa"), false);
+  assert.equal(isValidCvcByBrand("1234", "amex"), true);
+  assert.equal(isValidCvcByBrand("123", "amex"), false);
 });
 
 test("isValidAddress requires basic street and locality structure", () => {

@@ -9,8 +9,46 @@ export const PATH_STATUS = {
 
 export function canProceed(step = "", context = {}) {
   switch (step) {
+    case "GREETING_CONVERSATIONAL":
+      return true;
     case "CUSTOMER_STATUS_SELECTION":
-      return Boolean(context.selectedEntryIntent);
+      return true;
+    case "SERVICE_SELECTION":
+      return context.customerType === "new";
+    case "EXISTING_AUTH_ENTRY":
+      return context.customerType === "existing";
+    case "EXISTING_AUTH_VALIDATE":
+      return context.customerType === "existing" && Boolean(context.existingAuthAttempt);
+    case "EXISTING_AUTH_FAILURE_HARD_STOP":
+      return true;
+    case "INTERNET_ADDRESS_REQUEST":
+      return context.selectedService === "internet" || context.intent === "home internet";
+    case "INTERNET_ADDRESS_VALIDATE":
+      return Boolean(context.serviceAddress) && Boolean(context.serviceAddressValidated);
+    case "INTERNET_AVAILABILITY_RESULT":
+      return Boolean(context.serviceAddress);
+    case "INTERNET_PRIORITY_CAPTURE":
+      return Boolean(context.serviceAddress);
+    case "INTERNET_PLAN_PITCH":
+      return Boolean(context.serviceAddress) && Boolean(context.internetPreference);
+    case "PLAN_CONFIRMATION":
+      return Boolean(context.selectedPlanId);
+    case "NEW_ONBOARD_COMBINED_CAPTURE":
+      return context.customerType === "new" && Boolean(context.selectedPlanId);
+    case "NEW_ACCOUNT_CREATED_CONFIRM":
+      return Boolean(context.newOnboarding?.fullName) && Boolean(context.newOnboarding?.email) && Boolean(context.newOnboarding?.phone);
+    case "CHECKOUT_INTENT_PROMPT":
+      return Boolean(context.selectedPlanId);
+    case "PAYMENT_CARD_ENTRY":
+      return Boolean(context.selectedPlanId) && Array.isArray(context.basket) && context.basket.length > 0;
+    case "PAYMENT_CARD_NUMBER":
+      return Boolean(context.selectedPlanId) && Array.isArray(context.basket) && context.basket.length > 0;
+    case "PAYMENT_CARD_CVC":
+      return Boolean(context.paymentDraft?.cardValidated) && Boolean(context.paymentDraft?.brand);
+    case "PAYMENT_CARD_POSTAL":
+      return Boolean(context.paymentDraft?.cvcValidated) && Boolean(context.paymentDraft?.brand);
+    case "PAYMENT_CARD_CONFIRM":
+      return Boolean(context.paymentDraft?.cardValidated) && Boolean(context.paymentDraft?.cvcValidated) && Boolean(context.paymentDraft?.postalValidated);
     case "EXISTING_AREA_CODE_CHECK":
       return context.customerType === "existing";
     case "EXISTING_AUTH_MODE":
@@ -28,7 +66,7 @@ export function canProceed(step = "", context = {}) {
     case "VALIDATION_ADDRESS_CAPTURE":
       return Array.isArray(context.basket) && context.basket.length > 0;
     case "OFFER_BROWSE":
-      return canAccessOfferBrowse(context) && Boolean(context.areaCode);
+      return canAccessOfferBrowse(context);
     case "PAYMENT_METHOD":
       return Array.isArray(context.basket) && context.basket.length > 0;
     case "PAYMENT_CONFIRM_LAST4":
@@ -42,6 +80,8 @@ export function canProceed(step = "", context = {}) {
     case "ORDER_REVIEW":
       return Boolean(context.shipping?.address);
     case "ORDER_CONFIRMED":
+    case "POST_CHAT_RATING":
+    case "POST_CHAT_FEEDBACK":
       return true;
     default:
       return true;
@@ -92,9 +132,10 @@ function getFinancingAmount(basket = []) {
 
 function canAccessOfferBrowse(context = {}) {
   const hasAreaCode = Boolean(context.areaCode);
+  const hasValidatedAddress = Boolean(context.serviceAddressValidated);
   const hasIntent = Boolean(context.intent);
   const hasClarification = hasSalesClarification(context);
-  if (!hasAreaCode || !hasIntent || !hasClarification) return false;
+  if ((!hasAreaCode && !hasValidatedAddress) || !hasIntent || !hasClarification) return false;
 
   // Service address is validated later in checkout eligibility flow.
   if (context.authUser) return true;
@@ -111,7 +152,7 @@ function canAccessOfferBrowse(context = {}) {
 function hasSalesClarification(context = {}) {
   const intent = String(context.intent || "");
   const sales = context.salesProfile || {};
-  if (intent === "home internet") return Boolean(sales.speedPriority);
+  if (intent === "home internet") return Boolean(sales.speedPriority || context.internetPreference);
   if (intent === "mobility") {
     if (!sales.byodChoice || !sales.callingPlan) return false;
     if (sales.byodChoice === "byod") return true;

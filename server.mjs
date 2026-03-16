@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyIntentFallbackDetailed, extractIntentEntities, rankAddressSuggestions } from "./shared/flow-utils.mjs";
@@ -7,13 +8,40 @@ import { buildMetrics, parseJsonLines } from "./shared/metrics-utils.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+function loadLocalEnv() {
+  const envPath = path.join(__dirname, ".env.local");
+  if (!existsSync(envPath)) return;
+  try {
+    const raw = readFileSync(envPath, "utf8");
+    raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .forEach((line) => {
+        const idx = line.indexOf("=");
+        if (idx <= 0) return;
+        const key = line.slice(0, idx).trim();
+        const value = line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
+        if (!process.env[key]) {
+          process.env[key] = value;
+        }
+      });
+  } catch {
+    // Local env loading must never stop startup.
+  }
+}
+
+loadLocalEnv();
+
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || "127.0.0.1";
 const LOG_DIR = path.join(__dirname, "logs");
 const LOG_FILES = {
   info: path.join(LOG_DIR, "app-events.log"),
   error: path.join(LOG_DIR, "app-errors.log"),
-  qa: path.join(LOG_DIR, "qa-checklist.log")
+  qa: path.join(LOG_DIR, "qa-checklist.log"),
+  llmUsage: path.resolve(__dirname, process.env.LLM_USAGE_LOG_PATH || "./logs/llm-usage.log")
 };
 
 const staticTypes = {
@@ -24,16 +52,106 @@ const staticTypes = {
   ".json": "application/json; charset=utf-8"
 };
 
-async function classifyIntentLLM(message = "") {
-  const entities = extractIntentEntities(message);
-  if (!process.env.OPENAI_API_KEY) {
-    const fallback = classifyIntentFallbackDetailed(message);
+const LLM_ENABLED = String(process.env.LLM_ENABLED || "true").toLowerCase() !== "false";
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+const ADDRESS_PROVIDER = (process.env.ADDRESS_PROVIDER || "mock").toLowerCase();
+const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY || "";
+
+const LLM_COST_PER_1K = {
+  "gpt-4.1-mini": { input: 0.0004, output: 0.0016 }
+};
+
+const llmHealth = {
+  configured: Boolean(process.env.OPENAI_API_KEY) && LLM_ENABLED,
+  connected: false,
+  model: OPENAI_MODEL,
+  lastCheckedAt: null,
+  lastError: null
+};
+
+function getFallbackAssistText(task = "", payload = {}) {
+  const userMessage = String(payload.userMessage || "").trim();
+  switch (task) {
+    case "discovery_prompt":
+      return "I can help you compare internet, mobility, and landline options. What is your top priority right now?";
+    case "summary":
+      return `Summary: ${userMessage || "Customer reviewed offers and asked to continue."}`;
+    case "explain_recommendation":
+      return "Based on your stated preference, this recommendation balances value and performance while matching your selected service.";
+    case "translate":
+      return userMessage || "I can continue in English or French.";
+    case "handoff_summary":
+      return `Handoff summary: customer needs support with ${payload.step || "current step"} and asked for clarification.`;
+    case "intent_entities":
+      return "I understood your request. I can now map it to the next step.";
+    default:
+      return userMessage || "I can help with that. Tell me what matters most and I will guide you step by step.";
+  }
+}
+
+function estimateCostCad(model, usage = {}) {
+  const pricing = LLM_COST_PER_1K[model];
+  if (!pricing) return 0;
+  const inputTokens = Number(usage.inputTokens || 0);
+  const outputTokens = Number(usage.outputTokens || 0);
+  const inputCost = (inputTokens / 1000) * pricing.input;
+  const outputCost = (outputTokens / 1000) * pricing.output;
+  return Number((inputCost + outputCost).toFixed(6));
+}
+
+async function writeLlmUsage(payload = {}) {
+  await mkdir(path.dirname(LOG_FILES.llmUsage), { recursive: true });
+  const line = JSON.stringify({
+    ts: new Date().toISOString(),
+    ...payload
+  });
+  await appendFile(LOG_FILES.llmUsage, `${line}\n`, "utf8");
+}
+
+function buildAssistSystemPrompt(task = "") {
+  const base =
+    "You are Belinda, a telecom sales assistant. Be concise, professional, and conversational. " +
+    "You may improve phrasing, clarify intent, summarize, and explain recommendations. " +
+    "Do not invent or override authoritative business data.";
+  const guardrails =
+    "Never provide authoritative values for exact pricing, promo eligibility, credit decisions, contract terms, inventory counts, billing balances, order confirmation, or payment execution. " +
+    "Only rephrase deterministic values supplied in input.";
+  if (task === "intent_entities") {
+    return `${base} ${guardrails} Return strict JSON with keys: text, intent, entities, confidence, language.`;
+  }
+  return `${base} ${guardrails}`;
+}
+
+async function callOpenAIResponses({
+  task = "fluency",
+  sessionId = null,
+  step = null,
+  userMessage = "",
+  context = {},
+  deterministicData = {},
+  endpoint = "/api/chat-assist"
+} = {}) {
+  const hasKey = Boolean(process.env.OPENAI_API_KEY) && LLM_ENABLED;
+  if (!hasKey) {
+    llmHealth.configured = false;
+    llmHealth.connected = false;
+    llmHealth.lastCheckedAt = new Date().toISOString();
+    llmHealth.lastError = "OPENAI_API_KEY missing or LLM disabled";
+    await writeLlmUsage({
+      sessionId,
+      endpoint,
+      model: OPENAI_MODEL,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      estimatedCostCad: 0,
+      mode: "fallback"
+    });
     return {
-      intent: fallback.intent,
-      confidence: fallback.confidence,
-      entities,
+      ok: false,
       mode: "template_fallback",
-      fallbackUsed: true
+      data: null,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
     };
   }
 
@@ -45,19 +163,121 @@ async function classifyIntentLLM(message = "") {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+        model: OPENAI_MODEL,
         input: [
           {
             role: "system",
-            content:
-              "Classify telecom shopping intent. Return one label only: mobility, home internet, landline, bundle, human_handoff."
+            content: buildAssistSystemPrompt(task)
           },
-          { role: "user", content: message }
+          {
+            role: "user",
+            content: JSON.stringify({
+              task,
+              step,
+              userMessage,
+              context,
+              deterministicData
+            })
+          }
         ]
       })
     });
 
     if (!response.ok) {
+      llmHealth.configured = true;
+      llmHealth.connected = false;
+      llmHealth.lastCheckedAt = new Date().toISOString();
+      llmHealth.lastError = `LLM HTTP ${response.status}`;
+      await writeLlmUsage({
+        sessionId,
+        endpoint,
+        model: OPENAI_MODEL,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        estimatedCostCad: 0,
+        mode: "fallback"
+      });
+      return {
+        ok: false,
+        mode: "template_fallback",
+        data: null,
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+      };
+    }
+
+    const data = await response.json();
+    const usage = {
+      inputTokens: Number(data.usage?.input_tokens || 0),
+      outputTokens: Number(data.usage?.output_tokens || 0),
+      totalTokens: Number(data.usage?.total_tokens || 0)
+    };
+    await writeLlmUsage({
+      sessionId,
+      endpoint,
+      model: OPENAI_MODEL,
+      ...usage,
+      estimatedCostCad: estimateCostCad(OPENAI_MODEL, usage),
+      mode: "llm"
+    });
+    llmHealth.configured = true;
+    llmHealth.connected = true;
+    llmHealth.lastCheckedAt = new Date().toISOString();
+    llmHealth.lastError = null;
+
+    return {
+      ok: true,
+      mode: "llm",
+      data,
+      usage
+    };
+  } catch (error) {
+    llmHealth.configured = true;
+    llmHealth.connected = false;
+    llmHealth.lastCheckedAt = new Date().toISOString();
+    llmHealth.lastError = String(error?.message || "LLM call failed");
+    await writeLlmUsage({
+      sessionId,
+      endpoint,
+      model: OPENAI_MODEL,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      estimatedCostCad: 0,
+      mode: "fallback"
+    });
+    return {
+      ok: false,
+      mode: "template_fallback",
+      data: null,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+    };
+  }
+}
+
+async function classifyIntentLLM(message = "") {
+  const entities = extractIntentEntities(message);
+  if (!process.env.OPENAI_API_KEY || !LLM_ENABLED) {
+    const fallback = classifyIntentFallbackDetailed(message);
+    return {
+      intent: fallback.intent,
+      confidence: fallback.confidence,
+      entities,
+      mode: "template_fallback",
+      fallbackUsed: true
+    };
+  }
+
+  try {
+    const result = await callOpenAIResponses({
+      task: "intent_entities",
+      userMessage: message,
+      deterministicData: {
+        allowedIntents: ["mobility", "home internet", "landline", "bundle", "human_handoff"]
+      },
+      endpoint: "/api/intent"
+    });
+    if (!result.ok || !result.data) {
       const fallback = classifyIntentFallbackDetailed(message);
       return {
         intent: fallback.intent,
@@ -67,8 +287,7 @@ async function classifyIntentLLM(message = "") {
         fallbackUsed: true
       };
     }
-
-    const data = await response.json();
+    const data = result.data;
     const output = (data.output_text || "").trim().toLowerCase();
     if (["mobility", "home internet", "landline", "bundle", "human_handoff"].includes(output)) {
       return {
@@ -98,6 +317,86 @@ async function classifyIntentLLM(message = "") {
       fallbackUsed: true
     };
   }
+}
+
+async function checkLlmHealth({ force = false } = {}) {
+  const now = Date.now();
+  const lastCheckedMs = llmHealth.lastCheckedAt ? new Date(llmHealth.lastCheckedAt).getTime() : 0;
+  if (!force && lastCheckedMs && now - lastCheckedMs < 20_000) {
+    return llmHealth;
+  }
+  if (!process.env.OPENAI_API_KEY || !LLM_ENABLED) {
+    llmHealth.configured = false;
+    llmHealth.connected = false;
+    llmHealth.lastCheckedAt = new Date().toISOString();
+    llmHealth.lastError = "OPENAI_API_KEY missing or LLM disabled";
+    return llmHealth;
+  }
+
+  const ping = await callOpenAIResponses({
+    task: "summary",
+    userMessage: "health check",
+    deterministicData: { ping: true },
+    endpoint: "/api/llm-health"
+  });
+  if (ping.ok) {
+    llmHealth.configured = true;
+    llmHealth.connected = true;
+    llmHealth.lastCheckedAt = new Date().toISOString();
+    llmHealth.lastError = null;
+    return llmHealth;
+  }
+  llmHealth.configured = true;
+  llmHealth.connected = false;
+  llmHealth.lastCheckedAt = new Date().toISOString();
+  llmHealth.lastError = llmHealth.lastError || "LLM ping failed";
+  return llmHealth;
+}
+
+async function lookupGoogleSuggestions(query = "") {
+  if (!GOOGLE_PLACES_API_KEY) return [];
+  const input = String(query || "").trim();
+  if (input.length < 3) return [];
+  try {
+    const params = new URLSearchParams({
+      input,
+      key: GOOGLE_PLACES_API_KEY,
+      components: "country:ca"
+    });
+    const response = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?${params.toString()}`);
+    if (!response.ok) return [];
+    const payload = await response.json();
+    if (!Array.isArray(payload.predictions)) return [];
+    return payload.predictions.slice(0, 5).map((item) => {
+      const parts = String(item.description || "")
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      return {
+        id: item.place_id || item.description,
+        line1: parts[0] || item.description || "Address suggestion",
+        city: parts[1] || "",
+        province: parts[2] || "",
+        postalCode: "",
+        areaCode: null
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function resolveAddressSuggestions(query = "", areaCode = "") {
+  const mockSuggestions = rankAddressSuggestions(query, areaCode);
+  if (ADDRESS_PROVIDER === "mock") return mockSuggestions;
+  if (ADDRESS_PROVIDER === "google") {
+    const google = await lookupGoogleSuggestions(query);
+    return google.length ? google : mockSuggestions;
+  }
+  // hybrid default
+  const google = await lookupGoogleSuggestions(query);
+  if (google.length) return google;
+  return mockSuggestions;
 }
 
 function json(res, status, payload) {
@@ -145,6 +444,36 @@ function collectRequestBody(req) {
   });
 }
 
+function summarizeLlmUsage(records = []) {
+  if (!Array.isArray(records) || records.length === 0) {
+    return {
+      totalCalls: 0,
+      avgTokensPerSession: 0,
+      fallbackRatePercent: 0
+    };
+  }
+  const bySession = new Map();
+  let fallbackCount = 0;
+  let totalTokens = 0;
+  records.forEach((record) => {
+    const sessionId = record.sessionId || "unknown";
+    const session = bySession.get(sessionId) || { tokens: 0, calls: 0 };
+    session.tokens += Number(record.totalTokens || 0);
+    session.calls += 1;
+    bySession.set(sessionId, session);
+    totalTokens += Number(record.totalTokens || 0);
+    if (record.mode === "fallback") fallbackCount += 1;
+  });
+  const totalCalls = records.length;
+  const avgTokensPerSession = bySession.size ? Number((totalTokens / bySession.size).toFixed(2)) : 0;
+  const fallbackRatePercent = Number(((fallbackCount / totalCalls) * 100).toFixed(2));
+  return {
+    totalCalls,
+    avgTokensPerSession,
+    fallbackRatePercent
+  };
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -173,10 +502,63 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/chat-assist") {
+    try {
+      const parsed = await collectRequestBody(req);
+      const task = String(parsed.task || "fluency");
+      const step = String(parsed.step || "");
+      const userMessage = String(parsed.userMessage || "");
+      const context = parsed.context || {};
+      const deterministicData = parsed.deterministicData || {};
+
+      const result = await callOpenAIResponses({
+        task,
+        step,
+        userMessage,
+        context,
+        deterministicData,
+        sessionId: parsed.sessionId || context.sessionId || null,
+        endpoint: "/api/chat-assist"
+      });
+
+      if (!result.ok || !result.data) {
+        json(res, 200, {
+          text: getFallbackAssistText(task, { userMessage, step, context, deterministicData }),
+          intent: null,
+          entities: {},
+          language: null,
+          confidence: 0.55,
+          mode: "template_fallback",
+          fallbackUsed: true
+        });
+        return;
+      }
+
+      json(res, 200, {
+        text: String(result.data.output_text || "").trim() || getFallbackAssistText(task, { userMessage, step }),
+        intent: null,
+        entities: {},
+        language: null,
+        confidence: 0.85,
+        mode: "llm",
+        fallbackUsed: false
+      });
+    } catch {
+      json(res, 400, { error: "Invalid chat assist payload" });
+    }
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/llm-health") {
+    const status = await checkLlmHealth();
+    json(res, 200, status);
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/address-lookup") {
     try {
       const parsed = await collectRequestBody(req);
-      const suggestions = rankAddressSuggestions(parsed.query || "", parsed.areaCode || "");
+      const suggestions = await resolveAddressSuggestions(parsed.query || "", parsed.areaCode || "");
       json(res, 200, { suggestions });
     } catch {
       json(res, 400, { error: "Invalid JSON body" });
@@ -192,7 +574,9 @@ const server = createServer(async (req, res) => {
       const events = await readLogLines(LOG_FILES.info);
       const errors = await readLogLines(LOG_FILES.error);
       const qa = await readLogLines(LOG_FILES.qa);
+      const llmUsage = await readLogLines(LOG_FILES.llmUsage);
       const metrics = buildMetrics(events, errors, qa, { days, since, until });
+      metrics.llmUsage = summarizeLlmUsage(llmUsage);
       json(res, 200, metrics);
     } catch {
       json(res, 500, { error: "Unable to compute metrics" });

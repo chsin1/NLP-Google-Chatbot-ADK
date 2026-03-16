@@ -421,6 +421,40 @@ button {
   font-weight: 700;
 }
 
+.llm-status {
+  margin-left: auto;
+  margin-right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.llm-status .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #8f9eb0;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.22);
+}
+
+.llm-status.llm-online .dot {
+  background: #32d74b;
+}
+
+.llm-status.llm-degraded .dot {
+  background: #f6c453;
+}
+
+.llm-status.llm-offline .dot {
+  background: #95a4b8;
+}
+
 .chat-menu-btn,
 .close-chat {
   border: 2px solid #6ea5da;

@@ -36,6 +36,92 @@ export function isValidCanadianPostalCode(raw) {
   return /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z][ -]?\d[ABCEGHJ-NPRSTV-Z]\d$/.test(value);
 }
 
+export function parseCombinedOnboardingInput(text = "") {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+
+  const emailMatch = raw.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/i);
+  const phoneMatch =
+    raw.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/) || raw.match(/\b\d{10}\b/);
+
+  const email = emailMatch ? emailMatch[0].toLowerCase() : "";
+  const phone = phoneMatch ? normalizeCanadianPhone(phoneMatch[0]) : "";
+
+  let nameCandidate = raw;
+  if (emailMatch) {
+    nameCandidate = nameCandidate.replace(emailMatch[0], " ");
+  }
+  if (phoneMatch) {
+    nameCandidate = nameCandidate.replace(phoneMatch[0], " ");
+  }
+
+  nameCandidate = nameCandidate
+    .replace(/\b(full\s*name|name|email|e-mail|phone|telephone|tel)\b[:=-]*/gi, " ")
+    .replace(/[;,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!nameCandidate) {
+    const parts = raw.split(",").map((part) => part.trim()).filter(Boolean);
+    if (parts.length > 0 && !parts[0].includes("@")) {
+      nameCandidate = parts[0];
+    }
+  }
+
+  if (!nameCandidate || !email || !phone) return null;
+  if (!/^[A-Za-z][A-Za-z' -]{1,}$/.test(nameCandidate)) return null;
+  return {
+    fullName: nameCandidate,
+    email,
+    phone
+  };
+}
+
+export function detectCardBrand(cardNumber = "") {
+  const digits = String(cardNumber || "").replace(/\D/g, "");
+  if (!digits) return null;
+
+  if (/^4\d{12}(\d{3}){0,2}$/.test(digits)) return "visa";
+  if (/^3[47]\d{13}$/.test(digits)) return "amex";
+  if (/^(5[1-5]\d{14}|2(2[2-9]\d{12}|[3-6]\d{13}|7([01]\d{12}|20\d{12})))$/.test(digits)) return "mastercard";
+  return null;
+}
+
+export function isValidCardNumberLuhn(cardNumber = "") {
+  const digits = String(cardNumber || "").replace(/\D/g, "");
+  if (!digits) return false;
+
+  let sum = 0;
+  let shouldDouble = false;
+  for (let i = digits.length - 1; i >= 0; i -= 1) {
+    let digit = Number(digits[i]);
+    if (Number.isNaN(digit)) return false;
+    if (shouldDouble) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+    shouldDouble = !shouldDouble;
+  }
+  return sum % 10 === 0;
+}
+
+export function isValidCardLengthByBrand(cardNumber = "", brand = null) {
+  const digits = String(cardNumber || "").replace(/\D/g, "");
+  if (!digits || !brand) return false;
+  if (brand === "visa") return [13, 16, 19].includes(digits.length);
+  if (brand === "mastercard") return digits.length === 16;
+  if (brand === "amex") return digits.length === 15;
+  return false;
+}
+
+export function isValidCvcByBrand(cvc = "", brand = null) {
+  const digits = String(cvc || "").replace(/\D/g, "");
+  if (!brand) return false;
+  if (brand === "amex") return /^\d{4}$/.test(digits);
+  return /^\d{3}$/.test(digits);
+}
+
 export function isValidAddress(raw) {
   const value = String(raw || "").trim();
   if (value.length < 10) return false;
@@ -94,9 +180,10 @@ export function getExpectedLast4(method, user) {
 
 export function canAccessOfferBrowse(context = {}) {
   const hasAreaCode = Boolean(context.areaCode);
+  const hasValidatedAddress = Boolean(context.serviceAddressValidated);
   const hasIntent = Boolean(context.intent);
   const hasClarification = hasSalesClarification(context);
-  if (!hasAreaCode || !hasIntent || !hasClarification) return false;
+  if ((!hasAreaCode && !hasValidatedAddress) || !hasIntent || !hasClarification) return false;
 
   // Service address is validated later in checkout eligibility flow.
   if (context.authUser) return true;
@@ -181,7 +268,7 @@ export function calculateFinancingBreakdown(totalDeviceAmount, upfrontPayment, t
 function hasSalesClarification(context = {}) {
   const intent = String(context.intent || "");
   const sales = context.salesProfile || {};
-  if (intent === "home internet") return Boolean(sales.speedPriority);
+  if (intent === "home internet") return Boolean(sales.speedPriority || context.internetPreference);
   if (intent === "mobility") {
     if (!sales.byodChoice || !sales.callingPlan) return false;
     if (sales.byodChoice === "byod") return true;

@@ -39,7 +39,28 @@ test("legacy state list explicitly tracks deprecated steps", () => {
 
 test("forward path canProceed coverage for existing + checkout", () => {
   const ctx = baseContext();
+  ctx.selectedService = "internet";
+  ctx.intent = "home internet";
+  ctx.internetPreference = "value";
+  ctx.selectedPlanId = "internet-003";
+  ctx.serviceAddress = "100 Main St, Toronto, ON";
+  ctx.serviceAddressValidated = true;
+  ctx.paymentDraft = {
+    brand: "visa",
+    cardValidated: true,
+    cvcValidated: true,
+    postalValidated: true
+  };
   assert.equal(canProceed("CUSTOMER_STATUS_SELECTION", ctx), true);
+  assert.equal(canProceed("GREETING_CONVERSATIONAL", ctx), true);
+  assert.equal(canProceed("SERVICE_SELECTION", { ...ctx, customerType: "new" }), true);
+  assert.equal(canProceed("EXISTING_AUTH_ENTRY", { ...ctx, customerType: "existing" }), true);
+  assert.equal(canProceed("INTERNET_ADDRESS_REQUEST", ctx), true);
+  assert.equal(canProceed("INTERNET_ADDRESS_VALIDATE", { ...ctx, serviceAddress: "100 Main St, Toronto, ON" }), true);
+  assert.equal(canProceed("INTERNET_AVAILABILITY_RESULT", { ...ctx, serviceAddress: "100 Main St, Toronto, ON" }), true);
+  assert.equal(canProceed("INTERNET_PRIORITY_CAPTURE", { ...ctx, serviceAddress: "100 Main St, Toronto, ON" }), true);
+  assert.equal(canProceed("INTERNET_PLAN_PITCH", { ...ctx, serviceAddress: "100 Main St, Toronto, ON" }), true);
+  assert.equal(canProceed("PLAN_CONFIRMATION", ctx), true);
   assert.equal(canProceed("EXISTING_AREA_CODE_CHECK", ctx), true);
   assert.equal(canProceed("EXISTING_AUTH_MODE", ctx), true);
   assert.equal(canProceed("OFFER_BROWSE", ctx), true);
@@ -47,20 +68,40 @@ test("forward path canProceed coverage for existing + checkout", () => {
   assert.equal(canProceed("PAYMENT_METHOD", ctx), true);
   assert.equal(canProceed("PAYMENT_CONFIRM_LAST4", ctx), true);
   assert.equal(canProceed("PAYMENT_CVV", ctx), true);
+  assert.equal(canProceed("PAYMENT_CARD_ENTRY", ctx), true);
+  assert.equal(canProceed("PAYMENT_CARD_NUMBER", ctx), true);
+  assert.equal(canProceed("PAYMENT_CARD_CVC", ctx), true);
+  assert.equal(canProceed("PAYMENT_CARD_POSTAL", ctx), true);
+  assert.equal(canProceed("PAYMENT_CARD_CONFIRM", ctx), true);
   assert.equal(canProceed("SHIPPING_SELECTION", ctx), true);
   assert.equal(canProceed("ORDER_REVIEW", ctx), true);
+  assert.equal(canProceed("POST_CHAT_RATING", ctx), true);
   assert.equal(canProceed("ORDER_CONFIRMED", ctx), true);
 });
 
 test("negative gating checks fail when required context is missing", () => {
   const ctx = baseContext();
+  ctx.selectedService = "internet";
+  ctx.intent = "home internet";
+  ctx.internetPreference = "value";
+  ctx.selectedPlanId = "internet-003";
+  ctx.serviceAddress = "100 Main St, Toronto, ON";
+  ctx.serviceAddressValidated = true;
   ctx.areaCode = null;
   assert.equal(canProceed("EXISTING_AUTH_MODE", ctx), false);
-  assert.equal(canProceed("OFFER_BROWSE", ctx), false);
+  assert.equal(canProceed("OFFER_BROWSE", ctx), true);
+  ctx.serviceAddressValidated = false;
+  assert.equal(canProceed("INTERNET_ADDRESS_VALIDATE", ctx), false);
+  ctx.serviceAddressValidated = true;
+  assert.equal(canProceed("INTERNET_PLAN_PITCH", ctx), true);
   ctx.areaCode = "416";
-  ctx.salesProfile.callingPlan = null;
+  assert.equal(canProceed("INTERNET_PLAN_PITCH", ctx), true);
+  ctx.internetPreference = null;
   assert.equal(canProceed("OFFER_BROWSE", ctx), false);
-  ctx.salesProfile.callingPlan = "Canada + US";
+  ctx.selectedPlanId = null;
+  assert.equal(canProceed("PLAN_CONFIRMATION", ctx), false);
+  ctx.internetPreference = "value";
+  ctx.selectedPlanId = "internet-003";
   ctx.payment.verified = false;
   assert.equal(canProceed("SHIPPING_SELECTION", ctx), false);
   ctx.shipping.address = "";
