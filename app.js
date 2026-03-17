@@ -101,6 +101,13 @@ const FLOW_STEPS = {
   REMINDER_SCHEDULED: "REMINDER_SCHEDULED"
 };
 
+const ADDRESS_TYPEAHEAD_STEPS = new Set([
+  FLOW_STEPS.INTERNET_ADDRESS_REQUEST,
+  FLOW_STEPS.NEW_ONBOARD_ADDRESS,
+  FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE,
+  FLOW_STEPS.SHIPPING_MANUAL_ENTRY
+]);
+
 const STEP_CONTRACT = {
   [FLOW_STEPS.GREETING_CONVERSATIONAL]: {
     validInputs: ["conversation start"],
@@ -1108,6 +1115,11 @@ const llmStatusTextSite = document.getElementById("llm-status-text-site");
 const llmStatusTargets = [
   [llmStatusChipSite, llmStatusTextSite]
 ].filter(([chip, text]) => chip && text);
+const addressStatusChipSite = document.getElementById("address-status-site");
+const addressStatusTextSite = document.getElementById("address-status-text-site");
+const addressStatusTargets = [
+  [addressStatusChipSite, addressStatusTextSite]
+].filter(([chip, text]) => chip && text);
 const languageSwitcher = document.getElementById("language-switcher");
 const languageInputs = Array.from(document.querySelectorAll("input[name='chat-language']"));
 const themeInputs = Array.from(document.querySelectorAll("input[data-theme-input='1']"));
@@ -1314,7 +1326,15 @@ const state = {
     addressAuth: {
       pendingInput: null,
       suggestions: [],
-      awaitingConfirmation: false
+      awaitingConfirmation: false,
+      pendingSource: "manual"
+    },
+    addressTypeaheadSelection: {
+      step: null,
+      label: null,
+      id: null,
+      source: null,
+      selectedAt: null
     },
     llmStatus: {
       configured: false,
@@ -1947,6 +1967,54 @@ function updateLlmStatusUi(status = {}) {
     chip.classList.add("llm-offline");
     text.textContent = "ChatGPT: Not configured";
   });
+}
+
+function updateAddressLookupStatusUi(status = {}) {
+  if (addressStatusTargets.length === 0) return;
+  const provider = String(status.provider || "mock").toLowerCase();
+  const googleConfigured = Boolean(status.googleConfigured);
+
+  if (provider === "mock") {
+    addressStatusTargets.forEach(([chip, text]) => {
+      chip.classList.remove("llm-online", "llm-degraded", "llm-offline");
+      chip.classList.add("llm-degraded");
+      text.textContent = "Address: Mock provider";
+    });
+    return;
+  }
+
+  if ((provider === "google" || provider === "hybrid") && googleConfigured) {
+    const providerLabel = provider === "hybrid" ? "Hybrid" : "Google";
+    addressStatusTargets.forEach(([chip, text]) => {
+      chip.classList.remove("llm-online", "llm-degraded", "llm-offline");
+      chip.classList.add("llm-online");
+      text.textContent = `Address: ${providerLabel} (Toronto bias)`;
+    });
+    return;
+  }
+
+  addressStatusTargets.forEach(([chip, text]) => {
+    chip.classList.remove("llm-online", "llm-degraded", "llm-offline");
+    chip.classList.add("llm-offline");
+    text.textContent = "Address: Manual fallback";
+  });
+}
+
+async function refreshAddressLookupStatus() {
+  try {
+    const response = await fetch("/api/address-lookup-status");
+    if (!response.ok) throw new Error("address status unavailable");
+    const payload = await response.json();
+    updateAddressLookupStatusUi(payload);
+  } catch {
+    updateAddressLookupStatusUi({
+      provider: "unknown",
+      googleConfigured: false
+    });
+    addressStatusTargets.forEach(([, text]) => {
+      text.textContent = "Address: Status unavailable";
+    });
+  }
 }
 
 async function refreshLlmStatus({ silent = true } = {}) {
@@ -2911,6 +2979,64 @@ function clearAddressTypeahead() {
   addressTypeahead.classList.add("hidden");
 }
 
+function getEmptyAddressTypeaheadSelection() {
+  return {
+    step: null,
+    label: null,
+    id: null,
+    source: null,
+    selectedAt: null
+  };
+}
+
+function isAddressTypeaheadStep(step = state.flowStep) {
+  return ADDRESS_TYPEAHEAD_STEPS.has(step);
+}
+
+function normalizeAddressMatchValue(value = "") {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function clearAddressTypeaheadSelection() {
+  applyContextPatch({
+    addressTypeaheadSelection: getEmptyAddressTypeaheadSelection()
+  });
+}
+
+function markAddressTypeaheadSelection(suggestion = {}, label = "", step = state.flowStep) {
+  if (!label) return;
+  applyContextPatch({
+    addressTypeaheadSelection: {
+      step,
+      label,
+      id: suggestion?.id || null,
+      source: "typeahead",
+      selectedAt: new Date().toISOString()
+    }
+  });
+  logClient("info", "address_typeahead_selected", {
+    step,
+    suggestionId: suggestion?.id || null,
+    label
+  });
+}
+
+function inferAddressEntrySource(input = "", step = state.flowStep) {
+  const selection = state.context.addressTypeaheadSelection || {};
+  const normalizedInput = normalizeAddressMatchValue(input);
+  const normalizedSelected = normalizeAddressMatchValue(selection.label || "");
+  const matchedSuggestion = Boolean(
+    normalizedInput &&
+      normalizedSelected &&
+      normalizeAddressMatchValue(selection.step || "") === normalizeAddressMatchValue(step) &&
+      normalizedInput === normalizedSelected
+  );
+  return {
+    source: matchedSuggestion ? "typeahead_suggestion" : "manual",
+    suggestionId: matchedSuggestion ? selection.id || null : null
+  };
+}
+
 function resetAddressTypeaheadTimer() {
   if (state.addressTypeaheadTimer) {
     clearTimeout(state.addressTypeaheadTimer);
@@ -3797,7 +3923,15 @@ function resetSessionState() {
     addressAuth: {
       pendingInput: null,
       suggestions: [],
-      awaitingConfirmation: false
+      awaitingConfirmation: false,
+      pendingSource: "manual"
+    },
+    addressTypeaheadSelection: {
+      step: null,
+      label: null,
+      id: null,
+      source: null,
+      selectedAt: null
     },
     llmStatus: {
       configured: false,
@@ -3950,6 +4084,17 @@ function getPatchedContext(patch = {}) {
   if (patch.serviceAddress !== undefined) next.serviceAddress = patch.serviceAddress;
   if (patch.serviceAddressValidated !== undefined) next.serviceAddressValidated = patch.serviceAddressValidated;
   if (patch.addressAuth) next.addressAuth = { ...next.addressAuth, ...patch.addressAuth };
+  if (patch.addressTypeaheadSelection !== undefined) {
+    next.addressTypeaheadSelection = patch.addressTypeaheadSelection
+      ? { ...next.addressTypeaheadSelection, ...patch.addressTypeaheadSelection }
+      : {
+          step: null,
+          label: null,
+          id: null,
+          source: null,
+          selectedAt: null
+        };
+  }
   if (patch.llmStatus) next.llmStatus = { ...next.llmStatus, ...patch.llmStatus };
   if (patch.paymentDraft) next.paymentDraft = { ...next.paymentDraft, ...patch.paymentDraft };
   if (patch.quoteBuilder) next.quoteBuilder = { ...next.quoteBuilder, ...patch.quoteBuilder };
@@ -5306,28 +5451,34 @@ function finalizeServiceAddress(address, source = "manual") {
     addressAuth: {
       pendingInput: null,
       suggestions: [],
-      awaitingConfirmation: false
+      awaitingConfirmation: false,
+      pendingSource: "manual"
     }
   });
+  clearAddressTypeaheadSelection();
   logClient("info", "address_authenticated", { source, address });
 }
 
-function presentAddressConfirmation(addressInput, suggestions = []) {
+function presentAddressConfirmation(addressInput, suggestions = [], sourceMeta = { source: "manual", suggestionId: null }) {
   const topSuggestions = (suggestions || []).slice(0, 3);
   const labels = topSuggestions.map((suggestion) => `Use ${normalizeAddressSuggestionLabel(suggestion)}`);
   applyContextPatch({
     addressAuth: {
       pendingInput: addressInput,
       suggestions: topSuggestions,
-      awaitingConfirmation: true
+      awaitingConfirmation: true,
+      pendingSource: sourceMeta.source === "typeahead_suggestion" ? "typeahead_suggestion" : "manual"
     }
   });
   postMessage("bot", "I found these address matches. Select one, or use the address you entered.");
   showChoiceButtons([...labels, "Use my entered address"], (choice) => {
     postMessage("user", choice);
     if (choice === "Use my entered address") {
-      finalizeServiceAddress(addressInput, "manual_confirmed");
-      autoTriggerQuoteBuilderAfterAddress({ source: "address_typeahead_manual_confirmed" });
+      const source = sourceMeta.source === "typeahead_suggestion" ? "typeahead_suggestion" : "manual";
+      finalizeServiceAddress(addressInput, source);
+      autoTriggerQuoteBuilderAfterAddress({
+        source: sourceMeta.source === "typeahead_suggestion" ? "address_typeahead_manual_confirmed" : "address_manual_confirmed"
+      });
       transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
       return;
     }
@@ -5477,10 +5628,11 @@ function renderAddressTypeaheadSuggestions(suggestions = []) {
   suggestions.slice(0, 5).forEach((item) => {
     const button = document.createElement("button");
     button.type = "button";
-    const label = `${item.line1}, ${item.city}, ${item.province} ${item.postalCode}`;
+    const label = normalizeAddressSuggestionLabel(item);
     button.textContent = label;
     button.addEventListener("click", () => {
       chatInput.value = label;
+      markAddressTypeaheadSelection(item, label, state.flowStep);
       clearAddressTypeahead();
       chatInput.focus();
     });
@@ -5490,7 +5642,7 @@ function renderAddressTypeaheadSuggestions(suggestions = []) {
 }
 
 function queueAddressTypeahead(query) {
-  if (![FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE, FLOW_STEPS.INTERNET_ADDRESS_REQUEST].includes(state.flowStep)) {
+  if (!isAddressTypeaheadStep(state.flowStep)) {
     clearAddressTypeahead();
     return;
   }
@@ -5753,7 +5905,12 @@ function renderStep(step) {
   if (!canInvokeQuoteBuilder()) {
     state.quotePanelPinned = false;
   }
-  if (![FLOW_STEPS.SHIPPING_MANUAL_ENTRY, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE].includes(step)) clearAddressTypeahead();
+  if (!isAddressTypeaheadStep(step)) {
+    clearAddressTypeahead();
+    if (state.context.addressTypeaheadSelection?.step || state.context.addressTypeaheadSelection?.label) {
+      clearAddressTypeaheadSelection();
+    }
+  }
   if (state.quotePanelPinned && canInvokeQuoteBuilder()) {
     setPanelFocus("quote");
   } else if ([FLOW_STEPS.INTERNET_PRIORITY_CAPTURE, FLOW_STEPS.INTERNET_PLAN_PITCH].includes(step)) {
@@ -6312,8 +6469,8 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.NEW_ONBOARD_ADDRESS:
-      postMessage("bot", "Enter your address (including apartment/unit if applicable).");
-      setChatInputHint("Address");
+      postMessage("bot", "Enter your address (including apartment/unit if applicable). I can suggest matches as you type.");
+      setChatInputHint("Example: 16 Yonge Street, Toronto, ON");
       break;
 
     case FLOW_STEPS.HELPDESK_ENTRY:
@@ -6542,8 +6699,8 @@ function renderStep(step) {
       const profileAddress = state.context.authUser?.prefilledAddress || null;
       const onboardingAddress = state.context.newOnboarding?.address || null;
       logClient("info", "address_capture_prompted", { source: "validation_step" });
-      postMessage("bot", "Before I run validation, what service address should I use?");
-      setChatInputHint("Service address");
+      postMessage("bot", "Before I run validation, what service address should I use? I can suggest matches as you type.");
+      setChatInputHint("Example: 16 Yonge Street, Toronto, ON");
       const options = [];
       if (profileAddress) options.push("Use profile address");
       if (onboardingAddress) options.push("Use onboarding address");
@@ -6563,7 +6720,7 @@ function renderStep(step) {
           return;
         }
         postMessage("bot", "Please enter your full service address.");
-        setChatInputHint("Service address");
+        setChatInputHint("Example: 16 Yonge Street, Toronto, ON");
       });
       break;
     }
@@ -6788,8 +6945,8 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.SHIPPING_MANUAL_ENTRY:
-      postMessage("bot", "Enter the full shipping address.");
-      setChatInputHint("Full shipping address");
+      postMessage("bot", "Enter the full shipping address. I can suggest matches as you type.");
+      setChatInputHint("Example: 16 Yonge Street, Toronto, ON");
       clearAddressTypeahead();
       break;
 
@@ -7413,10 +7570,14 @@ async function handleChatInput(message) {
       if (state.context.addressAuth.awaitingConfirmation) {
         const pending = state.context.addressAuth.pendingInput || "";
         const suggestions = state.context.addressAuth.suggestions || [];
+        const pendingSource = state.context.addressAuth.pendingSource || "manual";
         const normalized = lower.trim();
         if (normalized.includes("use my entered") || normalized.includes("manual")) {
-          finalizeServiceAddress(pending, "manual_confirmed");
-          autoTriggerQuoteBuilderAfterAddress({ source: "address_typed_manual_confirmed" });
+          const source = pendingSource === "typeahead_suggestion" ? "typeahead_suggestion" : "manual";
+          finalizeServiceAddress(pending, source);
+          autoTriggerQuoteBuilderAfterAddress({
+            source: pendingSource === "typeahead_suggestion" ? "address_typed_typeahead_confirmed" : "address_typed_manual_confirmed"
+          });
           transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true, enforceContract: false });
           return;
         }
@@ -7443,18 +7604,24 @@ async function handleChatInput(message) {
         handleUnclearInput(message, "Please provide a valid service address (example: 210 - 100 Galt Ave, Toronto, ON).");
         return;
       }
+      const entryMeta = inferAddressEntrySource(trimmed, FLOW_STEPS.INTERNET_ADDRESS_REQUEST);
+      clearAddressTypeaheadSelection();
       try {
         const payload = await lookupAddresses(trimmed);
         const suggestions = payload?.suggestions || [];
         if (suggestions.length > 0) {
-          presentAddressConfirmation(trimmed, suggestions);
+          presentAddressConfirmation(trimmed, suggestions, entryMeta);
           return;
         }
-        finalizeServiceAddress(trimmed, "manual_confirmed_no_suggestions");
-        autoTriggerQuoteBuilderAfterAddress({ source: "address_manual_no_suggestions" });
+        finalizeServiceAddress(trimmed, entryMeta.source);
+        autoTriggerQuoteBuilderAfterAddress({
+          source: entryMeta.source === "typeahead_suggestion" ? "address_typeahead_no_suggestions" : "address_manual_no_suggestions"
+        });
       } catch {
-        finalizeServiceAddress(trimmed, "manual_confirmed_lookup_error");
-        autoTriggerQuoteBuilderAfterAddress({ source: "address_manual_lookup_error" });
+        finalizeServiceAddress(trimmed, entryMeta.source);
+        autoTriggerQuoteBuilderAfterAddress({
+          source: entryMeta.source === "typeahead_suggestion" ? "address_typeahead_lookup_error" : "address_manual_lookup_error"
+        });
       }
       transitionTo(FLOW_STEPS.INTERNET_ADDRESS_VALIDATE, {}, { pushHistory: true });
       return;
@@ -7973,7 +8140,14 @@ async function handleChatInput(message) {
         postMessage("bot", "Please enter a full address (example: 210 - 100 Galt Ave, Toronto, ON).");
         return;
       }
+      const onboardingEntryMeta = inferAddressEntrySource(trimmed, FLOW_STEPS.NEW_ONBOARD_ADDRESS);
+      clearAddressTypeaheadSelection();
       applyContextPatch({ newOnboarding: { address: trimmed }, serviceAddress: trimmed, serviceAddressValidated: false });
+      logClient("info", "onboarding_address_captured", {
+        source: onboardingEntryMeta.source,
+        suggestionId: onboardingEntryMeta.suggestionId,
+        address: trimmed
+      });
       autoTriggerQuoteBuilderAfterAddress({ source: "onboarding_address_capture" });
       transitionTo(FLOW_STEPS.NEW_AREA_CODE_ENTRY, {}, { pushHistory: true });
       return;
@@ -7983,12 +8157,22 @@ async function handleChatInput(message) {
       const onboardingAddress = state.context.newOnboarding?.address || null;
       if (lower.includes("profile") && profileAddress) {
         applyContextPatch({ serviceAddress: profileAddress, serviceAddressValidated: true, addressCaptureRetries: 0 });
+        logClient("info", "service_address_captured", {
+          source: "profile",
+          step: FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE,
+          address: profileAddress
+        });
         postMessage("bot", `Using profile service address: ${profileAddress}.`);
         transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
         return;
       }
       if ((lower.includes("onboarding") || lower.includes("signup")) && onboardingAddress) {
         applyContextPatch({ serviceAddress: onboardingAddress, serviceAddressValidated: true, addressCaptureRetries: 0 });
+        logClient("info", "service_address_captured", {
+          source: "onboarding",
+          step: FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE,
+          address: onboardingAddress
+        });
         postMessage("bot", `Using onboarding service address: ${onboardingAddress}.`);
         transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
         return;
@@ -8007,11 +8191,21 @@ async function handleChatInput(message) {
             postMessage("user", choice);
             if (choice === "Use profile address" && profileAddress) {
               applyContextPatch({ serviceAddress: profileAddress, serviceAddressValidated: true, addressCaptureRetries: 0 });
+              logClient("info", "service_address_captured", {
+                source: "profile",
+                step: FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE,
+                address: profileAddress
+              });
               transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
               return;
             }
             if (choice === "Use onboarding address" && onboardingAddress) {
               applyContextPatch({ serviceAddress: onboardingAddress, serviceAddressValidated: true, addressCaptureRetries: 0 });
+              logClient("info", "service_address_captured", {
+                source: "onboarding",
+                step: FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE,
+                address: onboardingAddress
+              });
               transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
               return;
             }
@@ -8023,7 +8217,15 @@ async function handleChatInput(message) {
         postMessage("bot", "Please enter a full service address (street, city, province).");
         return;
       }
+      const validationEntryMeta = inferAddressEntrySource(trimmed, FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE);
+      clearAddressTypeaheadSelection();
       applyContextPatch({ serviceAddress: trimmed, serviceAddressValidated: true, addressCaptureRetries: 0 });
+      logClient("info", "service_address_captured", {
+        source: validationEntryMeta.source,
+        suggestionId: validationEntryMeta.suggestionId,
+        step: FLOW_STEPS.VALIDATION_ADDRESS_CAPTURE,
+        address: trimmed
+      });
       postMessage("bot", `Thanks. I will validate service at: ${trimmed}.`);
       transitionTo(FLOW_STEPS.ELIGIBILITY_CHECK, {}, { pushHistory: true });
       return;
@@ -8545,8 +8747,14 @@ async function handleChatInput(message) {
         postMessage("bot", "Please provide a complete address.");
         return;
       }
+      const shippingEntryMeta = inferAddressEntrySource(trimmed, FLOW_STEPS.SHIPPING_MANUAL_ENTRY);
+      clearAddressTypeaheadSelection();
       applyContextPatch({ shipping: { mode: "manual", address: trimmed } });
-      logClient("info", "shipping_manual_entered", { address: trimmed });
+      logClient("info", "shipping_manual_entered", {
+        address: trimmed,
+        source: shippingEntryMeta.source,
+        suggestionId: shippingEntryMeta.suggestionId
+      });
       transitionTo(FLOW_STEPS.ORDER_REVIEW, {}, { pushHistory: true });
       return;
 
@@ -9076,9 +9284,19 @@ chatForm.addEventListener("submit", async (event) => {
 });
 
 chatInput.addEventListener("input", () => {
-  applyContextPatch({ offlineDraft: { input: chatInput.value } });
+  const nextInput = chatInput.value;
+  applyContextPatch({ offlineDraft: { input: nextInput } });
   saveOfflineDraft();
-  queueAddressTypeahead(chatInput.value.trim());
+  if (isAddressTypeaheadStep(state.flowStep)) {
+    const selection = state.context.addressTypeaheadSelection || {};
+    const normalizedInput = normalizeAddressMatchValue(nextInput);
+    const normalizedSelection = normalizeAddressMatchValue(selection.label || "");
+    const sameStep = normalizeAddressMatchValue(selection.step || "") === normalizeAddressMatchValue(state.flowStep);
+    if (sameStep && normalizedSelection && normalizedInput !== normalizedSelection) {
+      clearAddressTypeaheadSelection();
+    }
+  }
+  queueAddressTypeahead(nextInput.trim());
 });
 
 chatInput.addEventListener("blur", () => {
@@ -9088,11 +9306,13 @@ chatInput.addEventListener("blur", () => {
 
 window.addEventListener("focus", () => {
   void refreshLlmStatus({ silent: true });
+  void refreshAddressLookupStatus();
 });
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     void refreshLlmStatus({ silent: true });
+    void refreshAddressLookupStatus();
   }
 });
 
@@ -9133,7 +9353,9 @@ function boot() {
   watchSystemThemeChanges();
   updateLlmStatusUi({ configured: false, connected: false, model: null });
   refreshLlmStatus({ silent: true });
+  refreshAddressLookupStatus();
   setInterval(() => refreshLlmStatus({ silent: true }), 30000);
+  setInterval(() => refreshAddressLookupStatus(), 45000);
   refreshMetricsDashboard({ silent: true });
   setInterval(() => refreshMetricsDashboard({ silent: true }), 60000);
   registerServiceWorker();

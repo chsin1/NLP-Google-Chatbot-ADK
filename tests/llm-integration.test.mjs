@@ -8,6 +8,7 @@ test("server includes ChatGPT endpoints and guardrails", async () => {
   const serverCode = await readFile(`${ROOT}/server.mjs`, "utf8");
   assert.match(serverCode, /\/api\/chat-assist/);
   assert.match(serverCode, /\/api\/llm-health/);
+  assert.match(serverCode, /\/api\/address-lookup-status/);
   assert.match(serverCode, /\/api\/quote-preview/);
   assert.match(serverCode, /\/api\/handoff-summary/);
   assert.match(serverCode, /\/api\/transcript-export/);

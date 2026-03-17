@@ -3,10 +3,11 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { classifyIntentFallbackDetailed, extractIntentEntities, rankAddressSuggestions } from "./shared/flow-utils.mjs";
+import { classifyIntentFallbackDetailed, extractIntentEntities } from "./shared/flow-utils.mjs";
 import { buildMetrics, parseJsonLines } from "./shared/metrics-utils.mjs";
 import { buildQuotePreview } from "./shared/quote-utils.mjs";
 import { buildHandoffSummary, buildTranscriptHtml } from "./shared/conversation-utils.mjs";
+import { resolveAddressSuggestions } from "./shared/address-lookup-utils.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -356,52 +357,6 @@ async function checkLlmHealth({ force = false } = {}) {
   return llmHealth;
 }
 
-async function lookupGoogleSuggestions(query = "") {
-  if (!GOOGLE_PLACES_API_KEY) return [];
-  const input = String(query || "").trim();
-  if (input.length < 3) return [];
-  try {
-    const params = new URLSearchParams({
-      input,
-      key: GOOGLE_PLACES_API_KEY,
-      components: "country:ca"
-    });
-    const response = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?${params.toString()}`);
-    if (!response.ok) return [];
-    const payload = await response.json();
-    if (!Array.isArray(payload.predictions)) return [];
-    return payload.predictions.slice(0, 5).map((item) => {
-      const parts = String(item.description || "")
-        .split(",")
-        .map((part) => part.trim())
-        .filter(Boolean);
-      return {
-        id: item.place_id || item.description,
-        line1: parts[0] || item.description || "Address suggestion",
-        city: parts[1] || "",
-        province: parts[2] || "",
-        postalCode: "",
-        areaCode: null
-      };
-    });
-  } catch {
-    return [];
-  }
-}
-
-async function resolveAddressSuggestions(query = "", areaCode = "") {
-  const mockSuggestions = rankAddressSuggestions(query, areaCode);
-  if (ADDRESS_PROVIDER === "mock") return mockSuggestions;
-  if (ADDRESS_PROVIDER === "google") {
-    const google = await lookupGoogleSuggestions(query);
-    return google.length ? google : mockSuggestions;
-  }
-  // hybrid default
-  const google = await lookupGoogleSuggestions(query);
-  if (google.length) return google;
-  return mockSuggestions;
-}
-
 function json(res, status, payload) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -623,10 +578,35 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/address-lookup-status") {
+    const provider = ADDRESS_PROVIDER;
+    json(res, 200, {
+      provider,
+      googleConfigured: Boolean(GOOGLE_PLACES_API_KEY),
+      torontoBiasEnabled: provider === "google" || provider === "hybrid",
+      manualFallbackEnabled: true
+    });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/address-lookup") {
     try {
       const parsed = await collectRequestBody(req);
-      const suggestions = await resolveAddressSuggestions(parsed.query || "", parsed.areaCode || "");
+      const suggestions = await resolveAddressSuggestions({
+        query: parsed.query || "",
+        areaCode: parsed.areaCode || "",
+        provider: ADDRESS_PROVIDER,
+        apiKey: GOOGLE_PLACES_API_KEY,
+        log: async ({ level = "info", event = "address_lookup", details = {} } = {}) => {
+          await writeLog(level, {
+            event,
+            details: {
+              provider: ADDRESS_PROVIDER,
+              ...details
+            }
+          });
+        }
+      });
       json(res, 200, { suggestions });
     } catch {
       json(res, 400, { error: "Invalid JSON body" });

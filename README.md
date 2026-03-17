@@ -135,7 +135,7 @@ Deterministic business logic in `app.js`, `shared/*.mjs`, and server endpoints r
 - Sales-first guided flow with explicit step contracts
 - Existing/new customer onboarding and authentication variants
 - Mid-conversation language switching (EN/FR/ES/ZH) for future prompts and option labels
-- Address lookup (`mock|google|hybrid`) and typeahead support
+- Address lookup (`mock|google|hybrid`) and typeahead support with Toronto-first ranking in Google mode
 - Guided Quote Builder (budget/speed/device-cost weighting + side-by-side ranked options)
 - Quote preference hard-lock to `100` total points across budget/speed/device cost
 - Offer carousel, bundle discount logic, and cross-sell prompts
@@ -234,6 +234,12 @@ PORT=3001 node server.mjs
 | `ADDRESS_PROVIDER` | `mock` | `mock`, `google`, or `hybrid` |
 | `GOOGLE_PLACES_API_KEY` | empty | Google Places autocomplete (optional) |
 | `LLM_USAGE_LOG_PATH` | `./logs/llm-usage.log` | Token/cost usage log path |
+
+Address lookup behavior:
+
+- `mock`: deterministic local suggestions for testing/demo
+- `google` / `hybrid`: Google Places suggestions only, ranked Toronto-first (Toronto bias, not a hard city restriction)
+- If Google returns no results or is unavailable, the chat allows manual address entry (no forced block)
 
 ---
 
