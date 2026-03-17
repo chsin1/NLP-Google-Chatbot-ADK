@@ -12,6 +12,9 @@ test("app centralizes full-address typeahead step eligibility", async () => {
   assert.match(appCode, /FLOW_STEPS\.VALIDATION_ADDRESS_CAPTURE/);
   assert.match(appCode, /FLOW_STEPS\.SHIPPING_MANUAL_ENTRY/);
   assert.match(appCode, /function isAddressTypeaheadStep\(step = state\.flowStep\)/);
+  assert.match(appCode, /const POSTAL_CODE_TYPEAHEAD_STEPS = new Set\(\[/);
+  assert.match(appCode, /FLOW_STEPS\.PAYMENT_CARD_POSTAL/);
+  assert.match(appCode, /function isPostalCodeTypeaheadStep\(step = state\.flowStep\)/);
 });
 
 test("app tracks selected suggestion metadata and derives source tags", async () => {
@@ -27,4 +30,10 @@ test("address capture handlers include source-aware analytics logging", async ()
   assert.match(appCode, /"onboarding_address_captured"/);
   assert.match(appCode, /"service_address_captured"/);
   assert.match(appCode, /"shipping_manual_entered", \{\s*address: trimmed,\s*source: shippingEntryMeta\.source,/);
+});
+
+test("address lookup payload includes postal hint context", async () => {
+  const appCode = await readFile(`${ROOT}/app.js`, "utf8");
+  assert.match(appCode, /const postalCodeHint = getAddressLookupPostalHint\(state\.context\);/);
+  assert.match(appCode, /postalCodeHint/);
 });

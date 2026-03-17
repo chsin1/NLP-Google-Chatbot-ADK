@@ -35,11 +35,18 @@ import {
   stableContextHash
 } from "./shared/workflow-utils.mjs";
 import { composePrompt } from "./shared/conversation-style-utils.mjs";
+import { redactPaymentText, redactSensitiveObject, hasRawSensitivePaymentData } from "./shared/privacy-utils.mjs";
+import { isIntakeComplete, buildPostIntakePayload } from "./shared/automation-utils.mjs";
+import { requestAssistStream, supportsStreamingAssist } from "./src/client/features/chat/stream-renderer.mjs";
+import { createWalkthroughController } from "./src/client/features/onboarding/walkthrough.mjs";
 
 const FLOW_STEPS = {
   INIT_CONNECTING: "INIT_CONNECTING",
   GREETING_CONVERSATIONAL: "GREETING_CONVERSATIONAL",
   CUSTOMER_STATUS_SELECTION: "CUSTOMER_STATUS_SELECTION",
+  CONSENT_PROFILE: "CONSENT_PROFILE",
+  CONSENT_PAYMENT: "CONSENT_PAYMENT",
+  CONSENT_EXPORT: "CONSENT_EXPORT",
   SERVICE_SELECTION: "SERVICE_SELECTION",
   INTERNET_ADDRESS_REQUEST: "INTERNET_ADDRESS_REQUEST",
   INTERNET_ADDRESS_VALIDATE: "INTERNET_ADDRESS_VALIDATE",
@@ -68,6 +75,7 @@ const FLOW_STEPS = {
   NEW_ONBOARD_ADDRESS: "NEW_ONBOARD_ADDRESS",
   HELPDESK_ENTRY: "HELPDESK_ENTRY",
   SERVICE_CLARIFICATION: "SERVICE_CLARIFICATION",
+  LANDLINE_PORTING_DATE: "LANDLINE_PORTING_DATE",
   CORPORATE_DISCOVERY: "CORPORATE_DISCOVERY",
   SUPPORT_DISCOVERY: "SUPPORT_DISCOVERY",
   HARDWARE_TROUBLESHOOT: "HARDWARE_TROUBLESHOOT",
@@ -108,6 +116,10 @@ const ADDRESS_TYPEAHEAD_STEPS = new Set([
   FLOW_STEPS.SHIPPING_MANUAL_ENTRY
 ]);
 
+const POSTAL_CODE_TYPEAHEAD_STEPS = new Set([
+  FLOW_STEPS.PAYMENT_CARD_POSTAL
+]);
+
 const STEP_CONTRACT = {
   [FLOW_STEPS.GREETING_CONVERSATIONAL]: {
     validInputs: ["conversation start"],
@@ -120,6 +132,24 @@ const STEP_CONTRACT = {
     requiredContext: [],
     allowedNext: [FLOW_STEPS.SERVICE_SELECTION, FLOW_STEPS.EXISTING_AUTH_ENTRY],
     fallbackTarget: FLOW_STEPS.CUSTOMER_STATUS_SELECTION
+  },
+  [FLOW_STEPS.CONSENT_PROFILE]: {
+    validInputs: ["agree", "decline"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.SERVICE_SELECTION, FLOW_STEPS.EXISTING_AUTH_ENTRY, FLOW_STEPS.HELPDESK_ENTRY],
+    fallbackTarget: FLOW_STEPS.CONSENT_PROFILE
+  },
+  [FLOW_STEPS.CONSENT_PAYMENT]: {
+    validInputs: ["agree", "decline"],
+    requiredContext: ["basket"],
+    allowedNext: [FLOW_STEPS.PAYMENT_CARD_NUMBER, FLOW_STEPS.PAYMENT_CARD_ENTRY, FLOW_STEPS.CHECKOUT_INTENT_PROMPT, FLOW_STEPS.BASKET_REVIEW],
+    fallbackTarget: FLOW_STEPS.CONSENT_PAYMENT
+  },
+  [FLOW_STEPS.CONSENT_EXPORT]: {
+    validInputs: ["agree", "decline"],
+    requiredContext: [],
+    allowedNext: [FLOW_STEPS.WARM_AGENT_ROUTING, FLOW_STEPS.HELPDESK_ENTRY, FLOW_STEPS.ORDER_CONFIRMED],
+    fallbackTarget: FLOW_STEPS.CONSENT_EXPORT
   },
   [FLOW_STEPS.SERVICE_SELECTION]: {
     validInputs: ["internet", "mobility", "landline"],
@@ -238,8 +268,14 @@ const STEP_CONTRACT = {
   [FLOW_STEPS.SERVICE_CLARIFICATION]: {
     validInputs: ["service clarifier"],
     requiredContext: ["intent"],
-    allowedNext: [FLOW_STEPS.NEW_ONBOARD_NAME, FLOW_STEPS.OFFER_BROWSE],
+    allowedNext: [FLOW_STEPS.NEW_ONBOARD_NAME, FLOW_STEPS.LANDLINE_PORTING_DATE, FLOW_STEPS.OFFER_BROWSE],
     fallbackTarget: FLOW_STEPS.SERVICE_CLARIFICATION
+  },
+  [FLOW_STEPS.LANDLINE_PORTING_DATE]: {
+    validInputs: ["YYYY-MM-DD"],
+    requiredContext: ["intent"],
+    allowedNext: [FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.NEW_ONBOARD_NAME],
+    fallbackTarget: FLOW_STEPS.LANDLINE_PORTING_DATE
   },
   [FLOW_STEPS.EXISTING_AREA_CODE_CHECK]: {
     validInputs: ["3-digit area code"],
@@ -1135,9 +1171,19 @@ const chatMenuBtn = document.getElementById("chat-menu-btn");
 const chatMenu = document.getElementById("chat-menu");
 const muteChatBtn = document.getElementById("mute-chat-btn");
 const exportTranscriptBtn = document.getElementById("export-transcript-btn");
+const storeFinderBtn = document.getElementById("store-finder-btn");
+const replayWalkthroughBtn = document.getElementById("replay-walkthrough-btn");
+const privacyControlsBtn = document.getElementById("privacy-controls-btn");
+const aboutAiBtn = document.getElementById("about-ai-btn");
 const refreshChatBtn = document.getElementById("refresh-chat-btn");
 const endChatBtn = document.getElementById("end-chat-btn");
 const billDownloadBtn = document.getElementById("bill-download-btn");
+const privacyPanel = document.getElementById("privacy-panel");
+const privacyPanelClose = document.getElementById("privacy-panel-close");
+const privacyConsentList = document.getElementById("privacy-consent-list");
+const withdrawConsentBtn = document.getElementById("withdraw-consent-btn");
+const aiAboutPanel = document.getElementById("ai-about-panel");
+const aiAboutClose = document.getElementById("ai-about-close");
 
 const chatWindow = document.getElementById("chat-window");
 const quickActions = document.getElementById("quick-actions");
@@ -1158,8 +1204,10 @@ const panelBasket = document.getElementById("panel-basket");
 const panelCheckout = document.getElementById("panel-checkout");
 const panelQuote = document.getElementById("panel-quote");
 const panelBooking = document.getElementById("panel-booking");
+const panelFinder = document.getElementById("panel-finder");
 const quoteBuilderContent = document.getElementById("quote-builder-content");
 const bookingCalendarContent = document.getElementById("booking-calendar-content");
+const finderResultsContent = document.getElementById("finder-results-content");
 const chatBody = document.querySelector(".chat-body");
 
 const basketList = document.getElementById("basket-list");
@@ -1180,6 +1228,7 @@ const metricsSlaSummary = document.getElementById("sla-summary");
 const metricsSlaBreachTable = document.querySelector("#sla-breach-table tbody");
 const metricsRouteFilter = document.getElementById("metrics-route-filter");
 const journeyProgress = document.getElementById("journey-progress");
+const chatLiveRegion = document.getElementById("chat-live-region");
 
 const state = {
   chatStarted: false,
@@ -1194,6 +1243,9 @@ const state = {
   metricsRefreshTimer: null,
   metricsRouteFilter: "all",
   pendingAuthMode: null,
+  pendingConsentTransition: null,
+  pendingExportAction: null,
+  walkthrough: null,
   activeQuickActionLabels: new Set(),
   quotePanelPinned: false,
   context: {
@@ -1233,6 +1285,12 @@ const state = {
     i18n: {
       uiLanguage: "en",
       parserLanguage: "en"
+    },
+    consent: {
+      profile: { status: "pending", ts: null, version: "v1", locale: "en" },
+      payment: { status: "pending", ts: null, version: "v1" },
+      export: { status: "pending", ts: null, version: "v1" },
+      lastUpdatedBy: null
     },
     authUser: null,
     intent: null,
@@ -1321,6 +1379,11 @@ const state = {
       input: "",
       restoredAt: null
     },
+    automations: {
+      postIntakeTriggered: false,
+      postIntakeTriggeredAt: null,
+      postIntakeStatus: null
+    },
     serviceAddress: null,
     serviceAddressValidated: false,
     addressAuth: {
@@ -1347,10 +1410,11 @@ const state = {
       last4: null,
       cardSegments: ["", "", "", ""],
       cardValidated: false,
-      cvc: null,
       cvcValidated: false,
       postal: null,
-      postalValidated: false
+      postalValidated: false,
+      suggestedPostal: null,
+      postalPromptMode: "ask_reuse"
     },
     quoteBuilder: {
       preferences: {
@@ -1380,6 +1444,7 @@ const state = {
       phonePreference: null,
       linePreference: null,
       callingPlan: null,
+      portingDate: null,
       bundleSize: null,
       stage: null,
       awaitingOfferContinuation: false,
@@ -1425,6 +1490,7 @@ const conversationStyle = {
   [FLOW_STEPS.HELPDESK_ENTRY]: "consultative",
   [FLOW_STEPS.CUSTOMER_STATUS_SELECTION]: "consultative",
   [FLOW_STEPS.SERVICE_SELECTION]: "consultative",
+  [FLOW_STEPS.LANDLINE_PORTING_DATE]: "consultative",
   [FLOW_STEPS.INTERNET_ADDRESS_REQUEST]: "consultative",
   [FLOW_STEPS.INTERNET_PRIORITY_CAPTURE]: "consultative",
   [FLOW_STEPS.INTERNET_PLAN_PITCH]: "consultative",
@@ -1800,6 +1866,9 @@ function stepToJourneyStage(step) {
     [
       FLOW_STEPS.GREETING_CONVERSATIONAL,
       FLOW_STEPS.SERVICE_SELECTION,
+      FLOW_STEPS.CONSENT_PROFILE,
+      FLOW_STEPS.CONSENT_PAYMENT,
+      FLOW_STEPS.CONSENT_EXPORT,
       FLOW_STEPS.EXISTING_AUTH_ENTRY,
       FLOW_STEPS.EXISTING_AUTH_VALIDATE,
       FLOW_STEPS.EXISTING_AUTH_FAILURE_HARD_STOP,
@@ -1820,7 +1889,8 @@ function stepToJourneyStage(step) {
       FLOW_STEPS.NEW_ONBOARD_ADDRESS,
       FLOW_STEPS.NEW_AREA_CODE_ENTRY,
       FLOW_STEPS.INTENT_DISCOVERY,
-      FLOW_STEPS.SERVICE_CLARIFICATION
+      FLOW_STEPS.SERVICE_CLARIFICATION,
+      FLOW_STEPS.LANDLINE_PORTING_DATE
     ].includes(step)
   ) return 0;
   if ([FLOW_STEPS.OFFER_BROWSE, FLOW_STEPS.INTERNET_PLAN_PITCH, FLOW_STEPS.PLAN_CONFIRMATION].includes(step)) return 1;
@@ -1875,6 +1945,8 @@ function updateJourneyProgress(step) {
 function renderMetricsDashboard(metrics = {}, { fromCache = false } = {}) {
   const kpiList = metrics.businessKpis?.length ? metrics.businessKpis : DEFAULT_BUSINESS_KPIS;
   const llmUsage = metrics.llmUsage || null;
+  const compliance = metrics.complianceKpis || null;
+  const safety = metrics.safetyKpis || null;
   const mergedKpis = llmUsage
     ? [
         ...kpiList,
@@ -1883,6 +1955,18 @@ function renderMetricsDashboard(metrics = {}, { fromCache = false } = {}) {
         { key: "llm_fallback_rate", label: "LLM Fallback Rate (%)", value: llmUsage.fallbackRatePercent || 0 }
       ]
     : kpiList;
+  if (compliance) {
+    mergedKpis.push(
+      { key: "consent_granted_count", label: "Consent Granted", value: compliance.consentGranted || 0 },
+      { key: "compliance_blocked_payload", label: "Compliance Blocks", value: compliance.complianceBlockedPayload || 0 }
+    );
+  }
+  if (safety) {
+    mergedKpis.push(
+      { key: "safety_input_blocked", label: "Safety Blocks (Input)", value: safety.safetyInputBlocked || 0 },
+      { key: "safety_output_blocked", label: "Safety Blocks (Output)", value: safety.safetyOutputBlocked || 0 }
+    );
+  }
   const monthlyRows = (metrics.monthlySnapshots && metrics.monthlySnapshots.length)
     ? metrics.monthlySnapshots
     : readStore(KPI_SNAPSHOT_STORE_KEY, []).length
@@ -1950,7 +2034,7 @@ function updateLlmStatusUi(status = {}) {
     llmStatusTargets.forEach(([chip, text]) => {
       chip.classList.remove("llm-online", "llm-degraded", "llm-offline");
       chip.classList.add("llm-online");
-      text.textContent = `ChatGPT: Connected${status.model ? ` (${status.model})` : ""}`;
+      text.textContent = `AI Assistant: Connected${status.model ? ` (${status.model})` : ""}`;
     });
     return;
   }
@@ -1958,14 +2042,14 @@ function updateLlmStatusUi(status = {}) {
     llmStatusTargets.forEach(([chip, text]) => {
       chip.classList.remove("llm-online", "llm-degraded", "llm-offline");
       chip.classList.add("llm-degraded");
-      text.textContent = "ChatGPT: Degraded";
+      text.textContent = "AI Assistant: Degraded";
     });
     return;
   }
   llmStatusTargets.forEach(([chip, text]) => {
     chip.classList.remove("llm-online", "llm-degraded", "llm-offline");
     chip.classList.add("llm-offline");
-    text.textContent = "ChatGPT: Not configured";
+    text.textContent = "AI Assistant: Offline";
   });
 }
 
@@ -2042,31 +2126,64 @@ async function refreshLlmStatus({ silent = true } = {}) {
     });
     updateLlmStatusUi({ configured: false, connected: false, model: null });
     if (!silent) {
-      postMessage("bot", "ChatGPT connection check is unavailable right now. Continuing with deterministic responses.");
+      postMessage("bot", "AI assistant connection check is unavailable right now. Continuing with template guidance.");
     }
   }
 }
 
 async function requestChatAssist(task, payload = {}, { fallbackText = "", minLength = 8 } = {}) {
+  const requestPayload = {
+    task,
+    sessionId: state.context.sessionId,
+    step: state.flowStep,
+    context: {
+      sessionId: state.context.sessionId,
+      customerType: state.context.customerType,
+      intent: state.context.intent,
+      selectedService: state.context.selectedService
+    },
+    ...payload
+  };
+
+  if (supportsStreamingAssist() && payload?.disableStreaming !== true) {
+    const streamResult = await requestAssistStream({
+      payload: requestPayload,
+      retries: 1,
+      timeoutMs: 12000
+    });
+    if (streamResult.ok) {
+      if (String(streamResult.mode || "").includes("llm")) {
+        applyContextPatch({ llmStatus: { configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" } });
+        updateLlmStatusUi({ ...state.context.llmStatus, configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" });
+      }
+      const text = String(streamResult.text || "").trim();
+      if (text.length >= minLength) return text;
+    }
+  }
+
   try {
     const response = await fetch("/api/chat-assist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        task,
-        sessionId: state.context.sessionId,
-        step: state.flowStep,
-        context: {
-          sessionId: state.context.sessionId,
-          customerType: state.context.customerType,
-          intent: state.context.intent,
-          selectedService: state.context.selectedService
-        },
-        ...payload
-      })
+      body: JSON.stringify(requestPayload)
     });
     if (!response.ok) throw new Error("assist unavailable");
     const data = await response.json();
+    if (data?.safetyAction === "block") {
+      logClient("error", "safety_input_blocked", {
+        policyCategory: data.policyCategory || null,
+        endpoint: "requestChatAssist"
+      });
+      logClient("info", "safety_fallback_triggered", {
+        source: "requestChatAssist",
+        mode: data.mode || "safety_block"
+      });
+    } else if (data?.safetyAction === "warn") {
+      logClient("info", "safety_policy_violation_detected", {
+        policyCategory: data.policyCategory || null,
+        endpoint: "requestChatAssist"
+      });
+    }
     if (data?.mode === "llm") {
       applyContextPatch({ llmStatus: { configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" } });
       updateLlmStatusUi({ ...state.context.llmStatus, configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" });
@@ -2079,28 +2196,176 @@ async function requestChatAssist(task, payload = {}, { fallbackText = "", minLen
   }
 }
 
-async function requestHandoffSummary({ currentStep = state.flowStep } = {}) {
+async function triggerPostIntakeAutomation({ source = "unknown" } = {}) {
+  if (!state.context.sessionId) return;
+  if (state.context.automations?.postIntakeTriggered) return;
+  if (!isIntakeComplete(state.context)) return;
   try {
+    const payload = buildPostIntakePayload({
+      sessionId: state.context.sessionId,
+      context: state.context,
+      currentStep: state.flowStep,
+      transcript: state.transcript.slice(-24)
+    });
+    const response = await fetch("/api/automations/post-intake", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: state.context.sessionId,
+        currentStep: state.flowStep,
+        context: redactSensitiveObject(state.context),
+        messages: redactSensitiveObject(state.transcript.slice(-24)),
+        source
+      })
+    });
+    if (!response.ok) throw new Error("post_intake_automation_unavailable");
+    const result = await response.json();
+    const shouldLock = Boolean(result.fired) || String(result.reason || "") === "not_configured";
+    applyContextPatch({
+      automations: {
+        postIntakeTriggered: shouldLock,
+        postIntakeTriggeredAt: new Date().toISOString(),
+        postIntakeStatus: result.ok ? (result.fired ? "fired" : result.reason || "not_fired") : "failed"
+      }
+    });
+    logClient(result.ok ? "info" : "error", "post_intake_automation_result", {
+      source,
+      fired: Boolean(result.fired),
+      reason: result.reason || null,
+      error: result.error || null,
+      traceId: result.traceId || null,
+      payloadIntakeComplete: payload.intakeComplete
+    });
+  } catch (error) {
+    applyContextPatch({
+      automations: {
+        postIntakeTriggered: false,
+        postIntakeTriggeredAt: new Date().toISOString(),
+        postIntakeStatus: "failed"
+      }
+    });
+    logClient("error", "post_intake_automation_result", {
+      source,
+      fired: false,
+      reason: "client_exception",
+      error: String(error?.message || "unknown")
+    });
+  }
+}
+
+function escapeHtml(value = "") {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderFinderResults(results = [], source = "none") {
+  if (!finderResultsContent) return;
+  const safeRows = Array.isArray(results) ? results : [];
+  if (safeRows.length === 0) {
+    finderResultsContent.innerHTML = "<p class='small'>No nearby stores found yet. Try a different location.</p>";
+    return;
+  }
+  finderResultsContent.innerHTML = `
+    <p class="small">Source: ${escapeHtml(source)}</p>
+    <div class="finder-list">
+      ${safeRows
+        .map((item) => {
+          const name = escapeHtml(item?.name || "Store");
+          const address = escapeHtml(item?.address || "Address unavailable");
+          const phone = escapeHtml(item?.phone || "");
+          const website = String(item?.website || "");
+          const directions = String(item?.directionsUrl || "");
+          const callHref = phone ? `tel:${phone.replace(/[^\d+]/g, "")}` : "";
+          return `
+            <article class="finder-card">
+              <h4>${name}</h4>
+              <p>${address}</p>
+              <div class="finder-actions">
+                ${callHref ? `<a href="${escapeHtml(callHref)}">Call</a>` : "<span>Call unavailable</span>"}
+                ${directions ? `<a href="${escapeHtml(directions)}" target="_blank" rel="noopener noreferrer">Directions</a>` : "<span>Directions unavailable</span>"}
+                ${website ? `<a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer">Website</a>` : "<span>Website unavailable</span>"}
+              </div>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function getGeoPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("geolocation_unsupported"));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => resolve(position),
+      (error) => reject(error),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 }
+    );
+  });
+}
+
+async function openStoreFinderPanel() {
+  if (!panelFinder || !finderResultsContent) {
+    postMessage("bot", "Store finder panel is unavailable in this build.");
+    return;
+  }
+  setPanelFocus("finder");
+  finderResultsContent.innerHTML = "<p class='small'>Looking up nearby stores...</p>";
+  try {
+    const geo = await getGeoPosition();
+    const lat = Number(geo?.coords?.latitude);
+    const lng = Number(geo?.coords?.longitude);
+    const response = await fetch(`/api/finder/nearby?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&type=store`);
+    if (!response.ok) throw new Error("finder_unavailable");
+    const payload = await response.json();
+    renderFinderResults(payload.results || [], payload.source || "none");
+    logClient("info", "store_finder_loaded", {
+      source: payload.source || "none",
+      count: Array.isArray(payload.results) ? payload.results.length : 0,
+      traceId: payload.traceId || null
+    });
+    postMessage("bot", "I loaded nearby stores. You can call, get directions, or open the website from the panel.");
+  } catch (error) {
+    finderResultsContent.innerHTML = "<p class='small'>Unable to load nearby stores right now.</p>";
+    logClient("error", "store_finder_failed", {
+      error: String(error?.message || "unknown")
+    });
+    postMessage("bot", "I couldn’t load nearby stores right now. Please allow location access and try again.");
+  }
+}
+
+async function requestHandoffSummary({ currentStep = state.flowStep } = {}) {
+  if (requestConsentForExport("handoff", { currentStep })) return "";
+  try {
+    const safeContext = redactSensitiveObject({
+      sessionId: state.context.sessionId,
+      customerType: state.context.customerType,
+      intent: state.context.intent,
+      selectedService: state.context.selectedService,
+      activeTask: state.context.activeTask,
+      flowStep: state.flowStep,
+      authUser: state.context.authUser ? { id: state.context.authUser.id, name: state.context.authUser.name } : null,
+      basket: state.context.basket,
+      payment: state.context.payment,
+      shipping: state.context.shipping,
+      serviceAddress: state.context.serviceAddress
+    });
+    const safeMessages = redactSensitiveObject(state.transcript.slice(-100));
     const response = await fetch("/api/handoff-summary", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sessionId: state.context.sessionId,
         currentStep,
-        context: {
-          sessionId: state.context.sessionId,
-          customerType: state.context.customerType,
-          intent: state.context.intent,
-          selectedService: state.context.selectedService,
-          activeTask: state.context.activeTask,
-          flowStep: state.flowStep,
-          authUser: state.context.authUser ? { id: state.context.authUser.id, name: state.context.authUser.name } : null,
-          basket: state.context.basket,
-          payment: state.context.payment,
-          shipping: state.context.shipping,
-          serviceAddress: state.context.serviceAddress
-        },
-        messages: state.transcript.slice(-100)
+        context: safeContext,
+        messages: safeMessages
       })
     });
     if (!response.ok) throw new Error("handoff summary unavailable");
@@ -2135,6 +2400,7 @@ function downloadJsonFile(payload, fileName) {
 }
 
 async function exportTranscript() {
+  if (requestConsentForExport("transcript")) return;
   try {
     const sessionMessages = state.transcript.length
       ? state.transcript
@@ -2145,6 +2411,27 @@ async function exportTranscript() {
             ts: new Date().toISOString()
           }
         ];
+    const safeMessages = redactSensitiveObject(sessionMessages);
+    const safeContext = redactSensitiveObject({
+      sessionId: state.context.sessionId,
+      customerType: state.context.customerType,
+      intent: state.context.intent,
+      selectedService: state.context.selectedService,
+      flowStep: state.flowStep,
+      activeTask: state.context.activeTask,
+      basket: state.context.basket,
+      payment: state.context.payment,
+      shipping: state.context.shipping,
+      authUser: state.context.authUser ? { id: state.context.authUser.id, name: state.context.authUser.name } : null
+    });
+    if (hasRawSensitivePaymentData({ safeMessages, safeContext })) {
+      logClient("error", "compliance_blocked_payload", {
+        endpoint: "exportTranscript",
+        reason: "raw_payment_data_detected"
+      });
+      postMessage("bot", "I blocked this export because sensitive payment data was detected.");
+      return;
+    }
     const response = await fetch("/api/transcript-export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2152,19 +2439,8 @@ async function exportTranscript() {
         sessionId: state.context.sessionId,
         currentStep: state.flowStep,
         format: "pdf+json",
-        context: {
-          sessionId: state.context.sessionId,
-          customerType: state.context.customerType,
-          intent: state.context.intent,
-          selectedService: state.context.selectedService,
-          flowStep: state.flowStep,
-          activeTask: state.context.activeTask,
-          basket: state.context.basket,
-          payment: state.context.payment,
-          shipping: state.context.shipping,
-          authUser: state.context.authUser ? { id: state.context.authUser.id, name: state.context.authUser.name } : null
-        },
-        messages: sessionMessages
+        context: safeContext,
+        messages: safeMessages
       })
     });
     if (!response.ok) throw new Error("transcript export unavailable");
@@ -2993,6 +3269,73 @@ function isAddressTypeaheadStep(step = state.flowStep) {
   return ADDRESS_TYPEAHEAD_STEPS.has(step);
 }
 
+function isPostalCodeTypeaheadStep(step = state.flowStep) {
+  return POSTAL_CODE_TYPEAHEAD_STEPS.has(step);
+}
+
+function isInputTypeaheadStep(step = state.flowStep) {
+  return isAddressTypeaheadStep(step) || isPostalCodeTypeaheadStep(step);
+}
+
+function normalizePostalCodeInput(raw = "") {
+  return String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+}
+
+function formatPostalCodeInput(raw = "") {
+  const compact = normalizePostalCodeInput(raw);
+  if (!compact) return "";
+  return compact.length > 3 ? `${compact.slice(0, 3)} ${compact.slice(3)}` : compact;
+}
+
+function getPostalLookupCandidates(context = state.context) {
+  const candidates = [];
+  const seen = new Set();
+  const tryAdd = (value) => {
+    const compact = normalizePostalCodeInput(value);
+    if (compact.length !== 6) return;
+    if (seen.has(compact)) return;
+    seen.add(compact);
+    candidates.push(compact);
+  };
+
+  tryAdd(context.paymentDraft?.postal || "");
+  tryAdd(context.paymentDraft?.suggestedPostal || "");
+  tryAdd(extractCanadianPostalCode(resolveServiceAddress(context) || ""));
+  tryAdd(extractCanadianPostalCode(context.authUser?.prefilledAddress || ""));
+  tryAdd(extractCanadianPostalCode(context.shipping?.address || ""));
+  tryAdd(extractCanadianPostalCode(context.newOnboarding?.address || ""));
+  return candidates;
+}
+
+function getPostalCodeTypeaheadSuggestions(query = "", context = state.context) {
+  const compactQuery = normalizePostalCodeInput(query);
+  const candidates = getPostalLookupCandidates(context);
+  if (!compactQuery) {
+    return candidates.slice(0, 5).map((item) => formatPostalCodeInput(item));
+  }
+  const suggestions = candidates
+    .filter((candidate) => candidate.startsWith(compactQuery))
+    .slice(0, 5)
+    .map((item) => formatPostalCodeInput(item));
+  if (compactQuery.length >= 3) {
+    const typedFormatted = formatPostalCodeInput(compactQuery);
+    if (typedFormatted && !suggestions.includes(typedFormatted)) {
+      suggestions.unshift(typedFormatted);
+    }
+  }
+  return suggestions.slice(0, 5);
+}
+
+function getAddressLookupPostalHint(context = state.context) {
+  const fromDraft = normalizePostalCodeInput(context.paymentDraft?.postal || context.paymentDraft?.suggestedPostal || "");
+  if (fromDraft.length === 6) return fromDraft;
+  const fromService = normalizePostalCodeInput(extractCanadianPostalCode(resolveServiceAddress(context) || ""));
+  if (fromService.length === 6) return fromService;
+  const fromShipping = normalizePostalCodeInput(extractCanadianPostalCode(context.shipping?.address || ""));
+  if (fromShipping.length === 6) return fromShipping;
+  return "";
+}
+
 function normalizeAddressMatchValue(value = "") {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -3058,7 +3401,7 @@ function postMessage(role, text, { force = false } = {}) {
   if (role === "bot" && state.muted && !force) return;
   const el = document.createElement("div");
   el.className = `msg ${role}`;
-  const sourceText = String(text || "");
+  const sourceText = role === "user" ? redactPaymentText(String(text || "")) : String(text || "");
   el.textContent = sourceText;
   const isTranslatableUserChoice = role === "user" && state.activeQuickActionLabels?.has(sourceText);
   if (role === "bot" || isTranslatableUserChoice) {
@@ -3098,6 +3441,9 @@ function postMessage(role, text, { force = false } = {}) {
   }
   if (role === "bot") {
     trackSlaFirstReply();
+    if (chatLiveRegion) {
+      chatLiveRegion.textContent = sourceText;
+    }
   }
 }
 
@@ -3194,10 +3540,44 @@ async function logClient(level, event, details = {}) {
       route: resolveRouteFromStep(state.flowStep, state.context.activeTask),
       ...details
     };
+    if (event !== "compliance_blocked_payload" && hasRawSensitivePaymentData(enrichedDetails)) {
+      await fetch("/api/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level: "error",
+          event: "compliance_blocked_payload",
+          details: {
+            sessionId: state.context.sessionId,
+            flowStep: state.flowStep,
+            blockedEvent: event,
+            reason: "raw_payment_data_detected"
+          }
+        })
+      });
+      return;
+    }
+    const safeDetails = redactSensitiveObject(enrichedDetails, { strict: true });
+    const redacted = JSON.stringify(safeDetails) !== JSON.stringify(enrichedDetails);
+    if (redacted && event !== "pii_redacted") {
+      await fetch("/api/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level: "info",
+          event: "pii_redacted",
+          details: {
+            sessionId: state.context.sessionId,
+            flowStep: state.flowStep,
+            sourceEvent: event
+          }
+        })
+      });
+    }
     await fetch("/api/log", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ level, event, details: enrichedDetails })
+      body: JSON.stringify({ level, event, details: safeDetails })
     });
     queueMetricsDashboardRefresh();
   } catch {
@@ -3216,6 +3596,18 @@ function resetChatInputHint() {
 
 function setChatInputHint(placeholder) {
   chatInput.placeholder = placeholder || "Type your message here...";
+}
+
+function focusFirstActionableControl() {
+  const firstQuickAction = quickActions?.querySelector("button:not(:disabled)");
+  if (firstQuickAction) {
+    firstQuickAction.focus();
+    return;
+  }
+  if (chatInput) {
+    chatInput.focus();
+    logClient("info", "a11y_focus_recovered", { target: "chat_input", step: state.flowStep });
+  }
 }
 
 function normalizeLanguageCode(code = "en") {
@@ -3373,6 +3765,7 @@ function setConversationLanguage(languageCode = "en", { announce = true } = {}) 
   const previousLanguage = getCurrentUiLanguage();
   if (previousLanguage === normalizedLanguage) {
     syncLanguageSwitcherUi(normalizedLanguage);
+    document.documentElement.lang = normalizedLanguage;
     return;
   }
   applyContextPatch({
@@ -3383,6 +3776,7 @@ function setConversationLanguage(languageCode = "en", { announce = true } = {}) 
     }
   });
   syncLanguageSwitcherUi(normalizedLanguage);
+  document.documentElement.lang = normalizedLanguage;
   refreshQuickActionsLanguage();
   refreshQuoteToggleButton();
   refreshVisibleBotMessagesLanguage(normalizedLanguage);
@@ -3571,10 +3965,11 @@ function submitCardNumberDigits(rawDigits = "", { echo = false } = {}) {
         digits.slice(12, 16)
       ],
       cardValidated: true,
-      cvc: null,
       cvcValidated: false,
       postal: null,
-      postalValidated: false
+      postalValidated: false,
+      suggestedPostal: null,
+      postalPromptMode: "ask_reuse"
     }
   });
   if (echo) {
@@ -3704,10 +4099,11 @@ function getEmptyPaymentDraft() {
     last4: null,
     cardSegments: ["", "", "", ""],
     cardValidated: false,
-    cvc: null,
     cvcValidated: false,
     postal: null,
-    postalValidated: false
+    postalValidated: false,
+    suggestedPostal: null,
+    postalPromptMode: "ask_reuse"
   };
 }
 
@@ -3733,12 +4129,14 @@ function setPanelFocus(mode = "conversation") {
   const showCheckout = mode === "checkout";
   const showQuote = mode === "quote";
   const showBooking = mode === "booking";
-  const splitView = showOffers || showBasket || showCheckout || showQuote || showBooking;
+  const showFinder = mode === "finder";
+  const splitView = showOffers || showBasket || showCheckout || showQuote || showBooking || showFinder;
   panelOffers.classList.toggle("hidden", !showOffers);
   panelBasket.classList.toggle("hidden", !showBasket);
   panelCheckout.classList.toggle("hidden", !showCheckout);
   if (panelQuote) panelQuote.classList.toggle("hidden", !showQuote);
   if (panelBooking) panelBooking.classList.toggle("hidden", !showBooking);
+  if (panelFinder) panelFinder.classList.toggle("hidden", !showFinder);
   chatWidget.classList.toggle("expanded", splitView);
   if (chatBody) {
     chatBody.classList.toggle("split-view", splitView);
@@ -3791,6 +4189,8 @@ function resetSessionState() {
   state.historyStack = [];
   state.offerPageIndex = 0;
   state.pendingAuthMode = null;
+  state.pendingConsentTransition = null;
+  state.pendingExportAction = null;
   state.quotePanelPinned = false;
   state.transcript = [];
   state.context = {
@@ -3830,6 +4230,12 @@ function resetSessionState() {
     i18n: {
       uiLanguage: selectedLanguage,
       parserLanguage: selectedLanguage
+    },
+    consent: {
+      profile: { status: "pending", ts: null, version: "v1", locale: selectedLanguage },
+      payment: { status: "pending", ts: null, version: "v1" },
+      export: { status: "pending", ts: null, version: "v1" },
+      lastUpdatedBy: null
     },
     authUser: null,
     intent: null,
@@ -3918,6 +4324,11 @@ function resetSessionState() {
       input: "",
       restoredAt: null
     },
+    automations: {
+      postIntakeTriggered: false,
+      postIntakeTriggeredAt: null,
+      postIntakeStatus: null
+    },
     serviceAddress: null,
     serviceAddressValidated: false,
     addressAuth: {
@@ -3944,10 +4355,11 @@ function resetSessionState() {
       last4: null,
       cardSegments: ["", "", "", ""],
       cardValidated: false,
-      cvc: null,
       cvcValidated: false,
       postal: null,
-      postalValidated: false
+      postalValidated: false,
+      suggestedPostal: null,
+      postalPromptMode: "ask_reuse"
     },
     quoteBuilder: {
       preferences: {
@@ -3975,6 +4387,7 @@ function resetSessionState() {
       phonePreference: null,
       linePreference: null,
       callingPlan: null,
+      portingDate: null,
       bundleSize: null,
       stage: null,
       awaitingOfferContinuation: false,
@@ -4027,10 +4440,165 @@ function resetSessionState() {
   resetCheckoutPanel();
   setPanelFocus("conversation");
   syncLanguageSwitcherUi(selectedLanguage);
+  document.documentElement.lang = selectedLanguage;
   syncThemeSwitcherUi(selectedTheme);
   refreshQuickActionsLanguage();
   refreshBillDownloadButton();
   setStatus();
+}
+
+function getConsentScopeForStep(step = "") {
+  const profileSteps = new Set([
+    FLOW_STEPS.EXISTING_AUTH_ENTRY,
+    FLOW_STEPS.EXISTING_AUTH_VALIDATE,
+    FLOW_STEPS.EXISTING_AUTH_IDENTIFIER,
+    FLOW_STEPS.NEW_ONBOARD_NAME,
+    FLOW_STEPS.NEW_ONBOARD_EMAIL,
+    FLOW_STEPS.NEW_ONBOARD_PHONE,
+    FLOW_STEPS.NEW_ONBOARD_ADDRESS,
+    FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE
+  ]);
+  const paymentSteps = new Set([
+    FLOW_STEPS.PAYMENT_CARD_ENTRY,
+    FLOW_STEPS.PAYMENT_CARD_NUMBER,
+    FLOW_STEPS.PAYMENT_CARD_CVC,
+    FLOW_STEPS.PAYMENT_CARD_POSTAL,
+    FLOW_STEPS.PAYMENT_CARD_CONFIRM
+  ]);
+  if (profileSteps.has(step)) return "profile";
+  if (paymentSteps.has(step)) return "payment";
+  return null;
+}
+
+function getConsentStep(scope = "") {
+  if (scope === "profile") return FLOW_STEPS.CONSENT_PROFILE;
+  if (scope === "payment") return FLOW_STEPS.CONSENT_PAYMENT;
+  if (scope === "export") return FLOW_STEPS.CONSENT_EXPORT;
+  return null;
+}
+
+function isConsentGranted(scope = "") {
+  const status = state.context.consent?.[scope]?.status || "pending";
+  return status === "granted";
+}
+
+function recordConsentDecision(scope = "", status = "pending", source = "chat_input") {
+  const ts = new Date().toISOString();
+  const locale = getCurrentUiLanguage();
+  applyContextPatch({
+    consent: {
+      [scope]: {
+        status,
+        ts,
+        version: "v1",
+        locale
+      },
+      lastUpdatedBy: source
+    }
+  });
+  renderPrivacyPanel();
+  logClient("info", status === "granted" ? "consent_granted" : "consent_declined", {
+    scope,
+    source
+  });
+  void fetch("/api/consent-record", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: state.context.sessionId,
+      scope,
+      status,
+      source,
+      locale,
+      version: "v1"
+    })
+  }).catch(() => {
+    // Non-blocking.
+  });
+}
+
+function clearSensitiveSessionData() {
+  applyContextPatch({
+    authUser: null,
+    authMeta: {
+      mode: null,
+      phone: null,
+      email: null,
+      secureRef: null
+    },
+    existingAuthAttempt: {
+      name: null,
+      email: null,
+      phone: null,
+      status: null
+    },
+    newOnboarding: {
+      fullName: null,
+      email: null,
+      phone: null,
+      address: null,
+      leadId: null
+    },
+    serviceAddress: null,
+    serviceAddressValidated: false,
+    paymentDraft: getEmptyPaymentDraft(),
+    payment: {
+      method: null,
+      expectedLast4: null,
+      last4Confirmed: false,
+      cvvValidated: false,
+      verified: false,
+      token: null
+    },
+    cardEntry: {
+      brand: null,
+      maskedLast4: null,
+      cvcValidated: false,
+      postalValidated: false,
+      tokenized: false
+    }
+  });
+}
+
+function withdrawConsentAndReset() {
+  recordConsentDecision("profile", "declined", "quick_action");
+  recordConsentDecision("payment", "declined", "quick_action");
+  recordConsentDecision("export", "declined", "quick_action");
+  logClient("info", "consent_withdrawn", { scope: "all" });
+  clearSensitiveSessionData();
+  transitionTo(FLOW_STEPS.HELPDESK_ENTRY, { customerType: "guest" }, { pushHistory: true, enforceContract: false });
+}
+
+function resumePendingConsentTransition() {
+  const pending = state.pendingConsentTransition;
+  state.pendingConsentTransition = null;
+  if (!pending) return;
+  transitionTo(pending.nextStep, pending.patchContext || {}, {
+    pushHistory: Boolean(pending.pushHistory),
+    enforceContract: pending.enforceContract !== false
+  });
+}
+
+function requestConsentForExport(action = "transcript", meta = {}) {
+  if (isConsentGranted("export")) return false;
+  state.pendingExportAction = { action, ...meta };
+  logClient("info", "consent_required_block", { scope: "export", action });
+  logClient("info", "consent_prompted", { scope: "export", action });
+  transitionTo(FLOW_STEPS.CONSENT_EXPORT, {}, { pushHistory: true, enforceContract: false });
+  return true;
+}
+
+function resumePendingExportAction() {
+  const pending = state.pendingExportAction;
+  state.pendingExportAction = null;
+  if (!pending) return;
+  if (pending.action === "transcript") {
+    void exportTranscript();
+    return;
+  }
+  if (pending.action === "handoff") {
+    void requestHandoffSummary({ currentStep: pending.currentStep || state.flowStep });
+  }
 }
 
 function isStepValid(nextStep, ctx) {
@@ -4058,6 +4626,24 @@ function getPatchedContext(patch = {}) {
     };
   }
   if (patch.i18n) next.i18n = { ...next.i18n, ...patch.i18n };
+  if (patch.consent) {
+    next.consent = {
+      ...(next.consent || {}),
+      ...patch.consent,
+      profile: {
+        ...(next.consent?.profile || {}),
+        ...(patch.consent.profile || {})
+      },
+      payment: {
+        ...(next.consent?.payment || {}),
+        ...(patch.consent.payment || {})
+      },
+      export: {
+        ...(next.consent?.export || {}),
+        ...(patch.consent.export || {})
+      }
+    };
+  }
   if (patch.loopGuard) next.loopGuard = { ...next.loopGuard, ...patch.loopGuard };
   if (patch.pathMeta) next.pathMeta = { ...next.pathMeta, ...patch.pathMeta };
   if (patch.sla) next.sla = { ...next.sla, ...patch.sla };
@@ -4110,6 +4696,7 @@ function getPatchedContext(patch = {}) {
   if (patch.theme !== undefined) next.theme = patch.theme;
   if (patch.pwa) next.pwa = { ...next.pwa, ...patch.pwa };
   if (patch.offlineDraft) next.offlineDraft = { ...next.offlineDraft, ...patch.offlineDraft };
+  if (patch.automations) next.automations = { ...next.automations, ...patch.automations };
   if (patch.newOnboarding) next.newOnboarding = { ...next.newOnboarding, ...patch.newOnboarding };
   if (patch.salesProfile) next.salesProfile = { ...next.salesProfile, ...patch.salesProfile };
   if (patch.supportCase) next.supportCase = { ...next.supportCase, ...patch.supportCase };
@@ -4163,6 +4750,32 @@ function transitionTo(nextStep, patchContext = {}, { pushHistory = true, enforce
   if (LEGACY_FLOW_STEPS.includes(nextStep)) {
     logClient("error", "invalid_flow_transition", { from: state.flowStep, to: nextStep, reason: "legacy_step_deprecated" });
     postMessage("bot", "That step is no longer available. I will keep you in the current flow.");
+    return;
+  }
+
+  const consentScope = getConsentScopeForStep(nextStep);
+  const isConsentStep = [FLOW_STEPS.CONSENT_PROFILE, FLOW_STEPS.CONSENT_PAYMENT, FLOW_STEPS.CONSENT_EXPORT].includes(nextStep);
+  if (consentScope && !isConsentStep && !isConsentGranted(consentScope)) {
+    const consentStep = getConsentStep(consentScope);
+    state.pendingConsentTransition = {
+      nextStep,
+      patchContext,
+      pushHistory,
+      enforceContract
+    };
+    logClient("info", "consent_required_block", {
+      scope: consentScope,
+      blockedStep: nextStep
+    });
+    logClient("info", "consent_prompted", {
+      scope: consentScope,
+      blockedStep: nextStep
+    });
+    if (state.flowStep !== consentStep) {
+      transitionTo(consentStep, {}, { pushHistory: true, enforceContract: false });
+    } else {
+      renderStep(consentStep);
+    }
     return;
   }
 
@@ -4255,6 +4868,7 @@ function transitionTo(nextStep, patchContext = {}, { pushHistory = true, enforce
   state.flowStep = nextStep;
   trackSlaTransition(nextStep);
   logClient("info", "flow_transition", { from: prev, to: nextStep, patchContext });
+  void triggerPostIntakeAutomation({ source: `transition:${prev}->${nextStep}` });
   renderStep(nextStep);
 }
 
@@ -4592,6 +5206,27 @@ function getPreferredPrefilledAddress(context = state.context) {
   );
 }
 
+function hasCompleteNewOnboardingProfile(context = state.context) {
+  const onboarding = context.newOnboarding || {};
+  return Boolean(onboarding.fullName && onboarding.email && onboarding.phone);
+}
+
+function extractCanadianPostalCode(text = "") {
+  const match = String(text || "").toUpperCase().match(/[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z][ -]?\d[ABCEGHJ-NPRSTV-Z]\d/);
+  if (!match) return "";
+  return match[0].replace(/\s+/g, "");
+}
+
+function isValidFutureOrTodayDate(raw = "") {
+  const value = String(raw || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return false;
+  const today = new Date();
+  const floorToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return parsed >= floorToday;
+}
+
 function presentCrossSellChoices() {
   const options =
     state.context.salesProfile.crossSellOptions?.length > 0
@@ -4625,7 +5260,7 @@ function routeToCrossSellCategory(category) {
       applyContextPatch({ salesProfile: { byodChoice, phoneBrand: phonePreference ? "other" : null, phonePreference } });
       routeToCrossSellCategory("mobility");
     });
-    return true;
+    return false;
   }
   if (category === "mobility" && state.context.salesProfile.byodChoice === "new_device" && !state.context.salesProfile.phoneBrand) {
     postMessage("bot", "Which phone brand do you prefer?");
@@ -4635,7 +5270,7 @@ function routeToCrossSellCategory(category) {
       applyContextPatch({ salesProfile: { phoneBrand, phonePreference: choice } });
       routeToCrossSellCategory("mobility");
     });
-    return true;
+    return false;
   }
   if (category === "landline" && !state.context.salesProfile.linePreference) {
     postMessage("bot", "Before I show landline offers, do you need a new line or do you want to keep your existing number?");
@@ -4645,7 +5280,7 @@ function routeToCrossSellCategory(category) {
       applyContextPatch({ salesProfile: { linePreference } });
       routeToCrossSellCategory("landline");
     });
-    return true;
+    return false;
   }
   if (category === "landline" && !state.context.salesProfile.callingPlan) {
     postMessage("bot", "For landline, do you prefer local calling or international minutes?");
@@ -4654,7 +5289,11 @@ function routeToCrossSellCategory(category) {
       applyContextPatch({ salesProfile: { callingPlan: choice } });
       routeToCrossSellCategory("landline");
     });
-    return true;
+    return false;
+  }
+  if (category === "landline" && state.context.salesProfile.linePreference === "keep_existing" && !state.context.salesProfile.portingDate) {
+    transitionTo(FLOW_STEPS.LANDLINE_PORTING_DATE, { activeTask: "sales" }, { pushHistory: true, enforceContract: false });
+    return false;
   }
   applyContextPatch({
     salesProfile: {
@@ -4715,13 +5354,16 @@ function handleOfferContinuationChoice(choice) {
     return true;
   }
   if (normalized.includes("add mobility") || normalized.includes("mobility")) {
-    return routeToCrossSellCategory("mobility");
+    routeToCrossSellCategory("mobility");
+    return true;
   }
   if (normalized.includes("add internet") || normalized.includes("home internet") || normalized.includes("internet")) {
-    return routeToCrossSellCategory("home internet");
+    routeToCrossSellCategory("home internet");
+    return true;
   }
   if (normalized.includes("add landline") || normalized.includes("landline") || normalized.includes("home phone")) {
-    return routeToCrossSellCategory("landline");
+    routeToCrossSellCategory("landline");
+    return true;
   }
   return false;
 }
@@ -4788,6 +5430,21 @@ async function detectIntent(message) {
     });
     if (!response.ok) throw new Error("intent endpoint failed");
     const payload = await response.json();
+    if (payload?.safetyAction === "block") {
+      logClient("error", "safety_input_blocked", {
+        endpoint: "/api/intent",
+        policyCategory: payload.policyCategory || null
+      });
+      logClient("info", "safety_fallback_triggered", {
+        endpoint: "/api/intent",
+        mode: payload.mode || "safety_block"
+      });
+    } else if (payload?.safetyAction === "warn") {
+      logClient("info", "safety_policy_violation_detected", {
+        endpoint: "/api/intent",
+        policyCategory: payload.policyCategory || null
+      });
+    }
     if (payload.mode) {
       logClient("info", "llm_mode", {
         mode: payload.mode,
@@ -4898,6 +5555,7 @@ function routeHelpdeskSelection(choice, { pushHistory = true } = {}) {
         phonePreference: null,
         linePreference: null,
         callingPlan: null,
+        portingDate: null,
         bundleSize: null,
         stage: null,
         awaitingOfferContinuation: false,
@@ -5007,6 +5665,14 @@ function routeAfterSalesClarification({ pushHistory = true } = {}) {
       return;
     }
     transitionTo(FLOW_STEPS.INTERNET_PLAN_PITCH, { activeTask: "sales" }, { pushHistory, enforceContract: false });
+    return;
+  }
+  if (
+    state.context.intent === "landline" &&
+    state.context.salesProfile?.linePreference === "keep_existing" &&
+    !state.context.salesProfile?.portingDate
+  ) {
+    transitionTo(FLOW_STEPS.LANDLINE_PORTING_DATE, { activeTask: "sales" }, { pushHistory, enforceContract: false });
     return;
   }
   if (canAccessOfferBrowse(state.context)) {
@@ -5608,10 +6274,11 @@ function runEligibilityCheck() {
 }
 
 async function lookupAddresses(query) {
+  const postalCodeHint = getAddressLookupPostalHint(state.context);
   const response = await fetch("/api/address-lookup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, areaCode: state.context.areaCode })
+    body: JSON.stringify({ query, areaCode: state.context.areaCode, postalCodeHint })
   });
   if (!response.ok) throw new Error("address lookup failed");
   return response.json();
@@ -5641,7 +6308,43 @@ function renderAddressTypeaheadSuggestions(suggestions = []) {
   addressTypeahead.classList.remove("hidden");
 }
 
+function renderPostalCodeTypeaheadSuggestions(suggestions = []) {
+  if (!addressTypeahead) return;
+  addressTypeahead.innerHTML = "";
+  if (!Array.isArray(suggestions) || suggestions.length === 0) {
+    addressTypeahead.classList.add("hidden");
+    return;
+  }
+
+  suggestions.slice(0, 5).forEach((postalCode) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = postalCode;
+    button.addEventListener("click", () => {
+      chatInput.value = postalCode;
+      clearAddressTypeahead();
+      chatInput.focus();
+    });
+    addressTypeahead.appendChild(button);
+  });
+  addressTypeahead.classList.remove("hidden");
+}
+
 function queueAddressTypeahead(query) {
+  if (isPostalCodeTypeaheadStep(state.flowStep)) {
+    resetAddressTypeaheadTimer();
+    const normalizedQuery = normalizePostalCodeInput(query);
+    if (!normalizedQuery) {
+      clearAddressTypeahead();
+      return;
+    }
+    state.addressTypeaheadTimer = setTimeout(() => {
+      const suggestions = getPostalCodeTypeaheadSuggestions(normalizedQuery, state.context);
+      renderPostalCodeTypeaheadSuggestions(suggestions);
+    }, 120);
+    return;
+  }
+
   if (!isAddressTypeaheadStep(state.flowStep)) {
     clearAddressTypeahead();
     return;
@@ -5905,11 +6608,11 @@ function renderStep(step) {
   if (!canInvokeQuoteBuilder()) {
     state.quotePanelPinned = false;
   }
-  if (!isAddressTypeaheadStep(step)) {
+  if (!isInputTypeaheadStep(step)) {
     clearAddressTypeahead();
-    if (state.context.addressTypeaheadSelection?.step || state.context.addressTypeaheadSelection?.label) {
-      clearAddressTypeaheadSelection();
-    }
+  }
+  if (!isAddressTypeaheadStep(step) && (state.context.addressTypeaheadSelection?.step || state.context.addressTypeaheadSelection?.label)) {
+    clearAddressTypeaheadSelection();
   }
   if (state.quotePanelPinned && canInvokeQuoteBuilder()) {
     setPanelFocus("quote");
@@ -6044,6 +6747,67 @@ function renderStep(step) {
       });
       break;
 
+    case FLOW_STEPS.CONSENT_PROFILE:
+      postMessage("bot", "Before we continue, may I use your profile details for account setup and personalization?");
+      showChoiceButtons(["I agree", "Decline"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "I agree") {
+          recordConsentDecision("profile", "granted", "quick_action");
+          resumePendingConsentTransition();
+          return;
+        }
+        recordConsentDecision("profile", "declined", "quick_action");
+        postMessage("bot", "Understood. I can still help you browse offers without account setup.");
+        showChoiceButtons(["Browse offers without account", "Return to service menu"], (followUp) => {
+          postMessage("user", followUp);
+          if (followUp === "Browse offers without account") {
+            transitionTo(
+              FLOW_STEPS.HELPDESK_ENTRY,
+              {
+                customerType: "guest",
+                authUser: null,
+                authMeta: { mode: null, phone: null, email: null, secureRef: null }
+              },
+              { pushHistory: true, enforceContract: false }
+            );
+            return;
+          }
+          transitionTo(FLOW_STEPS.HELPDESK_ENTRY, {}, { pushHistory: true, enforceContract: false });
+        });
+      });
+      break;
+
+    case FLOW_STEPS.CONSENT_PAYMENT:
+      postMessage("bot", "To continue checkout, may I use your payment details for secure payment processing?");
+      showChoiceButtons(["I agree", "Decline"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "I agree") {
+          recordConsentDecision("payment", "granted", "quick_action");
+          resumePendingConsentTransition();
+          return;
+        }
+        recordConsentDecision("payment", "declined", "quick_action");
+        postMessage("bot", "No problem. Checkout is paused. You can continue browsing or save your quote.");
+        transitionTo(FLOW_STEPS.CHECKOUT_INTENT_PROMPT, {}, { pushHistory: true, enforceContract: false });
+      });
+      break;
+
+    case FLOW_STEPS.CONSENT_EXPORT:
+      postMessage("bot", "Can I use this session data to generate your export or agent handoff summary?");
+      showChoiceButtons(["I agree", "Decline"], (choice) => {
+        postMessage("user", choice);
+        if (choice === "I agree") {
+          recordConsentDecision("export", "granted", "quick_action");
+          resumePendingExportAction();
+          return;
+        }
+        recordConsentDecision("export", "declined", "quick_action");
+        postMessage("bot", "Understood. I canceled the export request.");
+        state.pendingExportAction = null;
+        transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
+      });
+      break;
+
     case FLOW_STEPS.SERVICE_SELECTION:
       postMessage("bot", "What service are you looking for today?");
       showChoiceButtons(["Internet", "Mobility", "Landline"], (choice) => {
@@ -6106,6 +6870,7 @@ function renderStep(step) {
             phonePreference: null,
             linePreference: null,
             callingPlan: null,
+            portingDate: null,
             bundleSize: null,
             stage: null,
             awaitingOfferContinuation: false,
@@ -6249,7 +7014,7 @@ function renderStep(step) {
           applyContextPatch({ basket });
           renderBasket();
         }
-        if (state.context.customerType === "new") {
+        if (state.context.customerType === "new" && !hasCompleteNewOnboardingProfile(state.context)) {
           transitionTo(FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE, {}, { pushHistory: true });
           return;
         }
@@ -6296,8 +7061,10 @@ function renderStep(step) {
             postMessage("bot", "Please choose checkout, one of the add-on services shown, or no thanks.");
             return;
           }
-          routeToCrossSellCategory(chosenCategory);
-          transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+          const ready = routeToCrossSellCategory(chosenCategory);
+          if (ready) {
+            transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+          }
         });
       }
       break;
@@ -6325,7 +7092,58 @@ function renderStep(step) {
       break;
 
     case FLOW_STEPS.PAYMENT_CARD_POSTAL:
-      postMessage("bot", "Enter your Canadian billing postal code (example: M5V 2T6).");
+      {
+        const suggestedPostal = extractCanadianPostalCode(resolveServiceAddress(state.context) || "");
+        const formattedPostal =
+          suggestedPostal && suggestedPostal.length === 6
+            ? `${suggestedPostal.slice(0, 3)} ${suggestedPostal.slice(3)}`
+            : suggestedPostal;
+        const promptMode =
+          state.context.paymentDraft.postalPromptMode ||
+          (suggestedPostal ? "ask_reuse" : "manual");
+        if (
+          promptMode !== state.context.paymentDraft.postalPromptMode ||
+          suggestedPostal !== (state.context.paymentDraft.suggestedPostal || "")
+        ) {
+          applyContextPatch({
+            paymentDraft: {
+              suggestedPostal: suggestedPostal || null,
+              postalPromptMode: promptMode
+            }
+          });
+        }
+        if (suggestedPostal && promptMode !== "manual") {
+          postMessage("bot", `Would you like to reuse ${formattedPostal} from your service address for billing?`);
+          setChatInputHint("Reply yes or no, or enter a different postal code");
+          showChoiceButtons(
+            ["Yes, use service address postal code", "No, I will enter a different postal code"],
+            (choice) => {
+              postMessage("user", choice);
+              if (choice.startsWith("Yes")) {
+                applyContextPatch({
+                  paymentDraft: {
+                    postal: suggestedPostal,
+                    postalValidated: true,
+                    postalPromptMode: "manual"
+                  }
+                });
+                transitionTo(FLOW_STEPS.PAYMENT_CARD_CONFIRM, {}, { pushHistory: true, enforceContract: false });
+                return;
+              }
+              applyContextPatch({
+                paymentDraft: {
+                  postalPromptMode: "manual"
+                }
+              });
+              clearQuickActions();
+              postMessage("bot", "No problem. Enter your Canadian billing postal code (example: M5V 2T6). I can suggest matches as you type.");
+              setChatInputHint("Canadian postal code");
+            }
+          );
+          break;
+        }
+      }
+      postMessage("bot", "Enter your Canadian billing postal code (example: M5V 2T6). I can suggest matches as you type.");
       setChatInputHint("Canadian postal code");
       break;
 
@@ -6662,10 +7480,20 @@ function renderStep(step) {
       showChoiceButtons(["Local calling", "International minutes"], (choice) => {
         postMessage("user", choice);
         applyContextPatch({ salesProfile: { callingPlan: choice } });
+        if (state.context.salesProfile.linePreference === "keep_existing" && !state.context.salesProfile.portingDate) {
+          transitionTo(FLOW_STEPS.LANDLINE_PORTING_DATE, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
         routeAfterSalesClarification({ pushHistory: true });
       });
       break;
     }
+
+    case FLOW_STEPS.LANDLINE_PORTING_DATE:
+      postMessage("bot", "To keep your existing number, what porting date should we use? Please enter YYYY-MM-DD.");
+      postMessage("bot", "Your line installation can happen on the same day as your porting date.");
+      setChatInputHint("YYYY-MM-DD");
+      break;
 
     case FLOW_STEPS.OFFER_BROWSE:
       hideAvailabilityCard();
@@ -7141,6 +7969,9 @@ function renderStep(step) {
     default:
       break;
   }
+  setTimeout(() => {
+    focusFirstActionableControl();
+  }, 0);
 }
 
 function normalizeCommand(text = "") {
@@ -7154,6 +7985,11 @@ function handleGlobalCommands(message) {
 
   if (cmd.includes("export transcript") || cmd.includes("download transcript")) {
     void exportTranscript();
+    return true;
+  }
+
+  if (cmd.includes("find nearby store") || cmd.includes("nearby stores") || cmd.includes("store finder")) {
+    void openStoreFinderPanel();
     return true;
   }
 
@@ -7424,6 +8260,58 @@ async function handleChatInput(message) {
       handleUnclearInput(message, "Please choose new client or existing client.");
       return;
 
+    case FLOW_STEPS.CONSENT_PROFILE:
+      if (/(agree|yes|allow|consent)/i.test(lower)) {
+        recordConsentDecision("profile", "granted", "chat_input");
+        resumePendingConsentTransition();
+        return;
+      }
+      if (/(decline|no|deny|do not)/i.test(lower)) {
+        recordConsentDecision("profile", "declined", "chat_input");
+        postMessage("bot", "Understood. I can still help you browse offers without account setup.");
+        transitionTo(
+          FLOW_STEPS.HELPDESK_ENTRY,
+          {
+            customerType: "guest",
+            authUser: null
+          },
+          { pushHistory: true, enforceContract: false }
+        );
+        return;
+      }
+      handleUnclearInput(message, "Please reply with 'I agree' or 'Decline'.");
+      return;
+
+    case FLOW_STEPS.CONSENT_PAYMENT:
+      if (/(agree|yes|allow|consent)/i.test(lower)) {
+        recordConsentDecision("payment", "granted", "chat_input");
+        resumePendingConsentTransition();
+        return;
+      }
+      if (/(decline|no|deny|do not)/i.test(lower)) {
+        recordConsentDecision("payment", "declined", "chat_input");
+        transitionTo(FLOW_STEPS.CHECKOUT_INTENT_PROMPT, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      handleUnclearInput(message, "Please reply with 'I agree' or 'Decline'.");
+      return;
+
+    case FLOW_STEPS.CONSENT_EXPORT:
+      if (/(agree|yes|allow|consent)/i.test(lower)) {
+        recordConsentDecision("export", "granted", "chat_input");
+        resumePendingExportAction();
+        return;
+      }
+      if (/(decline|no|deny|do not)/i.test(lower)) {
+        recordConsentDecision("export", "declined", "chat_input");
+        state.pendingExportAction = null;
+        postMessage("bot", "Export canceled.");
+        transitionTo(FLOW_STEPS.ORDER_CONFIRMED, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
+      handleUnclearInput(message, "Please reply with 'I agree' or 'Decline'.");
+      return;
+
     case FLOW_STEPS.SERVICE_SELECTION:
       // Close any open quote panel so the new service starts fresh.
       state.quotePanelPinned = false;
@@ -7484,6 +8372,7 @@ async function handleChatInput(message) {
             phonePreference: null,
             linePreference: null,
             callingPlan: null,
+            portingDate: null,
             bundleSize: null,
             stage: null,
             awaitingOfferContinuation: false,
@@ -7524,6 +8413,7 @@ async function handleChatInput(message) {
             phonePreference: null,
             linePreference: null,
             callingPlan: null,
+            portingDate: null,
             bundleSize: null,
             stage: null,
             awaitingOfferContinuation: false,
@@ -7712,7 +8602,7 @@ async function handleChatInput(message) {
         renderBasket();
         announceDiscountQualification(previousCount, basket.length);
       }
-      if (state.context.customerType === "new") {
+      if (state.context.customerType === "new" && !hasCompleteNewOnboardingProfile(state.context)) {
         transitionTo(FLOW_STEPS.NEW_ONBOARD_COMBINED_CAPTURE, {}, { pushHistory: true });
         return;
       }
@@ -7764,8 +8654,10 @@ async function handleChatInput(message) {
           postMessage("bot", "Mobility is already in your basket. You can checkout now or add another available service.");
           return;
         }
-        routeToCrossSellCategory("mobility");
-        transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+        const ready = routeToCrossSellCategory("mobility");
+        if (ready) {
+          transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+        }
         return;
       }
       if (lower.includes("internet")) {
@@ -7773,8 +8665,10 @@ async function handleChatInput(message) {
           postMessage("bot", "You already selected an internet product. You can add mobility or landline, or proceed to checkout.");
           return;
         }
-        routeToCrossSellCategory("home internet");
-        transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+        const ready = routeToCrossSellCategory("home internet");
+        if (ready) {
+          transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+        }
         return;
       }
       if (lower.includes("landline") || lower.includes("home phone")) {
@@ -7782,8 +8676,10 @@ async function handleChatInput(message) {
           postMessage("bot", "Landline is already in your basket. You can checkout now or add another available service.");
           return;
         }
-        routeToCrossSellCategory("landline");
-        transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+        const ready = routeToCrossSellCategory("landline");
+        if (ready) {
+          transitionTo(FLOW_STEPS.OFFER_BROWSE, {}, { pushHistory: true, enforceContract: false });
+        }
         return;
       }
       if (lower.includes("no") || lower.includes("not now")) {
@@ -7828,16 +8724,44 @@ async function handleChatInput(message) {
       }
       applyContextPatch({
         paymentDraft: {
-          cvc: cvcDigits,
           cvcValidated: true
         }
+      });
+      logClient("info", "payment_sensitive_field_suppressed", {
+        field: "cvc",
+        retention: "not_persisted"
       });
       transitionTo(FLOW_STEPS.PAYMENT_CARD_POSTAL, {}, { pushHistory: true, enforceContract: false });
       return;
     }
 
     case FLOW_STEPS.PAYMENT_CARD_POSTAL: {
+      const suggestedPostal = state.context.paymentDraft.suggestedPostal || extractCanadianPostalCode(resolveServiceAddress(state.context) || "");
       const normalizedPostal = trimmed.toUpperCase().replace(/\s+/g, "");
+      if (suggestedPostal && state.context.paymentDraft.postalPromptMode !== "manual") {
+        if (/(^y$|^yes$|reuse|use same|same postal)/i.test(lower)) {
+          applyContextPatch({
+            paymentDraft: {
+              postal: suggestedPostal,
+              postalValidated: true,
+              postalPromptMode: "manual"
+            }
+          });
+          transitionTo(FLOW_STEPS.PAYMENT_CARD_CONFIRM, {}, { pushHistory: true, enforceContract: false });
+          return;
+        }
+        if (/(^n$|^no$|different|new postal|enter)/i.test(lower)) {
+          applyContextPatch({
+            paymentDraft: {
+              postalPromptMode: "manual"
+            }
+          });
+          clearQuickActions();
+          postMessage("bot", "Okay. Enter your Canadian billing postal code (example: M5V 2T6). I can suggest matches as you type.");
+          setChatInputHint("Canadian postal code");
+          return;
+        }
+      }
       if (!isValidCanadianPostalCode(normalizedPostal)) {
         postMessage("bot", "Please enter a valid Canadian postal code (example: M5V 2T6).");
         return;
@@ -7845,7 +8769,8 @@ async function handleChatInput(message) {
       applyContextPatch({
         paymentDraft: {
           postal: normalizedPostal,
-          postalValidated: true
+          postalValidated: true,
+          postalPromptMode: "manual"
         }
       });
       transitionTo(FLOW_STEPS.PAYMENT_CARD_CONFIRM, {}, { pushHistory: true, enforceContract: false });
@@ -8232,18 +9157,8 @@ async function handleChatInput(message) {
     }
 
     case FLOW_STEPS.INTENT_DISCOVERY: {
-      const deterministicIntent = parseSalesIntentDeterministic(trimmed);
-      const detected = deterministicIntent
-        ? { intent: deterministicIntent, confidence: 1, entities: {}, mode: "deterministic", fallbackUsed: false }
-        : await detectIntent(trimmed);
-      if (deterministicIntent) {
-        logClient("info", "llm_mode", {
-          mode: "deterministic",
-          confidence: 1,
-          intent: deterministicIntent
-        });
-      }
-      const intent = detected?.intent;
+      const detected = await detectIntent(trimmed);
+      const intent = detected?.intent || detectIntentFallback(trimmed);
       if (!intent) {
         handleUnclearInput(message, "Please tell me if you want mobility, home internet, landline, or bundle.");
         return;
@@ -8365,9 +9280,24 @@ async function handleChatInput(message) {
         return;
       }
       applyContextPatch({ salesProfile: { callingPlan: canonicalInput } });
+      if (state.context.salesProfile.linePreference === "keep_existing" && !state.context.salesProfile.portingDate) {
+        transitionTo(FLOW_STEPS.LANDLINE_PORTING_DATE, {}, { pushHistory: true, enforceContract: false });
+        return;
+      }
       routeAfterSalesClarification({ pushHistory: true });
       return;
     
+
+    case FLOW_STEPS.LANDLINE_PORTING_DATE:
+      if (!isValidFutureOrTodayDate(trimmed)) {
+        handleUnclearInput(message, "Please provide a valid porting date in YYYY-MM-DD format.");
+        return;
+      }
+      applyContextPatch({ salesProfile: { portingDate: trimmed } });
+      postMessage("bot", `Perfect. We will plan installation for the same day: ${trimmed}.`);
+      routeAfterSalesClarification({ pushHistory: true });
+      return;
+
 
     case FLOW_STEPS.OFFER_BROWSE:
       if (state.context.salesProfile.awaitingOfferContinuation) {
@@ -8896,11 +9826,65 @@ async function handleChatInput(message) {
 function openChatWidget() {
   chatWidget.classList.remove("hidden");
   void refreshLlmStatus({ silent: true });
+  maybeStartWalkthrough();
 }
 
 function closeChatWidget() {
   chatWidget.classList.add("hidden");
-  chatMenu.classList.add("hidden");
+  setChatMenuOpen(false);
+  if (privacyPanel) privacyPanel.classList.add("hidden");
+  if (aiAboutPanel) aiAboutPanel.classList.add("hidden");
+  state.walkthrough?.teardown?.();
+}
+
+function setChatMenuOpen(open) {
+  if (!chatMenu || !chatMenuBtn) return;
+  chatMenu.classList.toggle("hidden", !open);
+  chatMenuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    const firstItem = chatMenu.querySelector("button");
+    firstItem?.focus();
+  }
+}
+
+function renderPrivacyPanel() {
+  if (!privacyConsentList) return;
+  const consent = state.context.consent || {};
+  const rows = [
+    ["Profile consent", consent.profile?.status || "pending"],
+    ["Payment consent", consent.payment?.status || "pending"],
+    ["Export consent", consent.export?.status || "pending"]
+  ];
+  privacyConsentList.innerHTML = rows
+    .map(([label, status]) => `<li><strong>${label}:</strong> ${status}</li>`)
+    .join("");
+}
+
+function openPrivacyPanel() {
+  if (!privacyPanel) return;
+  renderPrivacyPanel();
+  privacyPanel.classList.remove("hidden");
+  aiAboutPanel?.classList.add("hidden");
+  setChatMenuOpen(false);
+  privacyPanelClose?.focus();
+}
+
+function openAboutAiPanel() {
+  if (!aiAboutPanel) return;
+  aiAboutPanel.classList.remove("hidden");
+  privacyPanel?.classList.add("hidden");
+  setChatMenuOpen(false);
+  aiAboutClose?.focus();
+}
+
+function closePanelsAndRestoreFocus() {
+  const hadOpenPanel = Boolean((privacyPanel && !privacyPanel.classList.contains("hidden")) || (aiAboutPanel && !aiAboutPanel.classList.contains("hidden")));
+  privacyPanel?.classList.add("hidden");
+  aiAboutPanel?.classList.add("hidden");
+  if (hadOpenPanel) {
+    chatMenuBtn?.focus();
+    logClient("info", "a11y_focus_recovered", { source: "panel_close" });
+  }
 }
 
 function startConversation({ skipConnecting = false } = {}) {
@@ -8953,6 +9937,61 @@ function endChat() {
   state.chatStarted = false;
   clearOfflineDraft();
   logClient("info", "session_wiped", { closeWidget: true, restart: false });
+}
+
+function isWalkthroughBlockedStep(step = state.flowStep) {
+  const value = String(step || "").toUpperCase();
+  return value.includes("PAYMENT") || value.includes("CHECKOUT") || value.includes("SHIPPING");
+}
+
+function ensureWalkthroughController() {
+  if (state.walkthrough) return state.walkthrough;
+  state.walkthrough = createWalkthroughController({
+    targets: [
+      {
+        selector: "#language-switcher",
+        title: "Language Controls",
+        body: "Switch conversation language at any point."
+      },
+      {
+        selector: "#chat-input",
+        title: "Chat Input",
+        body: "Type requests naturally. The assistant keeps deterministic flow control."
+      },
+      {
+        selector: "#panel-quote",
+        title: "Quote Builder",
+        body: "Use Guided Quote Builder to compare ranked offers."
+      },
+      {
+        selector: "#export-transcript-btn",
+        title: "Transcript Export",
+        body: "Export transcript and structured summary for handoff."
+      }
+    ],
+    isBlockedStep: () => isWalkthroughBlockedStep(state.flowStep),
+    onStart: () => logClient("info", "walkthrough_started"),
+    onFinish: () => logClient("info", "walkthrough_completed"),
+    onSkip: () => logClient("info", "walkthrough_skipped")
+  });
+  return state.walkthrough;
+}
+
+function maybeStartWalkthrough() {
+  const controller = ensureWalkthroughController();
+  if (!controller.shouldAutoStart()) return;
+  const result = controller.start();
+  if (result.started) {
+    logClient("info", "walkthrough_shown", { reason: result.reason });
+  }
+}
+
+function replayWalkthrough() {
+  const controller = ensureWalkthroughController();
+  const result = controller.replay();
+  if (!result.started) {
+    postMessage("bot", "Walkthrough is unavailable in the current step. Try again from an earlier step.");
+  }
 }
 
 function setInstallPromptAvailable(installable) {
@@ -9163,11 +10202,20 @@ carouselNextBtn.addEventListener("click", () => {
 });
 
 chatMenuBtn.addEventListener("click", () => {
-  chatMenu.classList.toggle("hidden");
+  const opening = chatMenu.classList.contains("hidden");
+  setChatMenuOpen(opening);
+});
+
+document.addEventListener("click", (event) => {
+  if (!chatMenu || !chatMenuBtn) return;
+  if (chatMenu.classList.contains("hidden")) return;
+  const target = event.target;
+  if (chatMenu.contains(target) || chatMenuBtn.contains(target)) return;
+  setChatMenuOpen(false);
 });
 
 muteChatBtn.addEventListener("click", () => {
-  chatMenu.classList.add("hidden");
+  setChatMenuOpen(false);
   state.muted = !state.muted;
   muteChatBtn.textContent = state.muted ? "Unmute Chat" : "Mute Chat";
   postMessage("bot", state.muted ? "Chat muted." : "Chat unmuted.", { force: true });
@@ -9175,8 +10223,22 @@ muteChatBtn.addEventListener("click", () => {
 
 if (exportTranscriptBtn) {
   exportTranscriptBtn.addEventListener("click", () => {
-    chatMenu.classList.add("hidden");
+    setChatMenuOpen(false);
     void exportTranscript();
+  });
+}
+
+if (storeFinderBtn) {
+  storeFinderBtn.addEventListener("click", () => {
+    setChatMenuOpen(false);
+    void openStoreFinderPanel();
+  });
+}
+
+if (replayWalkthroughBtn) {
+  replayWalkthroughBtn.addEventListener("click", () => {
+    setChatMenuOpen(false);
+    replayWalkthrough();
   });
 }
 
@@ -9186,13 +10248,46 @@ if (billDownloadBtn) {
   });
 }
 
+if (privacyControlsBtn) {
+  privacyControlsBtn.addEventListener("click", () => {
+    openPrivacyPanel();
+  });
+}
+
+if (aboutAiBtn) {
+  aboutAiBtn.addEventListener("click", () => {
+    openAboutAiPanel();
+  });
+}
+
+if (privacyPanelClose) {
+  privacyPanelClose.addEventListener("click", () => {
+    closePanelsAndRestoreFocus();
+    logClient("info", "a11y_modal_escape", { panel: "privacy" });
+  });
+}
+
+if (aiAboutClose) {
+  aiAboutClose.addEventListener("click", () => {
+    closePanelsAndRestoreFocus();
+    logClient("info", "a11y_modal_escape", { panel: "about_ai" });
+  });
+}
+
+if (withdrawConsentBtn) {
+  withdrawConsentBtn.addEventListener("click", () => {
+    closePanelsAndRestoreFocus();
+    withdrawConsentAndReset();
+  });
+}
+
 refreshChatBtn.addEventListener("click", () => {
-  chatMenu.classList.add("hidden");
+  setChatMenuOpen(false);
   refreshChat();
 });
 
 endChatBtn.addEventListener("click", () => {
-  chatMenu.classList.add("hidden");
+  setChatMenuOpen(false);
   endChat();
 });
 
@@ -9284,7 +10379,14 @@ chatForm.addEventListener("submit", async (event) => {
 });
 
 chatInput.addEventListener("input", () => {
-  const nextInput = chatInput.value;
+  let nextInput = chatInput.value;
+  if (state.flowStep === FLOW_STEPS.PAYMENT_CARD_POSTAL) {
+    const formattedPostal = formatPostalCodeInput(nextInput);
+    if (formattedPostal !== nextInput) {
+      chatInput.value = formattedPostal;
+    }
+    nextInput = chatInput.value;
+  }
   applyContextPatch({ offlineDraft: { input: nextInput } });
   saveOfflineDraft();
   if (isAddressTypeaheadStep(state.flowStep)) {
@@ -9296,12 +10398,79 @@ chatInput.addEventListener("input", () => {
       clearAddressTypeaheadSelection();
     }
   }
+  if (!isInputTypeaheadStep(state.flowStep)) {
+    clearAddressTypeahead();
+    return;
+  }
   queueAddressTypeahead(nextInput.trim());
 });
 
 chatInput.addEventListener("blur", () => {
   const t = setTimeout(() => clearAddressTypeahead(), 150);
   state.timers.push(t);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    const menuOpen = chatMenu && !chatMenu.classList.contains("hidden");
+    const privacyOpen = privacyPanel && !privacyPanel.classList.contains("hidden");
+    const aiOpen = aiAboutPanel && !aiAboutPanel.classList.contains("hidden");
+    if (menuOpen) {
+      setChatMenuOpen(false);
+      chatMenuBtn?.focus();
+      logClient("info", "a11y_modal_escape", { panel: "menu" });
+      return;
+    }
+    if (privacyOpen || aiOpen) {
+      closePanelsAndRestoreFocus();
+      logClient("info", "a11y_modal_escape", { panel: privacyOpen ? "privacy" : "about_ai" });
+      return;
+    }
+  }
+
+  if (event.key === "Tab" && chatMenu && !chatMenu.classList.contains("hidden")) {
+    const items = Array.from(chatMenu.querySelectorAll("button:not(:disabled)"));
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+      logClient("info", "a11y_keyboard_nav_used", { target: "chat_menu", direction: "backward" });
+      return;
+    }
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+      logClient("info", "a11y_keyboard_nav_used", { target: "chat_menu", direction: "forward" });
+      return;
+    }
+  }
+
+  const activeModal = privacyPanel && !privacyPanel.classList.contains("hidden")
+    ? privacyPanel
+    : aiAboutPanel && !aiAboutPanel.classList.contains("hidden")
+      ? aiAboutPanel
+      : null;
+  if (event.key === "Tab" && activeModal) {
+    const items = Array.from(activeModal.querySelectorAll("button:not(:disabled), a[href], input:not(:disabled)"));
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+      logClient("info", "a11y_keyboard_nav_used", { target: "modal", direction: "backward" });
+      return;
+    }
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+      logClient("info", "a11y_keyboard_nav_used", { target: "modal", direction: "forward" });
+    }
+  }
 });
 
 window.addEventListener("focus", () => {
@@ -9346,7 +10515,9 @@ window.addEventListener("appinstalled", () => {
 function boot() {
   const savedTheme = readStore(CHAT_THEME_STORE_KEY, { mode: "system" });
   resetSessionState();
+  ensureWalkthroughController();
   closeChatWidget();
+  renderPrivacyPanel();
   validateOfferCoverage();
   updateJourneyProgress(FLOW_STEPS.INIT_CONNECTING);
   applyTheme(savedTheme?.mode || "system", { persist: false });

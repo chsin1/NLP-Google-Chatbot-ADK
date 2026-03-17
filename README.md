@@ -66,21 +66,48 @@ Recommended folder: `assets/screenshots/`
 
 ```mermaid
 graph TD
-    UI["Web Chat UI (index.html + app.js)"]
+    BROWSER["User Browser"]
+    UI["Web Chat UI (index.html + app.js + styles.css)"]
     FSM["Deterministic FSM + Step Contracts"]
-    LLM["ChatGPT Assist Layer (optional)"]
-    API["Node Server (server.mjs)"]
-    LOGS["Event + Error + QA + LLM Usage Logs"]
+    QUOTE["Quote Builder + Checkout Validators"]
+    SHARED["Shared Deterministic Logic (shared/*.mjs)"]
+    API["Node API Server (server.mjs)"]
+    LLM["OpenAI Responses API (/api/intent, /api/chat-assist)"]
+    ADDR["Address Provider (mock / google / hybrid)"]
+    FALLBACK["Template Fallback Mode"]
+    EXPORT["Transcript/Handoff/Receipt Payloads"]
+    LOGS["Logs (events, errors, QA, LLM usage)"]
     METRICS["KPI/SLA Aggregator (/api/metrics)"]
 
+    BROWSER --> UI
     UI --> FSM
+    FSM --> QUOTE
+    FSM --> SHARED
     FSM --> API
-    FSM --> LLM
-    LLM --> API
+    API --> SHARED
+    API --> LLM
+    API --> ADDR
+    API -. degraded/disabled .-> FALLBACK
+    API --> EXPORT
     API --> LOGS
     LOGS --> METRICS
     METRICS --> UI
+
+    style BROWSER fill:#1d4ed8,color:#ffffff,stroke:#1e3a8a,stroke-width:1px
+    style UI fill:#2563eb,color:#ffffff,stroke:#1e3a8a,stroke-width:1px
+    style FSM fill:#16a34a,color:#ffffff,stroke:#14532d,stroke-width:1px
+    style QUOTE fill:#16a34a,color:#ffffff,stroke:#14532d,stroke-width:1px
+    style SHARED fill:#22c55e,color:#052e16,stroke:#166534,stroke-width:1px
+    style API fill:#0f766e,color:#ffffff,stroke:#134e4a,stroke-width:1px
+    style LLM fill:#dc2626,color:#ffffff,stroke:#7f1d1d,stroke-width:1px
+    style ADDR fill:#ea580c,color:#ffffff,stroke:#9a3412,stroke-width:1px
+    style FALLBACK fill:#f59e0b,color:#111827,stroke:#b45309,stroke-width:1px
+    style EXPORT fill:#64748b,color:#ffffff,stroke:#334155,stroke-width:1px
+    style LOGS fill:#475569,color:#ffffff,stroke:#1e293b,stroke-width:1px
+    style METRICS fill:#334155,color:#ffffff,stroke:#0f172a,stroke-width:1px
 ```
+
+**Color key:** Red = external AI calls, Green = deterministic business logic, Blue/Teal = app runtime path, Orange = provider/fallback controls, Slate = telemetry/export artifacts.
 
 ---
 

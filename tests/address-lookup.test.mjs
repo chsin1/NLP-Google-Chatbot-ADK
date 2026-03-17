@@ -4,6 +4,7 @@ import {
   TORONTO_BIAS_CENTER,
   TORONTO_BIAS_RADIUS_METERS,
   buildGoogleAutocompleteParams,
+  composeAddressLookupQuery,
   rankTorontoBiasedSuggestions,
   resolveAddressSuggestions
 } from "../shared/address-lookup-utils.mjs";
@@ -47,6 +48,13 @@ test("rankTorontoBiasedSuggestions ranks Toronto entries before non-Toronto", ()
   assert.equal(suggestions.length, 2);
   assert.equal(suggestions[0].id, "toronto_1");
   assert.equal(suggestions[0].city, "Toronto");
+});
+
+test("composeAddressLookupQuery appends postal hint once when missing", () => {
+  const composed = composeAddressLookupQuery("16 Yonge Street, Toronto, ON", "M5V2T6");
+  assert.equal(composed, "16 Yonge Street, Toronto, ON M5V 2T6");
+  const alreadyPresent = composeAddressLookupQuery("16 Yonge Street, Toronto, ON M5V 2T6", "M5V2T6");
+  assert.equal(alreadyPresent, "16 Yonge Street, Toronto, ON M5V 2T6");
 });
 
 test("resolveAddressSuggestions in google/hybrid mode returns empty when Google has no results", async () => {

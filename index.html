@@ -30,7 +30,7 @@
         <div class="brand-tools">
           <div id="llm-status-site" class="llm-status llm-offline llm-status-site">
             <span id="llm-status-dot-site" class="dot"></span>
-            <span id="llm-status-text-site">ChatGPT: Not configured</span>
+            <span id="llm-status-text-site">AI Assistant: Offline</span>
           </div>
           <div id="address-status-site" class="llm-status llm-offline llm-status-site">
             <span class="dot"></span>
@@ -183,12 +183,16 @@
         </div>
         <div class="chat-topbar-actions">
           <button id="bill-download-btn" class="bill-download-btn hidden" type="button">Bill available</button>
-          <button id="chat-menu-btn" class="chat-menu-btn" aria-label="Chat options">...</button>
-          <div id="chat-menu" class="chat-menu hidden">
-            <button id="mute-chat-btn" type="button">Mute Chat</button>
-            <button id="export-transcript-btn" type="button">Export Transcript</button>
-            <button id="refresh-chat-btn" type="button">Refresh</button>
-            <button id="end-chat-btn" type="button">End Chat</button>
+          <button id="chat-menu-btn" class="chat-menu-btn" aria-label="Chat options" aria-haspopup="menu" aria-expanded="false" aria-controls="chat-menu">...</button>
+          <div id="chat-menu" class="chat-menu hidden" role="menu" aria-label="Chat menu">
+            <button id="mute-chat-btn" type="button" role="menuitem">Mute Chat</button>
+            <button id="export-transcript-btn" type="button" role="menuitem">Export Transcript</button>
+            <button id="store-finder-btn" type="button" role="menuitem">Find Nearby Stores</button>
+            <button id="replay-walkthrough-btn" type="button" role="menuitem">Replay Walkthrough</button>
+            <button id="privacy-controls-btn" type="button" role="menuitem">Privacy</button>
+            <button id="about-ai-btn" type="button" role="menuitem">About AI</button>
+            <button id="refresh-chat-btn" type="button" role="menuitem">Refresh</button>
+            <button id="end-chat-btn" type="button" role="menuitem">End Chat</button>
           </div>
           <button id="close-chat" class="close-chat" aria-label="Minimize chat">-</button>
         </div>
@@ -199,6 +203,9 @@
           <div id="chat-window" class="chat-window"></div>
           <div id="journey-progress" class="journey-progress"></div>
           <div id="quick-actions" class="quick-actions"></div>
+          <div class="quote-toggle-wrap">
+            <button id="quote-toggle-btn" type="button" class="secondary">Guided Quote Builder</button>
+          </div>
           <section id="availability-card" class="availability-card hidden">
             <div class="availability-head">
               <div class="availability-title">Check availability</div>
@@ -236,6 +243,7 @@
           </form>
           <div id="address-typeahead" class="address-typeahead hidden"></div>
           <div class="session-status" id="session-status">Session: not authenticated</div>
+          <div id="chat-live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
         </section>
 
         <section class="assistant-panels">
@@ -273,8 +281,34 @@
             <h3>Installation Calendar</h3>
             <div id="booking-calendar-content" class="booking-calendar-content"></div>
           </div>
+
+          <div id="panel-finder" class="panel-card hidden">
+            <h3>Nearby Stores</h3>
+            <div id="finder-results-content" class="finder-results-content">
+              <p class="small">Use "Find Nearby Stores" from the chat menu to load results.</p>
+            </div>
+          </div>
         </section>
       </div>
+
+      <section id="privacy-panel" class="chat-modal hidden" role="dialog" aria-modal="true" aria-labelledby="privacy-panel-title">
+        <header>
+          <h3 id="privacy-panel-title">Privacy Controls</h3>
+          <button id="privacy-panel-close" type="button" class="secondary">Close</button>
+        </header>
+        <p>This panel shows what consent is active and lets you withdraw profile/payment/export consent.</p>
+        <ul id="privacy-consent-list" class="privacy-consent-list"></ul>
+        <button id="withdraw-consent-btn" type="button" class="secondary danger">Withdraw Consent and Reset PII</button>
+      </section>
+
+      <section id="ai-about-panel" class="chat-modal hidden" role="dialog" aria-modal="true" aria-labelledby="ai-about-title">
+        <header>
+          <h3 id="ai-about-title">About AI Assistant</h3>
+          <button id="ai-about-close" type="button" class="secondary">Close</button>
+        </header>
+        <p>AI helps with conversational fluency, intent understanding, recommendation explanation, and multilingual phrasing.</p>
+        <p>AI does not decide exact pricing, promo eligibility, credit outcomes, inventory truth, billing balances, order confirmation, or payment execution.</p>
+      </section>
     </section>
 
     <script type="module" src="./app.js"></script>

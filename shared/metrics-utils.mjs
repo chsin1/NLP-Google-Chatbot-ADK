@@ -149,6 +149,19 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
   let darkThemeChanged = 0;
   let pwaInstallPrompted = 0;
   let offlineDraftRestored = 0;
+  let consentPrompted = 0;
+  let consentGranted = 0;
+  let consentDeclined = 0;
+  let consentWithdrawn = 0;
+  let consentRequiredBlock = 0;
+  let piiRedacted = 0;
+  let paymentSensitiveSuppressed = 0;
+  let complianceBlockedPayload = 0;
+  let compliancePassedExport = 0;
+  let safetyInputBlocked = 0;
+  let safetyOutputBlocked = 0;
+  let safetyFallbackTriggered = 0;
+  let safetyPolicyViolationDetected = 0;
   let pathStartedCount = 0;
   let pathCompletedCount = 0;
   let pathFailedCount = 0;
@@ -387,6 +400,45 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
       case "offline_draft_restored":
         offlineDraftRestored += 1;
         break;
+      case "consent_prompted":
+        consentPrompted += 1;
+        break;
+      case "consent_granted":
+        consentGranted += 1;
+        break;
+      case "consent_declined":
+        consentDeclined += 1;
+        break;
+      case "consent_withdrawn":
+        consentWithdrawn += 1;
+        break;
+      case "consent_required_block":
+        consentRequiredBlock += 1;
+        break;
+      case "pii_redacted":
+        piiRedacted += 1;
+        break;
+      case "payment_sensitive_field_suppressed":
+        paymentSensitiveSuppressed += 1;
+        break;
+      case "compliance_blocked_payload":
+        complianceBlockedPayload += 1;
+        break;
+      case "compliance_passed_export":
+        compliancePassedExport += 1;
+        break;
+      case "safety_input_blocked":
+        safetyInputBlocked += 1;
+        break;
+      case "safety_output_blocked":
+        safetyOutputBlocked += 1;
+        break;
+      case "safety_fallback_triggered":
+        safetyFallbackTriggered += 1;
+        break;
+      case "safety_policy_violation_detected":
+        safetyPolicyViolationDetected += 1;
+        break;
       case "path_started":
         pathStartedCount += 1;
         routeBucket.pathStarted += 1;
@@ -504,6 +556,18 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
       case "sla_clarification_retry_breach":
         clarifyRetryBreaches += 1;
         markMonthlyBreach(entry.ts, "clarify_retry");
+        break;
+      case "compliance_blocked_payload":
+        complianceBlockedPayload += 1;
+        break;
+      case "safety_input_blocked":
+        safetyInputBlocked += 1;
+        break;
+      case "safety_output_blocked":
+        safetyOutputBlocked += 1;
+        break;
+      case "safety_policy_violation_detected":
+        safetyPolicyViolationDetected += 1;
         break;
       default:
         break;
@@ -715,6 +779,19 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
       darkThemeChangedCount: darkThemeChanged,
       pwaInstallPromptedCount: pwaInstallPrompted,
       offlineDraftRestoredCount: offlineDraftRestored,
+      consentPromptedCount: consentPrompted,
+      consentGrantedCount: consentGranted,
+      consentDeclinedCount: consentDeclined,
+      consentWithdrawnCount: consentWithdrawn,
+      consentRequiredBlockCount: consentRequiredBlock,
+      piiRedactedCount: piiRedacted,
+      paymentSensitiveFieldSuppressedCount: paymentSensitiveSuppressed,
+      complianceBlockedPayloadCount: complianceBlockedPayload,
+      compliancePassedExportCount: compliancePassedExport,
+      safetyInputBlockedCount: safetyInputBlocked,
+      safetyOutputBlockedCount: safetyOutputBlocked,
+      safetyFallbackTriggeredCount: safetyFallbackTriggered,
+      safetyPolicyViolationDetectedCount: safetyPolicyViolationDetected,
       pathStartedCount,
       pathCompletedCount,
       pathFailedCount,
@@ -758,6 +835,23 @@ export function buildMetrics(entries = [], errorEntries = [], qaEntries = [], op
       { key: "export_usage_rate", label: "Export Usage Rate (%)", value: exportUsageRatePercent },
       { key: "dark_mode_adoption", label: "Dark Mode Adoption (%)", value: darkModeAdoptionPercent }
     ],
+    complianceKpis: {
+      consentPrompted,
+      consentGranted,
+      consentDeclined,
+      consentWithdrawn,
+      consentRequiredBlock,
+      piiRedacted,
+      paymentSensitiveSuppressed,
+      complianceBlockedPayload,
+      compliancePassedExport
+    },
+    safetyKpis: {
+      safetyInputBlocked,
+      safetyOutputBlocked,
+      safetyFallbackTriggered,
+      safetyPolicyViolationDetected
+    },
     monthlySnapshots,
     sessionInteractions,
     sla: {

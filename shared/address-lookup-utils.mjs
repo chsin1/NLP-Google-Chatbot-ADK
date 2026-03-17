@@ -91,6 +91,21 @@ export function buildGoogleAutocompleteParams({ query = "", apiKey = "" } = {}) 
   });
 }
 
+export function composeAddressLookupQuery(query = "", postalCodeHint = "") {
+  const base = String(query || "").trim();
+  const hintCompact = String(postalCodeHint || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!base) return "";
+  if (hintCompact.length !== 6) return base;
+  const hintFormatted = `${hintCompact.slice(0, 3)} ${hintCompact.slice(3)}`;
+  const normalizedBase = normalizeAddressToken(base);
+  const normalizedHintCompact = normalizeAddressToken(hintCompact);
+  const normalizedHintFormatted = normalizeAddressToken(hintFormatted);
+  if (normalizedBase.includes(normalizedHintCompact) || normalizedBase.includes(normalizedHintFormatted)) {
+    return base;
+  }
+  return `${base} ${hintFormatted}`.trim();
+}
+
 export function mapGooglePredictionToSuggestion(prediction = {}) {
   const description = String(prediction.description || "").trim();
   const formatting = prediction.structured_formatting || {};
@@ -198,6 +213,7 @@ export async function lookupGoogleSuggestions({
 export async function resolveAddressSuggestions({
   query = "",
   areaCode = "",
+  postalCodeHint = "",
   provider = "mock",
   apiKey = "",
   fetchImpl = globalThis.fetch,
@@ -216,8 +232,9 @@ export async function resolveAddressSuggestions({
     return rankAddressSuggestions(query, areaCode);
   }
 
+  const effectiveQuery = composeAddressLookupQuery(query, postalCodeHint);
   const googleSuggestions = await lookupGoogleSuggestions({
-    query,
+    query: effectiveQuery,
     apiKey,
     fetchImpl,
     log
@@ -228,7 +245,7 @@ export async function resolveAddressSuggestions({
       event: "address_lookup_google_empty",
       details: {
         provider: normalizedProvider,
-        queryLength: String(query || "").trim().length
+        queryLength: String(effectiveQuery || "").trim().length
       }
     });
   }

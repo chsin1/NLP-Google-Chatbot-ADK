@@ -13,8 +13,12 @@ export function canProceed(step = "", context = {}) {
       return true;
     case "CUSTOMER_STATUS_SELECTION":
       return true;
+    case "CONSENT_PROFILE":
+    case "CONSENT_PAYMENT":
+    case "CONSENT_EXPORT":
+      return true;
     case "SERVICE_SELECTION":
-      return context.customerType === "new";
+      return context.customerType === "new" || context.customerType === "guest";
     case "EXISTING_AUTH_ENTRY":
       return context.customerType === "existing";
     case "EXISTING_AUTH_VALIDATE":
@@ -158,6 +162,10 @@ function canAccessOfferBrowse(context = {}) {
   const hasClarification = hasSalesClarification(context);
   if ((!hasAreaCode && !hasValidatedAddress) || !hasIntent || !hasClarification) return false;
 
+  if (context?.consent?.profile?.status === "declined") {
+    return true;
+  }
+
   // Service address is validated later in checkout eligibility flow.
   if (context.authUser) return true;
 
@@ -180,6 +188,10 @@ function hasSalesClarification(context = {}) {
     return Boolean(sales.phonePreference);
   }
   if (intent === "bundle") return Boolean(sales.bundleSize);
-  if (intent === "landline") return Boolean(sales.linePreference) && Boolean(sales.callingPlan);
+  if (intent === "landline") {
+    if (!sales.linePreference || !sales.callingPlan) return false;
+    if (sales.linePreference === "keep_existing") return Boolean(sales.portingDate);
+    return true;
+  }
   return false;
 }

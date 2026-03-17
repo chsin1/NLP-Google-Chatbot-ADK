@@ -54,6 +54,9 @@ test("forward path canProceed coverage for existing + checkout", () => {
   };
   assert.equal(canProceed("CUSTOMER_STATUS_SELECTION", ctx), true);
   assert.equal(canProceed("GREETING_CONVERSATIONAL", ctx), true);
+  assert.equal(canProceed("CONSENT_PROFILE", ctx), true);
+  assert.equal(canProceed("CONSENT_PAYMENT", ctx), true);
+  assert.equal(canProceed("CONSENT_EXPORT", ctx), true);
   assert.equal(canProceed("SERVICE_SELECTION", { ...ctx, customerType: "new" }), true);
   assert.equal(canProceed("EXISTING_AUTH_ENTRY", { ...ctx, customerType: "existing" }), true);
   assert.equal(canProceed("INTERNET_ADDRESS_REQUEST", ctx), true);
@@ -211,6 +214,22 @@ test("canProceed internet steps accept authUser.prefilledAddress when serviceAdd
     "INTERNET_AVAILABILITY_RESULT must fail when no address is available in any fallback slot");
   assert.equal(canProceed("INTERNET_PRIORITY_CAPTURE", ctxNoAddress), false,
     "INTERNET_PRIORITY_CAPTURE must fail when no address is available in any fallback slot");
+});
+
+test("offer browse allows guest browsing when profile consent is declined", () => {
+  const ctx = {
+    customerType: "guest",
+    areaCode: null,
+    serviceAddress: "16 Yonge Street, Toronto, ON",
+    serviceAddressValidated: true,
+    intent: "home internet",
+    internetPreference: "value",
+    salesProfile: { speedPriority: "Balanced value" },
+    consent: {
+      profile: { status: "declined" }
+    }
+  };
+  assert.equal(canProceed("OFFER_BROWSE", ctx), true);
 });
 
 test("canProceed falls back to newOnboarding.address and shipping.address when serviceAddress absent", () => {

@@ -233,6 +233,22 @@ test("canAccessOfferBrowse requires landline line preference", () => {
   assert.equal(canAccessOfferBrowse(context), true);
 });
 
+test("canAccessOfferBrowse allows guest path when profile consent is declined", () => {
+  const context = {
+    customerType: "guest",
+    areaCode: null,
+    serviceAddressValidated: true,
+    serviceAddress: "16 Yonge Street, Toronto, ON",
+    intent: "home internet",
+    internetPreference: "value",
+    salesProfile: { speedPriority: "Balanced value" },
+    consent: {
+      profile: { status: "declined" }
+    }
+  };
+  assert.equal(canAccessOfferBrowse(context), true);
+});
+
 test("getEligibilityProfile returns synthetic profile for new customer lead", () => {
   const context = {
     authUser: null,

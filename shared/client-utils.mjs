@@ -193,6 +193,10 @@ export function canAccessOfferBrowse(context = {}) {
   const hasClarification = hasSalesClarification(context);
   if ((!hasAreaCode && !hasValidatedAddress) || !hasIntent || !hasClarification) return false;
 
+  if (context?.consent?.profile?.status === "declined") {
+    return true;
+  }
+
   // Service address is validated later in checkout eligibility flow.
   if (context.authUser) return true;
 
@@ -283,6 +287,10 @@ function hasSalesClarification(context = {}) {
     return Boolean(sales.phonePreference);
   }
   if (intent === "bundle") return Boolean(sales.bundleSize);
-  if (intent === "landline") return Boolean(sales.linePreference) && Boolean(sales.callingPlan);
+  if (intent === "landline") {
+    if (!sales.linePreference || !sales.callingPlan) return false;
+    if (sales.linePreference === "keep_existing") return Boolean(sales.portingDate);
+    return true;
+  }
   return false;
 }
