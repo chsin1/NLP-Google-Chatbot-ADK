@@ -528,15 +528,19 @@ async function streamOpenAiAssist({
   }
 
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = controller
-    ? setTimeout(() => {
-        try {
-          controller.abort();
-        } catch {
-          // ignore
-        }
-      }, 12000)
-    : null;
+  let idleTimer = null;
+  const resetIdleTimer = () => {
+    if (!controller) return;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    }, 12000);
+  };
+  resetIdleTimer();
   let fullText = "";
 
   try {
@@ -572,9 +576,7 @@ async function streamOpenAiAssist({
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (timer) {
-        clearTimeout(timer);
-      }
+      resetIdleTimer();
       buffer += decoder.decode(value, { stream: true });
       let newline = buffer.indexOf("\n");
       while (newline !== -1) {
@@ -619,7 +621,7 @@ async function streamOpenAiAssist({
   } catch {
     return { ok: false, mode: "template_fallback", text: "" };
   } finally {
-    if (timer) clearTimeout(timer);
+    if (idleTimer) clearTimeout(idleTimer);
   }
 }
 

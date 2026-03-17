@@ -9959,7 +9959,7 @@ function ensureWalkthroughController() {
         body: "Type requests naturally. The assistant keeps deterministic flow control."
       },
       {
-        selector: "#panel-quote",
+        selector: "#quote-toggle-btn",
         title: "Quote Builder",
         body: "Use Guided Quote Builder to compare ranked offers."
       },
