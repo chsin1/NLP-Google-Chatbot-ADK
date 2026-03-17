@@ -13073,3 +13073,4 @@
 {"ts":"2026-03-17T04:14:34.414Z","level":"info","event":"offer_coverage_validated","details":{"sessionId":"sess_1773720874408_3tn2im","flowStep":"INIT_CONNECTING","clientType":null,"route":"sales","coverage":[{"category":"mobility","count":6},{"category":"home internet","count":3},{"category":"landline","count":3}]}}
 {"ts":"2026-03-17T04:14:37.304Z","level":"info","event":"theme_changed","details":{"sessionId":"sess_1773720874408_3tn2im","flowStep":"INIT_CONNECTING","clientType":null,"route":"sales","mode":"system","resolved":"dark"}}
 {"ts":"2026-03-17T04:14:38.915Z","level":"info","event":"theme_changed","details":{"sessionId":"sess_1773720874408_3tn2im","flowStep":"INIT_CONNECTING","clientType":null,"route":"sales","mode":"light","resolved":"light"}}
+{"ts":"2026-03-17T04:50:29.284Z","level":"info","event":"transcript_export_generated","details":{"sessionId":"sess_1773722865647_syqmrb","messageCount":64}}

@@ -754,6 +754,7 @@ button {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  position: relative;
 }
 
 .chat-window {
@@ -879,12 +880,18 @@ button {
 }
 
 .address-typeahead {
-  margin: -4px 12px 8px;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 88px;
+  margin: 0;
   border: 1px solid #cfd7e2;
   border-radius: 12px;
   background: #fff;
-  max-height: 170px;
+  max-height: min(240px, 45vh);
   overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+  z-index: 28;
 }
 
 .address-typeahead button {
@@ -1582,14 +1589,6 @@ button:disabled {
   .availability-grid {
     grid-template-columns: 1fr;
   }
-}
-
-.quote-toggle-wrap {
-  margin: 8px 0 6px;
-}
-
-.quote-toggle-wrap .secondary {
-  width: 100%;
 }
 
 .finder-results-content {
