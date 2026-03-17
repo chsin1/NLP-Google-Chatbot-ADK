@@ -51,8 +51,9 @@ Evidence anchor to cite:
 ## 5. Quality and Reliability Evidence (2 minutes)
 State clearly:
 - Automated suite status: 126/126 passing (`node --test tests/*.mjs`).
-- Operational window (Mar 11-16, 2026): 28 order attempts, 27 successful.
-- Attempt-to-success rate: 96.43%.
+- Operational window (Mar 11-17, 2026): 33 order attempts, 32 successful.
+- Attempt-to-success rate: 96.97%.
+- Compliance posture: payload redaction checks are enforced before logging.
 
 Suggested line:
 "This gives us confidence that the prototype behaves consistently under expected path conditions."

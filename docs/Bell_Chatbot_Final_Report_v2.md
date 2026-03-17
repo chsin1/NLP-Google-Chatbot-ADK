@@ -3,7 +3,7 @@ Business-facing proof of concept report with technical appendix
 
 Prepared for: Bell telecommunications stakeholders  
 Prepared on: March 17, 2026  
-Evidence window used in this report: March 11, 2026 to March 16, 2026
+Evidence window used in this report: March 11, 2026 to March 17, 2026
 
 ## Executive Summary
 Bell is a large telecommunications company with complex product bundles, strict checkout requirements, and high customer expectations for fast support. The business problem is straightforward: digital sales journeys still lose customers when discovery, qualification, checkout, and follow-up are fragmented across tools or delayed by manual handoffs. Bell needs a full end-to-end chatbot that can guide a customer from first message to confirmed order while keeping business-critical decisions deterministic.
@@ -12,10 +12,11 @@ This proof of concept demonstrates that approach. The Bell NLP chatbot combines 
 
 Key observed results in the current codebase and logs:
 - Automated quality gate: `126/126` tests passing (`node --test tests/*.mjs`, March 17, 2026).
-- Operational conversion in window: `27` successful orders out of `28` attempts (`96.43%` attempt-to-success).
+- Operational conversion in window: `32` successful orders out of `33` attempts (`96.97%` attempt-to-success).
 - End-to-end sample success: one observed session moved from chat open to order success in `65.206` seconds, then booking selection by `71.951` seconds.
-- LLM assist cost remained low in this window: `/api/chat-assist` total estimated cost `CAD 0.017758` across `395` calls (`CAD 0.000045` average per call).
+- LLM assist cost remained low in this window: `/api/chat-assist` total estimated cost `CAD 0.043771` across `623` calls.
 - Nearby Bell store discovery now supports entered-address-first lookup plus current-location fallback with configurable radius (`0-50 km`).
+- Compliance and safety coverage now includes deterministic input/output screening plus payload redaction checks before logging.
 
 The approach appears viable beyond POC if Bell funds three gaps: production systems integration (CRM/OMS/billing), production-grade data governance/approvals, and stricter KPI instrumentation discipline.
 
@@ -33,13 +34,15 @@ Bell operates at enterprise scale with multiple service lines. A chatbot that on
 The current POC supports the following end-to-end path in one chat session:
 1. Start conversation with AI disclosure.
 2. Capture customer status and service intent.
-3. Run service clarification and quote comparison.
-4. Onboard new users or authenticate existing users.
-5. Validate payment path and shipping details.
-6. Create order confirmation and render receipt.
-7. Offer installation slot selection and reminder options.
-8. Export transcript and handoff artifacts.
-9. Find nearby Bell stores from entered address or current location with radius control.
+3. Run deterministic safety screening and route assist tasks.
+4. Run service clarification and quote comparison.
+5. Onboard new users or authenticate existing users.
+6. Validate payment path and shipping details with compliance redaction checks.
+7. Create order confirmation and render receipt.
+8. Offer installation slot selection and reminder options.
+9. Export transcript and handoff artifacts.
+10. Trigger optional post-intake automation webhook.
+11. Find nearby Bell stores from entered address or current location with radius control.
 
 This flow is implemented across:
 - Front-end orchestrator: `app.js`
@@ -75,7 +78,7 @@ From repository limitations and architecture boundaries:
 |---|---|---|
 | All automated tests are passing | Proven | `node --test tests/*.mjs` on March 17, 2026: `126` pass, `0` fail |
 | LLM guardrails prohibit authoritative pricing/payment truth from model | Proven | `server.mjs` guardrail prompt and deterministic boundaries |
-| POC achieved strong order completion on attempted checkouts | Observed | Metrics window Mar 11-16, 2026: `28` attempts, `27` successes (`96.43%`) |
+| POC achieved strong order completion on attempted checkouts | Observed | Metrics window Mar 11-17, 2026: `33` attempts, `32` successes (`96.97%`) |
 | Quote builder had a runtime regression (`preferenceTotal`) on Mar 16, 2026 | Observed | `app-errors.log`: `38` matching errors across `12` sessions |
 | Production privacy approval posture is incomplete | Planned | Repo limitations and roadmap notes (PII governance and integration gaps) |
 | Production deployment needs real systems integration | Planned | Known limitations in README and planned interfaces |
@@ -108,9 +111,10 @@ How implemented:
 - `LLM_ENABLED` toggle, endpoint-level fallback mode, and health checks.
 - Deterministic flow progression can continue even when LLM is unavailable.
 
-Observed evidence (Mar 11-16, 2026):
-- `/api/chat-assist`: `395` calls, `33,586` tokens, `CAD 0.017758` estimated total.
-- Average `/api/chat-assist` cost per call: `CAD 0.000045`.
+Observed evidence (Mar 11-17, 2026):
+- `/api/chat-assist`: `623` calls, `83,167` tokens, `CAD 0.043771` estimated total.
+- Average `/api/chat-assist` cost per call: `CAD 0.000070`.
+- `/api/chat-assist` fallback rate in window: `38.84%`.
 
 Trade-off:
 - Very low assist cost, but user experience quality can degrade during fallback periods.
@@ -122,6 +126,7 @@ Judgment:
 How implemented:
 - AI disclosure message shown at start.
 - Email masking utility and secure reference generation for auth metadata.
+- Payload redaction checks and compliance-blocking before event log writes.
 - File-based logging for reproducible QA and telemetry.
 
 Trade-off:
@@ -223,6 +228,12 @@ From `.env.example`:
 - `ADDRESS_PROVIDER=mock`
 - `GOOGLE_PLACES_API_KEY=`
 - `LLM_USAGE_LOG_PATH=./logs/llm-usage.log`
+- `N8N_WEBHOOK_URL=`
+- `FINDER_DEFAULT_RADIUS_METERS=8000`
+- `SSE_ASSIST_ENABLED=true`
+- `LANGSMITH_TRACING_ENABLED=false`
+- `LANGSMITH_ENDPOINT=`
+- `LANGSMITH_API_KEY=`
 
 Operational meaning:
 - LLM assist is configurable and can be disabled.
@@ -233,10 +244,15 @@ Operational meaning:
 Implemented endpoints (from server implementation):
 - `POST /api/log` - structured telemetry logging.
 - `POST /api/intent` - intent classification (LLM + deterministic fallback).
+- `POST /api/agent-router` - deterministic tool routing metadata.
 - `POST /api/chat-assist` - assistive language tasks.
+- `POST /api/chat-assist-stream` - SSE assist stream with token events.
 - `GET /api/llm-health` - LLM connectivity and model status.
+- `GET /api/compliance-status` - compliance policy status.
+- `POST /api/consent-record` - structured consent logging.
 - `POST /api/address-lookup` - address suggestions.
 - `GET /api/finder/nearby` - nearby Bell stores using either `lat/lng` or `address` and optional radius.
+- `POST /api/automations/post-intake` - optional webhook trigger after intake completion.
 - `POST /api/quote-preview` - deterministic quote ranking.
 - `POST /api/handoff-summary` - structured handoff summary generation.
 - `POST /api/transcript-export` - exportable transcript payload.
@@ -268,47 +284,49 @@ node --test tests/*.mjs
 - `tests/export-and-booking.test.mjs`
 - `tests/client-utils.test.mjs`
 
-## Appendix E - Telemetry Artifacts (Mar 11-16, 2026)
+## Appendix E - Telemetry Artifacts (Mar 11-17, 2026)
 ### E.1 KPI snapshot (selected)
 | Metric | Observed value |
 |---|---|
-| Sessions | 96 |
-| Order attempts | 28 |
-| Order success | 27 |
-| Attempt-to-success rate | 96.43% |
-| Quote comparison viewed | 25 |
-| Booking slot selected | 5 |
+| Sessions | 116 |
+| Order attempts | 33 |
+| Order success | 32 |
+| Attempt-to-success rate | 96.97% |
+| Quote comparison viewed | 36 |
+| Booking slot selected | 10 |
 | Warm-agent routed | 3 |
 | Mean time to completion | 2.36 min |
-| SLA overall health score | 95 |
+| SLA overall health score | 78.33 |
 
 ### E.2 SLA target snapshot
 | SLA target | Actual | Status |
 |---|---|---|
-| First reply <= 20 sec | 5.4 sec | pass |
-| Intent lock <= 90 sec | 81.93 sec | pass |
-| Offer presentation <= 180 sec | 113.85 sec | pass |
-| Checkout completion <= 10 min | 0.12 min | pass |
-| Order success >= 75% | 96.43% | pass |
+| First reply <= 20 sec | 27.38 sec | breach |
+| Intent lock <= 90 sec | 98.66 sec | warn |
+| Offer presentation <= 180 sec | 140.02 sec | pass |
+| Checkout completion <= 10 min | 0.11 min | pass |
+| Order success >= 75% | 96.97% | pass |
 | Clarify retries <= 2 | 3 | warn |
 
 ### E.3 LLM usage and cost snapshot
 | Measure | Value |
 |---|---|
-| Total LLM log calls | 1,790 |
-| Total tokens | 201,827 |
-| Total estimated cost | CAD 0.124406 |
-| `/api/llm-health` calls | 1,395 |
-| `/api/chat-assist` calls | 395 |
-| `/api/chat-assist` cost | CAD 0.017758 |
-| Average `/api/chat-assist` cost/call | CAD 0.000045 |
-| Fallback calls | 603 (33.69%) |
+| Total LLM log calls | 2,491 |
+| Total tokens | 304,479 |
+| Total estimated cost | CAD 0.184096 |
+| `/api/llm-health` calls | 1,868 |
+| `/api/chat-assist` calls | 623 |
+| `/api/chat-assist` cost | CAD 0.043771 |
+| Average `/api/chat-assist` cost/call | CAD 0.000070 |
+| `/api/chat-assist` fallback rate | 38.84% |
 
 ### E.4 Error distribution snapshot
 | Error event | Count |
 |---|---|
 | `invalid_flow_transition` | 2,249 |
 | `path_failed` | 2,228 |
+| `compliance_blocked_payload` | 457 |
+| `address_lookup_google_api_error` | 27 |
 | `quote_preview_failed` | 25 |
 | `frontend_error` | 23 |
 | `frontend_unhandled_rejection` | 21 |

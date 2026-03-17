@@ -1,68 +1,61 @@
 # Bell-Style Agentic Sales Chatbot
 
-Conversational, sales-first telecom assistant with deterministic checkout logic, KPI/SLA telemetry, and optional ChatGPT-assisted language.
+Sales-first telecom assistant with deterministic checkout orchestration, assistive LLM capabilities, and operational KPI/SLA observability.
 
 ---
 
-## Overview
+## Executive Snapshot
 
-This project implements a Bell-style sales chatbot that guides users through:
-
-- Service discovery (`mobility`, `home internet`, `landline`, `bundle`)
-- Offer browsing and cross-sell flow
-- Basket, eligibility, payment, shipping, and order confirmation
-- Corporate-style receipt generation
-- Metrics, SLA monitoring, and QA event logging
-
-The system uses a **Hybrid FSM + LLM** design:
-
-- FSM controls business-critical transitions and validations.
-- ChatGPT is assistive for fluency, intent/entity help, summaries, and multilingual phrasing.
+| Area | Current state |
+|---|---|
+| Journey scope | Discovery -> quote -> onboarding/auth -> checkout -> order -> booking -> follow-up |
+| Architecture | Hybrid deterministic FSM + optional LLM assist |
+| Runtime | Vanilla web client + Node server (`server.mjs`) |
+| Observability | Structured event/error/QA/LLM logs + `/api/metrics` rollups |
+| Test status (Mar 17, 2026) | `126/126` passing (`node --test tests/*.mjs`) |
 
 ---
 
-## Problem Statement
+## Why This Exists
 
-Digital telecom purchase flows often drop users due to:
+Telecom digital journeys lose conversions when users hit unclear steps or fragmented handoffs.  
+This project reduces that friction with deterministic business logic for high-risk steps (eligibility, checkout progression, payment and order transitions) while using LLM only for assistive language and intent support.
 
-- unclear next steps,
-- fragmented checkout experiences,
-- weak cross-sell sequencing,
-- missing observability on where users fail.
-
-This assistant addresses that with deterministic flow control, guided payment/address handling, and sales-grade KPI monitoring.
-
----
-
-## Who It Is For
-
+Primary users:
 - **Sales teams:** improve conversion, bundle attach rate, and checkout completion.
-- **Product owners:** test new funnel logic quickly in a controlled prototype.
-- **Operations leaders:** monitor SLA breaches and interaction quality from logs.
-
----
-
-## Product Demo / Screenshots / Video
-
-Add screenshots or demo links here:
-
-- Chat start and service intake
-- Offer carousel and cross-sell
-- Basket and checkout
-- Receipt
-- KPI and SLA dashboard
-
-Recommended folder: `assets/screenshots/`
+- **Product owners:** iterate funnel logic safely in a controlled prototype.
+- **Operations leaders:** monitor SLA breaches and route-level friction with concrete telemetry.
 
 ---
 
 ## Project Documents
 
-- Final Report: 
-- Demo Script: 
+- [Final Report v2 (Markdown)](docs/Bell_Chatbot_Final_Report_v2.md)
+- [Final Report v2 (Word)](docs/Bell_Chatbot_Final_Report_v2.docx)
+- [Executive Demo Script v2 (Markdown)](docs/Bell_Chatbot_Demo_Script_v2.md)
+- [Executive Demo Script v2 (Word)](docs/Bell_Chatbot_Demo_Script_v2.docx)
+- [Technology Stack (Markdown)](docs/TECH_STACK.md)
+- [Technology Stack (Word)](docs/TECH_STACK.docx)
+- [Feature Expansion Backlog](docs/FEATURE_EXPANSION_BACKLOG.md)
+- [Pre-Expansion Test Scenarios](docs/TEST_SCENARIOS_PRE_EXPANSION.md)
+
 ---
 
-## System Architecture
+## Product Demo Assets
+
+Recommended capture set for GitHub/demo updates:
+- Chat start with AI disclosure + privacy/about-AI controls
+- Service selection and quote builder
+- Checkout (payment + shipping) and order confirmation
+- Booking flow and reminder opt-in
+- Finder panel with entered-address and radius controls
+- KPI/SLA dashboard and terminal test output
+
+Recommended folder: `assets/screenshots/`
+
+---
+
+## 🧠 System Architecture
 
 ```mermaid
 graph TD
@@ -111,22 +104,53 @@ graph TD
 
 ---
 
-## Conversation Flow (State-Machine)
+## 🔄 Conversation Flow (State-Machine)
 
 ```mermaid
-graph LR
-    A["Greeting"] --> B["Customer Status"]
-    B --> C["Service Selection"]
-    C --> D["Clarification"]
-    D --> E["Onboarding/Auth"]
-    E --> F["Offer Browse"]
-    F --> G["Basket Review"]
-    G --> H["Eligibility"]
-    H --> I["Payment"]
-    I --> J["Shipping"]
-    J --> K["Order Review"]
-    K --> L["Confirmed + Receipt + Rating"]
+graph TD
+    START["Chat Open + Walkthrough"]
+    DISCLOSE["AI Disclosure + Privacy/About-AI Panels"]
+    ROUTE["Customer Status + Service Intent"]
+    SAFETY["Input Safety Screen + Agent Router"]
+    CLARIFY["Service Clarification + Quote Builder"]
+    AUTH{"Existing or New?"}
+    AUTH_EXIST["Existing Auth + Profile Consent"]
+    AUTH_NEW["New Customer Onboarding"]
+    CHECKOUT["Payment + Shipping + Compliance Redaction"]
+    ORDER["Order Confirmation + Receipt Export"]
+    POST["Booking + Reminder + Rating"]
+    FINDER["Nearby Bell Finder (Address or Current Location)"]
+    HANDOFF["Transcript/Handoff Export + Automation Hook"]
+    METRICS["Event Logs -> KPI/SLA Metrics"]
+
+    START --> DISCLOSE --> ROUTE --> SAFETY --> CLARIFY --> AUTH
+    AUTH -->|Existing| AUTH_EXIST --> CHECKOUT
+    AUTH -->|New| AUTH_NEW --> CHECKOUT
+    CHECKOUT --> ORDER --> POST
+    POST --> FINDER
+    ORDER --> HANDOFF
+    SAFETY -. escalation .-> HANDOFF
+    ROUTE --> METRICS
+    CHECKOUT --> METRICS
+    HANDOFF --> METRICS
+
+    style START fill:#1d4ed8,color:#ffffff,stroke:#1e3a8a,stroke-width:1px
+    style DISCLOSE fill:#1d4ed8,color:#ffffff,stroke:#1e3a8a,stroke-width:1px
+    style ROUTE fill:#2563eb,color:#ffffff,stroke:#1e3a8a,stroke-width:1px
+    style SAFETY fill:#f59e0b,color:#111827,stroke:#b45309,stroke-width:1px
+    style CLARIFY fill:#16a34a,color:#ffffff,stroke:#14532d,stroke-width:1px
+    style AUTH fill:#0f766e,color:#ffffff,stroke:#134e4a,stroke-width:1px
+    style AUTH_EXIST fill:#16a34a,color:#ffffff,stroke:#14532d,stroke-width:1px
+    style AUTH_NEW fill:#16a34a,color:#ffffff,stroke:#14532d,stroke-width:1px
+    style CHECKOUT fill:#16a34a,color:#ffffff,stroke:#14532d,stroke-width:1px
+    style ORDER fill:#0f766e,color:#ffffff,stroke:#134e4a,stroke-width:1px
+    style POST fill:#0f766e,color:#ffffff,stroke:#134e4a,stroke-width:1px
+    style FINDER fill:#ea580c,color:#ffffff,stroke:#9a3412,stroke-width:1px
+    style HANDOFF fill:#64748b,color:#ffffff,stroke:#334155,stroke-width:1px
+    style METRICS fill:#334155,color:#ffffff,stroke:#0f172a,stroke-width:1px
 ```
+
+**Flow key:** Green = deterministic conversion path, Orange = safety/compliance controls, Blue/Teal = user journey stages, Slate = export/analytics surfaces.
 
 ---
 
@@ -325,6 +349,8 @@ Run all tests:
 node --test tests/*.mjs
 ```
 
+Latest local run (March 17, 2026): **126 passing, 0 failing**.
+
 Key suites:
 
 - `tests/workflow-paths.test.mjs` - end-to-end path gating
@@ -401,6 +427,9 @@ Balanced SLA targets include:
 ├── tests/
 ├── logs/
 └── docs/
+    ├── Bell_Chatbot_Final_Report_v2.md
+    ├── Bell_Chatbot_Demo_Script_v2.md
+    ├── TECH_STACK.md
     ├── FEATURE_EXPANSION_BACKLOG.md
     └── TEST_SCENARIOS_PRE_EXPANSION.md
 ```
