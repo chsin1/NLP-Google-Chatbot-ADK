@@ -4572,10 +4572,15 @@ function withdrawConsentAndReset() {
 function resumePendingConsentTransition() {
   const pending = state.pendingConsentTransition;
   state.pendingConsentTransition = null;
-  if (!pending) return;
+  if (!pending) {
+    transitionTo(FLOW_STEPS.HELPDESK_ENTRY, {}, { pushHistory: true, enforceContract: false });
+    return;
+  }
   transitionTo(pending.nextStep, pending.patchContext || {}, {
     pushHistory: Boolean(pending.pushHistory),
-    enforceContract: pending.enforceContract !== false
+    // Consent is an interstitial checkpoint and must not be blocked by the
+    // previous step contract when resuming the original destination.
+    enforceContract: false
   });
 }
 
@@ -4774,7 +4779,8 @@ function transitionTo(nextStep, patchContext = {}, { pushHistory = true, enforce
     if (state.flowStep !== consentStep) {
       transitionTo(consentStep, {}, { pushHistory: true, enforceContract: false });
     } else {
-      renderStep(consentStep);
+      // Avoid duplicating the same consent prompt while already on this step.
+      setChatInputHint("Reply with I agree or Decline");
     }
     return;
   }
