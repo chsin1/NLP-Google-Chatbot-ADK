@@ -25,7 +25,7 @@ test("input safety blocks jailbreak-like text", () => {
 test("input safety warns on abusive language", () => {
   const result = screenInputSafety("you are a stupid bot");
   assert.equal(result.safetyAction, "warn");
-  assert.equal(result.policyCategory, "harassment_abuse");
+  assert.equal(result.policyCategory, "human_abuse_harassment");
 });
 
 test("input safety allows normal shopping request", () => {

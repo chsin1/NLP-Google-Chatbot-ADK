@@ -163,6 +163,7 @@ Deterministic business logic in `app.js`, `shared/*.mjs`, and server endpoints r
 - Existing/new customer onboarding and authentication variants
 - Mid-conversation language switching (EN/FR/ES/ZH) for future prompts and option labels
 - Address lookup (`mock|google|hybrid`) and typeahead support with Toronto-first ranking in Google mode
+- Nearby store finder with Google Places primary + OpenStreetMap Overpass fallback
 - Guided Quote Builder (budget/speed/device-cost weighting + side-by-side ranked options)
 - Quote preference hard-lock to `100` total points across budget/speed/device cost
 - Offer carousel, bundle discount logic, and cross-sell prompts
@@ -170,6 +171,11 @@ Deterministic business logic in `app.js`, `shared/*.mjs`, and server endpoints r
 - Guided card entry (brand detection + Luhn + CVC + postal validation)
 - Mock financing path with approval/decline flow
 - Mon-Thu booking calendar with Friday meeting-request fallback
+- Assist-only SSE streaming (`/api/chat-assist-stream`) with automatic fallback to `/api/chat-assist`
+- Post-intake automation webhook trigger (`/api/automations/post-intake`) with safe no-op when not configured
+- First-time animated onboarding walkthrough with replay control and localStorage persistence
+- Agentic tool routing (`/api/agent-router`) and per-request trace IDs
+- Deterministic LLM safety guardrails with multilingual/leet normalization and policy categories
 - Corporate-style printable receipt
 - Chat end/refresh session lifecycle controls
 - KPI + SLA dashboard data via `/api/metrics`
@@ -181,11 +187,16 @@ Deterministic business logic in `app.js`, `shared/*.mjs`, and server endpoints r
 
 ### Implemented
 
-- Hybrid LLM endpoints: `/api/intent`, `/api/chat-assist`, `/api/llm-health`
+- Hybrid LLM endpoints: `/api/intent`, `/api/chat-assist`, `/api/chat-assist-stream`, `/api/llm-health`
+- Agent router endpoint: `/api/agent-router`
 - Deterministic quote ranking endpoint: `/api/quote-preview`
+- Finder endpoint with fallback providers: `/api/finder/nearby`
+- Post-intake automation endpoint: `/api/automations/post-intake`
+- Compliance endpoints: `/api/compliance-status`, `/api/consent-record`
+- Export/handoff endpoints: `/api/handoff-summary`, `/api/transcript-export`
 - Metrics and SLA aggregation with monthly snapshots and session rollups
 - Validation utilities for Canadian phone/email/postal/card checks
-- Structured tests across routing, metrics, utils, LLM integration
+- Structured tests across routing, metrics, utils, LLM integration, SSE, automation, finder, onboarding, and agentic evals
 - Checkout continuity hardening for internet, mobility, and landline paths
 - Calendar booking UI with weekday availability controls
 
@@ -193,7 +204,7 @@ Deterministic business logic in `app.js`, `shared/*.mjs`, and server endpoints r
 
 - richer quote building and plan comparison
 - stronger CRM handoff and campaign attribution
-- production-grade PII governance and redaction automation
+- production deployment wiring for webhook/telemetry destinations
 
 ---
 
@@ -259,14 +270,21 @@ PORT=3001 node server.mjs
 | `OPENAI_MODEL` | `gpt-4.1-mini` | LLM model for assist and intent |
 | `LLM_ENABLED` | `true` | Toggle LLM path vs template fallback |
 | `ADDRESS_PROVIDER` | `mock` | `mock`, `google`, or `hybrid` |
-| `GOOGLE_PLACES_API_KEY` | empty | Google Places autocomplete (optional) |
+| `GOOGLE_PLACES_API_KEY` | empty | Google Places autocomplete + nearby finder (optional) |
 | `LLM_USAGE_LOG_PATH` | `./logs/llm-usage.log` | Token/cost usage log path |
+| `N8N_WEBHOOK_URL` | empty | Post-intake automation webhook target (optional) |
+| `FINDER_DEFAULT_RADIUS_METERS` | `8000` | Default finder radius when query radius is omitted |
+| `SSE_ASSIST_ENABLED` | `true` | Feature flag for assist SSE endpoint behavior |
+| `LANGSMITH_TRACING_ENABLED` | `false` | Enables trace forwarding to external observability endpoint |
+| `LANGSMITH_ENDPOINT` | empty | Trace forwarding endpoint URL |
+| `LANGSMITH_API_KEY` | empty | Optional API key for trace forwarding |
 
 Address lookup behavior:
 
 - `mock`: deterministic local suggestions for testing/demo
 - `google` / `hybrid`: Google Places suggestions only, ranked Toronto-first (Toronto bias, not a hard city restriction)
 - If Google returns no results or is unavailable, the chat allows manual address entry (no forced block)
+- Finder behavior: Google Places first when key is configured, otherwise Overpass fallback, then safe empty response
 
 ---
 
@@ -276,15 +294,23 @@ Address lookup behavior:
 
 - `POST /api/log` - structured event logging
 - `POST /api/intent` - intent classification (LLM + fallback)
+- `POST /api/agent-router` - deterministic agent tool selection metadata
 - `POST /api/chat-assist` - conversational assist tasks
+- `POST /api/chat-assist-stream` - assist streaming via SSE (`start`, `token`, `end`, `error`)
 - `GET /api/llm-health` - configured/connected status for UI indicator
 - `POST /api/address-lookup` - typeahead suggestions
+- `GET /api/finder/nearby` - nearby finder with Google->Overpass fallback
+- `POST /api/automations/post-intake` - optional webhook trigger for intake-complete events
 - `POST /api/quote-preview` - deterministic quote ranking and comparison output
+- `GET /api/compliance-status` - compliance policy status flags
+- `POST /api/consent-record` - structured consent logging
+- `POST /api/handoff-summary` - sales/agent handoff summary generation
+- `POST /api/transcript-export` - structured transcript and export payload generation
+- `GET /api/install-slots` - booking slot availability for install scheduling
 - `GET /api/metrics` - KPI/SLA/session analytics
 
 ### Planned Interfaces
 
-- `POST /api/handoff-summary`
 - `GET /api/order-status?orderId=...`
 - `GET /api/evals?window=30d`
 - `POST /api/pii-redact-check`
@@ -305,6 +331,11 @@ Key suites:
 - `tests/client-utils.test.mjs` - validation and pricing helpers
 - `tests/metrics-utils.test.mjs` - KPI and SLA aggregation
 - `tests/llm-integration.test.mjs` - endpoint/config presence checks
+- `tests/sse-assist.test.mjs` - SSE event ordering and fallback behavior
+- `tests/automation-webhook.test.mjs` - post-intake webhook success/no-op/failure behavior
+- `tests/finder-fallback.test.mjs` - Google primary and Overpass fallback behavior
+- `tests/onboarding-walkthrough.test.mjs` - walkthrough persistence and replay wiring
+- `tests/agentic-evals.test.mjs` - safety harness and agent-tool routing checks
 
 Pre-expansion scenarios: [docs/TEST_SCENARIOS_PRE_EXPANSION.md](/Users/alexkatzighera/Documents/NLP%20Google%20Chatbot/docs/TEST_SCENARIOS_PRE_EXPANSION.md)
 
@@ -347,12 +378,24 @@ Balanced SLA targets include:
 ├── styles.css
 ├── server.mjs
 ├── shared/
+│   ├── agent-router-utils.mjs
+│   ├── ai-safety-utils.mjs
+│   ├── automation-utils.mjs
 │   ├── client-utils.mjs
 │   ├── conversation-style-utils.mjs
 │   ├── conversation-utils.mjs
 │   ├── flow-utils.mjs
 │   ├── metrics-utils.mjs
+│   ├── privacy-utils.mjs
+│   ├── trace-utils.mjs
 │   └── workflow-utils.mjs
+├── src/
+│   ├── client/features/chat/stream-renderer.mjs
+│   ├── client/features/onboarding/walkthrough.mjs
+│   └── server/finder/
+│       ├── finder-service.mjs
+│       ├── google-places-provider.mjs
+│       └── overpass-provider.mjs
 ├── tests/
 ├── logs/
 └── docs/
@@ -367,7 +410,7 @@ Balanced SLA targets include:
 - Product catalog, inventory, eligibility, and payment are mocked.
 - No real CRM, OMS, or billing system integration.
 - No persistent database; logs are file-based.
-- Google address provider requires separate API setup.
+- Google Places provider and webhook forwarding require external API/network setup.
 - LLM quality depends on key/model availability and prompt tuning.
 
 ---
@@ -404,6 +447,11 @@ node server.mjs
 ### 2026-03
 
 - Added ChatGPT health and assist endpoints with fallback mode
+- Added assist-only SSE streaming endpoint with client fallback behavior
+- Added nearby finder endpoint with Google Places primary and Overpass fallback
+- Added post-intake automation webhook endpoint (code-ready, optional)
+- Added first-time walkthrough module with replay support in chat menu
+- Added deterministic agent-router endpoint and trace IDs across intent/assist/finder/webhook flows
 - Added guided payment validation path
 - Expanded KPI/SLA metrics and monthly snapshots
 - Hardened receipt format and test coverage
@@ -431,7 +479,7 @@ node server.mjs
 
 1. Create a feature branch.
 2. Add or update tests for behavior changes.
-3. Run `node --test tests/*.test.mjs`.
+3. Run `node --test tests/*.mjs`.
 4. Open a PR with flow impact and QA evidence.
 
 ---

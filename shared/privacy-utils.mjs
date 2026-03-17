@@ -21,7 +21,7 @@ function maskCvcLike(text = "") {
     .replace(/\b(cvc|cvv|security\s*code|card\s*code)\b\s*[:#-]?\s*\d{3,4}/gi, (match) =>
       match.replace(/\d{3,4}/g, "***")
     )
-    .replace(/\b\d{3,4}\b(?=\s*(?:cvc|cvv|security\s*code|card\s*code))/gi, "***");
+    .replace(/\b\d{3}\b(?=\s*(?:cvc|cvv|security\s*code|card\s*code))/gi, "***");
 }
 
 function maskEmail(value = "") {

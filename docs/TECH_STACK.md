@@ -38,10 +38,12 @@ There is **no database and no build pipeline** in the current POC. The app runs 
 │ Port: 3000 (default)                                     │
 │                                                           │
 │ - Static file serving                                    │
-│ - /api/intent, /api/chat-assist, /api/llm-health        │
-│ - /api/address-lookup, /api/quote-preview               │
+│ - /api/intent, /api/agent-router                         │
+│ - /api/chat-assist, /api/chat-assist-stream, /api/llm-health │
+│ - /api/address-lookup, /api/finder/nearby, /api/quote-preview │
+│ - /api/automations/post-intake                           │
 │ - /api/handoff-summary, /api/transcript-export          │
-│ - /api/install-slots, /api/metrics, /api/log            │
+│ - /api/install-slots, /api/metrics, /api/log, /api/consent-record │
 │ - Writes logs to /logs/*.log                            │
 └───────────────────────┬───────────────────────────────────┘
                         │ HTTPS
@@ -49,7 +51,10 @@ There is **no database and no build pipeline** in the current POC. The app runs 
 ┌───────────────────────────────────────────────────────────┐
 │ External Services                                         │
 │ - OpenAI Responses API (assist + intent)                 │
-│ - Optional Google Places API (address provider mode)     │
+│ - Optional Google Places API (address + nearby finder)   │
+│ - OpenStreetMap Overpass API (finder fallback)           │
+│ - Optional webhook target (post-intake automation)       │
+│ - Optional trace sink (LangSmith-compatible endpoint)    │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -80,11 +85,15 @@ Production guidance in `README.md` recommends adding:
 | Frontend | Vanilla HTML/CSS/JS | Chat UI, flow orchestration, checkout UX |
 | Backend | Node HTTP server (`node:http`) | API endpoints + static hosting |
 | LLM Integration | OpenAI Responses API | Assistive language + intent extraction |
-| Address Search | `mock` / `google` / `hybrid` provider modes | Typeahead and address suggestions |
+| Address + Finder | `mock` / `google` / `hybrid` + Overpass fallback | Typeahead and nearby store discovery |
+| Automation | Webhook integration (`N8N_WEBHOOK_URL`) | Post-intake trigger handoff |
+| Streaming | Server-Sent Events (SSE) | Incremental assist response delivery |
+| Agentic Routing | Deterministic tool router (`shared/agent-router-utils.mjs`) | Tool hints for intent/assist/finder/webhook |
 | State Management | In-memory context in browser session | Flow progression and checkout context |
 | Persistence | JSON line logs (`logs/*.log`) | Event, error, QA, and LLM usage tracking |
+| Observability | Trace utility + optional endpoint forwarding | Correlate request lifecycle by trace ID |
 | Analytics | `shared/metrics-utils.mjs` + `/api/metrics` | KPI/SLA/session rollups |
-| Testing | Node test runner (`node --test`) | 76-test regression and utility coverage |
+| Testing | Node test runner (`node --test`) | 120-test regression and utility coverage |
 
 ---
 
@@ -98,6 +107,9 @@ Production guidance in `README.md` recommends adding:
 - Shipping selection and order review path.
 - Booking and reminder post-order flow.
 - LLM status handling and fallback behavior in UI.
+- Assist streaming consumption and automatic non-stream fallback.
+- First-run onboarding walkthrough with replay and dismissal persistence.
+- Nearby store finder panel with call/directions/website deep links.
 - KPI dashboard rendering from `/api/metrics`.
 
 ### UI assets
@@ -115,16 +127,27 @@ Production guidance in `README.md` recommends adding:
 - Exposes sales-assistant API endpoints.
 - Calls OpenAI only for assistive tasks.
 - Enforces fallback mode when LLM unavailable.
+- Emits SSE token events for assist-only streaming.
+- Executes deterministic tool routing for agentic metadata.
+- Triggers optional post-intake webhook automation.
+- Resolves nearby finder results with provider fallback.
 - Writes event/error/QA/LLM usage logs.
+- Emits trace IDs and optional trace forwarding payloads.
 - Aggregates operational metrics and SLA snapshots.
 
 ### Endpoint inventory
 - `POST /api/log`
 - `POST /api/intent`
+- `POST /api/agent-router`
 - `POST /api/chat-assist`
+- `POST /api/chat-assist-stream`
 - `GET /api/llm-health`
 - `POST /api/address-lookup`
+- `GET /api/finder/nearby`
+- `POST /api/automations/post-intake`
 - `POST /api/quote-preview`
+- `GET /api/compliance-status`
+- `POST /api/consent-record`
 - `POST /api/handoff-summary`
 - `POST /api/transcript-export`
 - `GET /api/install-slots`
@@ -170,11 +193,20 @@ LLM_ENABLED=true
 ADDRESS_PROVIDER=mock
 GOOGLE_PLACES_API_KEY=
 LLM_USAGE_LOG_PATH=./logs/llm-usage.log
+N8N_WEBHOOK_URL=
+FINDER_DEFAULT_RADIUS_METERS=8000
+SSE_ASSIST_ENABLED=true
+LANGSMITH_TRACING_ENABLED=false
+LANGSMITH_ENDPOINT=
+LANGSMITH_API_KEY=
 ```
 
 Key behaviors:
 - If `LLM_ENABLED=false` or key is missing, server uses deterministic/template fallback.
 - `ADDRESS_PROVIDER` controls lookup mode: `mock`, `google`, or `hybrid`.
+- `SSE_ASSIST_ENABLED` gates assist streaming; client falls back to `/api/chat-assist` on stream failure.
+- Finder uses Google Places first when available, then Overpass fallback.
+- `N8N_WEBHOOK_URL` enables post-intake automation trigger; missing URL returns safe no-op.
 - LLM usage is recorded for cost and fallback-rate monitoring.
 
 ---
@@ -191,6 +223,7 @@ Key behaviors:
 - `logs/app-errors.log`: runtime and transition errors.
 - `logs/qa-checklist.log`: QA probes/checks.
 - `logs/llm-usage.log`: token/cost/fallback telemetry.
+- Trace events include per-request `traceId` and optional external forwarding metadata.
 
 ### Metrics
 `/api/metrics` computes:
@@ -207,7 +240,8 @@ Key behaviors:
 ### Present controls
 - Deterministic flow guards for invalid transitions.
 - LLM fallback mode for degraded external dependencies.
-- Basic masking utility for email exposure reduction.
+- Deterministic input/output safety screening with policy categories.
+- Payment/PII masking and compliance payload blocking.
 - Session identifiers and structured audit-style logging.
 
 ### Remaining production gaps
@@ -223,11 +257,11 @@ Key behaviors:
 Run all tests:
 
 ```bash
-node --test tests/*.test.mjs
+node --test tests/*.mjs
 ```
 
 Current result (March 17, 2026):
-- **76 tests passing, 0 failing**
+- **120 tests passing, 0 failing**
 
 Coverage spans:
 - workflow gating and route behavior,
@@ -235,7 +269,12 @@ Coverage spans:
 - metrics aggregation,
 - quote ranking determinism,
 - export and booking flow,
-- LLM integration guardrail presence checks.
+- LLM integration guardrail presence checks,
+- SSE event protocol and fallback behavior,
+- post-intake webhook behavior,
+- finder provider fallback behavior,
+- onboarding walkthrough wiring,
+- agentic routing/safety eval harness.
 
 ---
 
@@ -271,9 +310,19 @@ Recommended next steps:
 - `server.mjs`
 - `index.html`
 - `styles.css`
+- `src/client/features/chat/stream-renderer.mjs`
+- `src/client/features/onboarding/walkthrough.mjs`
+- `src/server/finder/finder-service.mjs`
+- `src/server/finder/google-places-provider.mjs`
+- `src/server/finder/overpass-provider.mjs`
+- `shared/agent-router-utils.mjs`
+- `shared/automation-utils.mjs`
+- `shared/trace-utils.mjs`
+- `shared/ai-safety-utils.mjs`
+- `shared/privacy-utils.mjs`
 - `shared/client-utils.mjs`
 - `shared/workflow-utils.mjs`
 - `shared/quote-utils.mjs`
 - `shared/metrics-utils.mjs`
-- `tests/*.test.mjs`
+- `tests/*.mjs`
 - `README.md`
