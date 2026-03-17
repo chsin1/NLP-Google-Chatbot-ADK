@@ -1240,15 +1240,17 @@ const server = createServer(async (req, res) => {
       });
       const lat = toNumber(url.searchParams.get("lat"), null);
       const lng = toNumber(url.searchParams.get("lng"), null);
+      const address = String(url.searchParams.get("address") || "").trim();
       const radius = toNumber(url.searchParams.get("radius"), FINDER_DEFAULT_RADIUS_METERS);
       const type = String(url.searchParams.get("type") || "store");
-      if (lat == null || lng == null) {
-        json(res, 400, { error: "lat and lng are required" });
+      if ((lat == null || lng == null) && !address) {
+        json(res, 400, { error: "lat/lng or address is required" });
         return;
       }
       const payload = await findNearbyLocations({
         lat,
         lng,
+        address,
         radiusMeters: radius,
         type,
         googleApiKey: GOOGLE_PLACES_API_KEY,
@@ -1261,7 +1263,12 @@ const server = createServer(async (req, res) => {
       });
       const done = finishTrace(trace, {
         status: "ok",
-        details: { resultCount: payload.results.length, source: payload.source }
+        details: {
+          resultCount: payload.results.length,
+          source: payload.source,
+          reason: payload.reason || null,
+          lookupMode: address ? "address" : "coordinates"
+        }
       });
       await logTrace("info", buildTraceEvent(done, "end", done.details));
       json(res, 200, {

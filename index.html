@@ -280,7 +280,25 @@
           </div>
 
           <div id="panel-finder" class="panel-card hidden">
-            <h3>Nearby Stores</h3>
+            <h3>Nearby Bell Stores</h3>
+            <div class="finder-controls">
+              <div class="finder-mode-row">
+                <label class="finder-option" for="finder-mode-address">
+                  <input id="finder-mode-address" type="radio" name="finder-location-mode" value="service_address" checked />
+                  <span id="finder-mode-address-label">Use entered address</span>
+                </label>
+                <label class="finder-option" for="finder-mode-current">
+                  <input id="finder-mode-current" type="radio" name="finder-location-mode" value="current_location" />
+                  <span>Use current location</span>
+                </label>
+              </div>
+              <div class="finder-radius-row">
+                <label for="finder-radius-range">Search radius: <strong id="finder-radius-value">8 km</strong></label>
+                <input id="finder-radius-range" type="range" min="0" max="50" step="1" value="8" />
+              </div>
+              <button id="finder-refresh-btn" type="button" class="secondary">Search Bell Stores</button>
+              <p id="finder-center-status" class="small">Set your location mode and search radius, then load nearby Bell stores.</p>
+            </div>
             <div id="finder-results-content" class="finder-results-content">
               <p class="small">Use "Find Nearby Stores" from the chat menu to load results.</p>
             </div>

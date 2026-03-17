@@ -1,11 +1,14 @@
-const CANADIAN_AREA_CODES = new Set([
+const CANADIAN_AREA_CODE_LIST = [
   "204", "226", "236", "249", "250", "263", "289", "306", "343", "354",
   "365", "367", "368", "382", "403", "416", "418", "431", "437", "438",
   "450", "468", "474", "506", "514", "519", "548", "579", "581", "584",
   "587", "604", "613", "639", "647", "672", "683", "705", "709", "742",
   "753", "778", "780", "782", "807", "819", "825", "867", "873", "879",
   "902", "905", "942", "986"
-]);
+];
+
+const CANADIAN_AREA_CODES = new Set(CANADIAN_AREA_CODE_LIST);
+const PRIORITY_AREA_CODES = ["416", "647", "986", "905", "613"];
 
 export function normalizeCanadianPhone(raw) {
   const digits = String(raw || "").replace(/\D/g, "");
@@ -17,6 +20,16 @@ export function normalizeCanadianPhone(raw) {
 export function isValidCanadianAreaCode(areaCode) {
   const normalized = String(areaCode || "").trim();
   return /^\d{3}$/.test(normalized) && CANADIAN_AREA_CODES.has(normalized);
+}
+
+export function getCanadianAreaCodeSuggestions(raw = "", limit = 5) {
+  const normalized = String(raw || "").replace(/\D/g, "").slice(0, 3);
+  const sortedRemainder = CANADIAN_AREA_CODE_LIST
+    .filter((code) => !PRIORITY_AREA_CODES.includes(code))
+    .sort((a, b) => Number(a) - Number(b));
+  const ordered = [...PRIORITY_AREA_CODES.filter((code) => CANADIAN_AREA_CODES.has(code)), ...sortedRemainder];
+  const pool = normalized ? ordered.filter((code) => code.startsWith(normalized)) : ordered;
+  return pool.slice(0, Math.max(1, Number(limit) || 5));
 }
 
 export function isValidCanadianPhone(raw) {

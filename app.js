@@ -11,6 +11,7 @@ import {
   isValidCanadianAreaCode,
   isValidCanadianPhone,
   isValidCanadianPostalCode,
+  getCanadianAreaCodeSuggestions,
   isValidEmail,
   normalizeCanadianPhone,
   parseCombinedOnboardingInput,
@@ -119,6 +120,15 @@ const ADDRESS_TYPEAHEAD_STEPS = new Set([
 const POSTAL_CODE_TYPEAHEAD_STEPS = new Set([
   FLOW_STEPS.PAYMENT_CARD_POSTAL
 ]);
+
+const AREA_CODE_TYPEAHEAD_STEPS = new Set([
+  FLOW_STEPS.EXISTING_AREA_CODE_CHECK,
+  FLOW_STEPS.NEW_AREA_CODE_ENTRY
+]);
+
+const FINDER_RADIUS_MIN_KM = 0;
+const FINDER_RADIUS_MAX_KM = 50;
+const FINDER_RADIUS_DEFAULT_KM = 8;
 
 const STEP_CONTRACT = {
   [FLOW_STEPS.GREETING_CONVERSATIONAL]: {
@@ -1208,6 +1218,13 @@ const panelFinder = document.getElementById("panel-finder");
 const quoteBuilderContent = document.getElementById("quote-builder-content");
 const bookingCalendarContent = document.getElementById("booking-calendar-content");
 const finderResultsContent = document.getElementById("finder-results-content");
+const finderModeAddressInput = document.getElementById("finder-mode-address");
+const finderModeCurrentInput = document.getElementById("finder-mode-current");
+const finderModeAddressLabel = document.getElementById("finder-mode-address-label");
+const finderRadiusRange = document.getElementById("finder-radius-range");
+const finderRadiusValue = document.getElementById("finder-radius-value");
+const finderRefreshBtn = document.getElementById("finder-refresh-btn");
+const finderCenterStatus = document.getElementById("finder-center-status");
 const chatBody = document.querySelector(".chat-body");
 
 const basketList = document.getElementById("basket-list");
@@ -1344,6 +1361,15 @@ const state = {
       address: null,
       lookupQuery: null,
       suggestions: []
+    },
+    finder: {
+      radiusKm: FINDER_RADIUS_DEFAULT_KM,
+      locationMode: "service_address",
+      modeSetManually: false,
+      lastCenter: null,
+      lastAddressQuery: null,
+      lastSource: null,
+      lastResultsCount: 0
     },
     booking: {
       slots: [],
@@ -2262,15 +2288,107 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#39;");
 }
 
-function renderFinderResults(results = [], source = "none") {
+function clampFinderRadiusKm(value = FINDER_RADIUS_DEFAULT_KM) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return FINDER_RADIUS_DEFAULT_KM;
+  return Math.max(FINDER_RADIUS_MIN_KM, Math.min(FINDER_RADIUS_MAX_KM, Math.round(numeric)));
+}
+
+function formatFinderRadiusLabel(radiusKm = FINDER_RADIUS_DEFAULT_KM) {
+  const normalized = clampFinderRadiusKm(radiusKm);
+  return normalized === 0 ? "0 km (closest)" : `${normalized} km`;
+}
+
+function formatFinderCenterLabel(center = {}) {
+  if (center?.address) return String(center.address);
+  const lat = Number(center?.lat);
+  const lng = Number(center?.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
+  return "selected location";
+}
+
+function resolveFinderAddressCandidate(context = state.context) {
+  const resolvedService = String(resolveServiceAddress(context) || "").trim();
+  if (resolvedService) return resolvedService;
+  const pending = String(context?.addressAuth?.pendingInput || "").trim();
+  if (pending) return pending;
+  const selected = String(context?.addressTypeaheadSelection?.label || "").trim();
+  if (selected) return selected;
+  return "";
+}
+
+function getFinderUiState(context = state.context) {
+  const serviceAddress = resolveFinderAddressCandidate(context);
+  const radiusKm = clampFinderRadiusKm(context?.finder?.radiusKm);
+  const modeSetManually = Boolean(context?.finder?.modeSetManually);
+  let locationMode = String(context?.finder?.locationMode || "service_address");
+  if (!["service_address", "current_location"].includes(locationMode)) {
+    locationMode = "service_address";
+  }
+  if (serviceAddress && !modeSetManually) {
+    locationMode = "service_address";
+  } else if (!serviceAddress && locationMode === "service_address") {
+    locationMode = "current_location";
+  }
+  return {
+    serviceAddress,
+    radiusKm,
+    locationMode,
+    modeSetManually
+  };
+}
+
+function syncFinderControls({ persist = false } = {}) {
+  const uiState = getFinderUiState();
+  if (finderRadiusRange) finderRadiusRange.value = String(uiState.radiusKm);
+  if (finderRadiusValue) finderRadiusValue.textContent = formatFinderRadiusLabel(uiState.radiusKm);
+  if (finderModeAddressLabel) {
+    const shortAddress =
+      uiState.serviceAddress.length > 56 ? `${uiState.serviceAddress.slice(0, 53).trim()}...` : uiState.serviceAddress;
+    finderModeAddressLabel.textContent = uiState.serviceAddress
+      ? `Use entered address (${shortAddress})`
+      : "Use entered address (not available yet)";
+  }
+  if (finderModeAddressInput) {
+    finderModeAddressInput.disabled = !uiState.serviceAddress;
+    finderModeAddressInput.checked = uiState.locationMode === "service_address" && Boolean(uiState.serviceAddress);
+  }
+  if (finderModeCurrentInput) {
+    finderModeCurrentInput.checked = uiState.locationMode === "current_location" || !uiState.serviceAddress;
+  }
+  if (persist) {
+    const previous = state.context.finder || {};
+    if (previous.radiusKm !== uiState.radiusKm || previous.locationMode !== uiState.locationMode) {
+      applyContextPatch({
+        finder: {
+          radiusKm: uiState.radiusKm,
+          locationMode: uiState.locationMode
+        }
+      });
+    }
+  }
+  return uiState;
+}
+
+function isFinderPanelOpen() {
+  return Boolean(panelFinder && !panelFinder.classList.contains("hidden"));
+}
+
+function renderFinderResults(results = [], source = "none", { center = null, radiusMeters = null } = {}) {
   if (!finderResultsContent) return;
   const safeRows = Array.isArray(results) ? results : [];
   if (safeRows.length === 0) {
-    finderResultsContent.innerHTML = "<p class='small'>No nearby stores found yet. Try a different location.</p>";
+    finderResultsContent.innerHTML = "<p class='small'>No nearby Bell stores found yet. Try a larger radius or different location mode.</p>";
     return;
   }
+  const safeRadiusKm = Number.isFinite(Number(radiusMeters)) ? Math.round(Number(radiusMeters) / 1000) : null;
+  const centerLabel = center ? formatFinderCenterLabel(center) : null;
   finderResultsContent.innerHTML = `
-    <p class="small">Source: ${escapeHtml(source)}</p>
+    <p class="finder-meta">Source: ${escapeHtml(source)}</p>
+    ${centerLabel ? `<p class="finder-meta">Center: ${escapeHtml(centerLabel)}</p>` : ""}
+    ${safeRadiusKm != null ? `<p class="finder-meta">Radius: ${escapeHtml(formatFinderRadiusLabel(safeRadiusKm))}</p>` : ""}
     <div class="finder-list">
       ${safeRows
         .map((item) => {
@@ -2279,11 +2397,14 @@ function renderFinderResults(results = [], source = "none") {
           const phone = escapeHtml(item?.phone || "");
           const website = String(item?.website || "");
           const directions = String(item?.directionsUrl || "");
+          const distanceKm = Number(item?.distanceKm);
+          const distanceText = Number.isFinite(distanceKm) ? `${distanceKm.toFixed(1)} km away` : "";
           const callHref = phone ? `tel:${phone.replace(/[^\d+]/g, "")}` : "";
           return `
             <article class="finder-card">
               <h4>${name}</h4>
               <p>${address}</p>
+              ${distanceText ? `<p class="finder-distance">${escapeHtml(distanceText)}</p>` : ""}
               <div class="finder-actions">
                 ${callHref ? `<a href="${escapeHtml(callHref)}">Call</a>` : "<span>Call unavailable</span>"}
                 ${directions ? `<a href="${escapeHtml(directions)}" target="_blank" rel="noopener noreferrer">Directions</a>` : "<span>Directions unavailable</span>"}
@@ -2311,34 +2432,130 @@ function getGeoPosition() {
   });
 }
 
-async function openStoreFinderPanel() {
+function getFinderFailureMessage(error) {
+  const message = String(error?.message || "").toLowerCase();
+  if (message.includes("finder_service_address_missing")) {
+    return "Enter your full address in chat first, or switch to current location.";
+  }
+  if (message.includes("geolocation_unsupported")) {
+    return "Current location is not supported in this browser. Use your entered address.";
+  }
+  if (message.includes("geolocation_denied")) {
+    return "Location permission is blocked. Use your entered address or enable location access.";
+  }
+  if (message.includes("geolocation_timeout")) {
+    return "Current location timed out. Retry, increase location accuracy, or use your entered address.";
+  }
+  if (message.includes("geolocation_unavailable")) {
+    return "Current location is unavailable right now. Use your entered address instead.";
+  }
+  if (message.includes("address_not_found")) {
+    return "I couldn’t locate that service address. Try a fuller address or switch to current location.";
+  }
+  if (message.includes("lat/lng or address is required") || message.includes("finder_center_required")) {
+    return "Please enter an address first, or switch to current location.";
+  }
+  return "Unable to load nearby Bell stores right now.";
+}
+
+async function loadNearbyBellStores({ announce = false } = {}) {
+  const uiState = syncFinderControls({ persist: true });
+  if (!finderResultsContent) return;
+  finderResultsContent.innerHTML = "<p class='small'>Looking up nearby Bell stores...</p>";
+  if (finderCenterStatus) {
+    finderCenterStatus.textContent =
+      uiState.locationMode === "service_address"
+        ? `Searching near your entered address within ${formatFinderRadiusLabel(uiState.radiusKm)}.`
+        : `Searching near your current location within ${formatFinderRadiusLabel(uiState.radiusKm)}.`;
+  }
+  try {
+    const params = new URLSearchParams({
+      type: "bell_store",
+      radius: String(clampFinderRadiusKm(uiState.radiusKm) * 1000)
+    });
+    if (uiState.locationMode === "service_address") {
+      if (!uiState.serviceAddress) {
+        throw new Error("finder_service_address_missing");
+      }
+      params.set("address", uiState.serviceAddress);
+    } else {
+      const geo = await getGeoPosition().catch((error) => {
+        if (error?.code === 1) throw new Error("geolocation_denied");
+        if (error?.code === 2) throw new Error("geolocation_unavailable");
+        if (error?.code === 3) throw new Error("geolocation_timeout");
+        throw error;
+      });
+      const lat = Number(geo?.coords?.latitude);
+      const lng = Number(geo?.coords?.longitude);
+      params.set("lat", String(lat));
+      params.set("lng", String(lng));
+    }
+
+    const response = await fetch(`/api/finder/nearby?${params.toString()}`);
+    if (!response.ok) {
+      let errorCode = "finder_unavailable";
+      try {
+        const errorPayload = await response.json();
+        if (errorPayload?.error) errorCode = String(errorPayload.error);
+      } catch {
+        // Keep default.
+      }
+      throw new Error(errorCode);
+    }
+    const payload = await response.json();
+    renderFinderResults(payload.results || [], payload.source || "none", {
+      center: payload.center || null,
+      radiusMeters: payload.radiusMeters
+    });
+    if (finderCenterStatus) {
+      const centerLabel = payload.center ? formatFinderCenterLabel(payload.center) : "selected location";
+      finderCenterStatus.textContent = `Showing Bell stores around ${centerLabel} within ${formatFinderRadiusLabel(
+        uiState.radiusKm
+      )}.`;
+    }
+    applyContextPatch({
+      finder: {
+        radiusKm: uiState.radiusKm,
+        locationMode: uiState.locationMode,
+        lastCenter: payload.center || null,
+        lastAddressQuery: uiState.locationMode === "service_address" ? uiState.serviceAddress : null,
+        lastSource: payload.source || "none",
+        lastResultsCount: Array.isArray(payload.results) ? payload.results.length : 0
+      }
+    });
+    logClient("info", "store_finder_loaded", {
+      source: payload.source || "none",
+      mode: uiState.locationMode,
+      radiusKm: uiState.radiusKm,
+      count: Array.isArray(payload.results) ? payload.results.length : 0,
+      traceId: payload.traceId || null
+    });
+    if (announce) {
+      postMessage("bot", "I loaded nearby Bell stores. Use the radius toggle or location mode to refine results.");
+    }
+  } catch (error) {
+    const failureMessage = getFinderFailureMessage(error);
+    finderResultsContent.innerHTML = `<p class='small'>${escapeHtml(failureMessage)}</p>`;
+    if (finderCenterStatus) finderCenterStatus.textContent = failureMessage;
+    logClient("error", "store_finder_failed", {
+      mode: uiState.locationMode,
+      radiusKm: uiState.radiusKm,
+      error: String(error?.message || "unknown")
+    });
+    if (announce) {
+      postMessage("bot", failureMessage);
+    }
+  }
+}
+
+async function openStoreFinderPanel({ announce = true } = {}) {
   if (!panelFinder || !finderResultsContent) {
     postMessage("bot", "Store finder panel is unavailable in this build.");
     return;
   }
   setPanelFocus("finder");
-  finderResultsContent.innerHTML = "<p class='small'>Looking up nearby stores...</p>";
-  try {
-    const geo = await getGeoPosition();
-    const lat = Number(geo?.coords?.latitude);
-    const lng = Number(geo?.coords?.longitude);
-    const response = await fetch(`/api/finder/nearby?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&type=store`);
-    if (!response.ok) throw new Error("finder_unavailable");
-    const payload = await response.json();
-    renderFinderResults(payload.results || [], payload.source || "none");
-    logClient("info", "store_finder_loaded", {
-      source: payload.source || "none",
-      count: Array.isArray(payload.results) ? payload.results.length : 0,
-      traceId: payload.traceId || null
-    });
-    postMessage("bot", "I loaded nearby stores. You can call, get directions, or open the website from the panel.");
-  } catch (error) {
-    finderResultsContent.innerHTML = "<p class='small'>Unable to load nearby stores right now.</p>";
-    logClient("error", "store_finder_failed", {
-      error: String(error?.message || "unknown")
-    });
-    postMessage("bot", "I couldn’t load nearby stores right now. Please allow location access and try again.");
-  }
+  syncFinderControls({ persist: true });
+  await loadNearbyBellStores({ announce });
 }
 
 async function requestHandoffSummary({ currentStep = state.flowStep } = {}) {
@@ -3273,8 +3490,12 @@ function isPostalCodeTypeaheadStep(step = state.flowStep) {
   return POSTAL_CODE_TYPEAHEAD_STEPS.has(step);
 }
 
+function isAreaCodeTypeaheadStep(step = state.flowStep) {
+  return AREA_CODE_TYPEAHEAD_STEPS.has(step);
+}
+
 function isInputTypeaheadStep(step = state.flowStep) {
-  return isAddressTypeaheadStep(step) || isPostalCodeTypeaheadStep(step);
+  return isAddressTypeaheadStep(step) || isPostalCodeTypeaheadStep(step) || isAreaCodeTypeaheadStep(step);
 }
 
 function normalizePostalCodeInput(raw = "") {
@@ -4290,6 +4511,15 @@ function resetSessionState() {
       lookupQuery: null,
       suggestions: []
     },
+    finder: {
+      radiusKm: FINDER_RADIUS_DEFAULT_KM,
+      locationMode: "service_address",
+      modeSetManually: false,
+      lastCenter: null,
+      lastAddressQuery: null,
+      lastSource: null,
+      lastResultsCount: 0
+    },
     booking: {
       slots: [],
       calendarMonth: null,
@@ -4444,6 +4674,7 @@ function resetSessionState() {
   syncThemeSwitcherUi(selectedTheme);
   refreshQuickActionsLanguage();
   refreshBillDownloadButton();
+  syncFinderControls({ persist: true });
   setStatus();
 }
 
@@ -4541,6 +4772,14 @@ function clearSensitiveSessionData() {
     },
     serviceAddress: null,
     serviceAddressValidated: false,
+    finder: {
+      locationMode: "current_location",
+      modeSetManually: false,
+      lastCenter: null,
+      lastAddressQuery: null,
+      lastResultsCount: 0,
+      lastSource: null
+    },
     paymentDraft: getEmptyPaymentDraft(),
     payment: {
       method: null,
@@ -4692,6 +4931,7 @@ function getPatchedContext(patch = {}) {
   if (patch.payment) next.payment = { ...next.payment, ...patch.payment };
   if (patch.financing) next.financing = { ...next.financing, ...patch.financing };
   if (patch.shipping) next.shipping = { ...next.shipping, ...patch.shipping };
+  if (patch.finder) next.finder = { ...next.finder, ...patch.finder };
   if (patch.booking) next.booking = { ...next.booking, ...patch.booking };
   if (patch.checkout) next.checkout = { ...next.checkout, ...patch.checkout };
   if (patch.reminders) next.reminders = { ...next.reminders, ...patch.reminders };
@@ -6336,7 +6576,43 @@ function renderPostalCodeTypeaheadSuggestions(suggestions = []) {
   addressTypeahead.classList.remove("hidden");
 }
 
+function renderAreaCodeTypeaheadSuggestions(suggestions = []) {
+  if (!addressTypeahead) return;
+  addressTypeahead.innerHTML = "";
+  if (!Array.isArray(suggestions) || suggestions.length === 0) {
+    addressTypeahead.classList.add("hidden");
+    return;
+  }
+
+  suggestions.slice(0, 5).forEach((areaCode) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = areaCode;
+    button.addEventListener("click", () => {
+      chatInput.value = areaCode;
+      clearAddressTypeahead();
+      chatInput.focus();
+    });
+    addressTypeahead.appendChild(button);
+  });
+  addressTypeahead.classList.remove("hidden");
+}
+
 function queueAddressTypeahead(query) {
+  if (isAreaCodeTypeaheadStep(state.flowStep)) {
+    resetAddressTypeaheadTimer();
+    const normalizedQuery = String(query || "").replace(/\D/g, "").slice(0, 3);
+    if (!normalizedQuery) {
+      clearAddressTypeahead();
+      return;
+    }
+    state.addressTypeaheadTimer = setTimeout(() => {
+      const suggestions = getCanadianAreaCodeSuggestions(normalizedQuery, 5);
+      renderAreaCodeTypeaheadSuggestions(suggestions);
+    }, 100);
+    return;
+  }
+
   if (isPostalCodeTypeaheadStep(state.flowStep)) {
     resetAddressTypeaheadTimer();
     const normalizedQuery = normalizePostalCodeInput(query);
@@ -10237,7 +10513,66 @@ if (exportTranscriptBtn) {
 if (storeFinderBtn) {
   storeFinderBtn.addEventListener("click", () => {
     setChatMenuOpen(false);
-    void openStoreFinderPanel();
+    void openStoreFinderPanel({ announce: true });
+  });
+}
+
+if (finderRefreshBtn) {
+  finderRefreshBtn.addEventListener("click", () => {
+    void loadNearbyBellStores({ announce: true });
+  });
+}
+
+if (finderModeAddressInput) {
+  finderModeAddressInput.addEventListener("change", () => {
+    if (!finderModeAddressInput.checked) return;
+    applyContextPatch({
+      finder: {
+        locationMode: "service_address",
+        modeSetManually: true
+      }
+    });
+    if (isFinderPanelOpen()) {
+      void loadNearbyBellStores({ announce: false });
+    }
+  });
+}
+
+if (finderModeCurrentInput) {
+  finderModeCurrentInput.addEventListener("change", () => {
+    if (!finderModeCurrentInput.checked) return;
+    applyContextPatch({
+      finder: {
+        locationMode: "current_location",
+        modeSetManually: true
+      }
+    });
+    if (isFinderPanelOpen()) {
+      void loadNearbyBellStores({ announce: false });
+    }
+  });
+}
+
+if (finderRadiusRange) {
+  finderRadiusRange.addEventListener("input", () => {
+    const radiusKm = clampFinderRadiusKm(finderRadiusRange.value);
+    if (finderRadiusValue) finderRadiusValue.textContent = formatFinderRadiusLabel(radiusKm);
+    applyContextPatch({
+      finder: {
+        radiusKm
+      }
+    });
+  });
+  finderRadiusRange.addEventListener("change", () => {
+    const radiusKm = clampFinderRadiusKm(finderRadiusRange.value);
+    applyContextPatch({
+      finder: {
+        radiusKm
+      }
+    });
+    if (isFinderPanelOpen()) {
+      void loadNearbyBellStores({ announce: false });
+    }
   });
 }
 
@@ -10521,6 +10856,7 @@ window.addEventListener("appinstalled", () => {
 function boot() {
   const savedTheme = readStore(CHAT_THEME_STORE_KEY, { mode: "system" });
   resetSessionState();
+  syncFinderControls({ persist: true });
   ensureWalkthroughController();
   closeChatWidget();
   renderPrivacyPanel();

@@ -30,6 +30,7 @@ Show and explain:
 6. Payment and shipping progression.
 7. Order confirmation and receipt output.
 8. Booking slot selection and post-order options.
+9. Nearby Bell store lookup from entered address with 0-50 km radius toggle.
 
 Talk track:
 "The key design choice is deterministic control over the critical path, while AI improves fluency and intent handling."
@@ -49,7 +50,7 @@ Evidence anchor to cite:
 
 ## 5. Quality and Reliability Evidence (2 minutes)
 State clearly:
-- Automated suite status: 76/76 passing (`node --test tests/*.test.mjs`).
+- Automated suite status: 126/126 passing (`node --test tests/*.mjs`).
 - Operational window (Mar 11-16, 2026): 28 order attempts, 27 successful.
 - Attempt-to-success rate: 96.43%.
 
@@ -100,7 +101,7 @@ node server.mjs
 - Service selection and quote builder
 - Checkout and order confirmation
 - Booking calendar selection
-- Terminal test summary (76/76)
+- Terminal test summary (126/126)
 
 ### C. Q&A prompts
 - "What fails safely if the model is offline?"

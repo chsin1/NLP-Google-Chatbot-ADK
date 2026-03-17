@@ -163,7 +163,7 @@ Deterministic business logic in `app.js`, `shared/*.mjs`, and server endpoints r
 - Existing/new customer onboarding and authentication variants
 - Mid-conversation language switching (EN/FR/ES/ZH) for future prompts and option labels
 - Address lookup (`mock|google|hybrid`) and typeahead support with Toronto-first ranking in Google mode
-- Nearby store finder with Google Places primary + OpenStreetMap Overpass fallback
+- Nearby Bell store finder with entered-address or current-location mode and 0-50 km radius control
 - Guided Quote Builder (budget/speed/device-cost weighting + side-by-side ranked options)
 - Quote preference hard-lock to `100` total points across budget/speed/device cost
 - Offer carousel, bundle discount logic, and cross-sell prompts
@@ -284,7 +284,7 @@ Address lookup behavior:
 - `mock`: deterministic local suggestions for testing/demo
 - `google` / `hybrid`: Google Places suggestions only, ranked Toronto-first (Toronto bias, not a hard city restriction)
 - If Google returns no results or is unavailable, the chat allows manual address entry (no forced block)
-- Finder behavior: Google Places first when key is configured, otherwise Overpass fallback, then safe empty response
+- Finder behavior: uses entered service address when available (or current location), searches Bell stores via Google Places, and keeps Overpass as fallback for resilience
 
 ---
 
@@ -299,7 +299,7 @@ Address lookup behavior:
 - `POST /api/chat-assist-stream` - assist streaming via SSE (`start`, `token`, `end`, `error`)
 - `GET /api/llm-health` - configured/connected status for UI indicator
 - `POST /api/address-lookup` - typeahead suggestions
-- `GET /api/finder/nearby` - nearby finder with Google->Overpass fallback
+- `GET /api/finder/nearby` - nearby Bell store finder (`lat/lng` or `address`, optional `radius` in meters) with Google->Overpass fallback
 - `POST /api/automations/post-intake` - optional webhook trigger for intake-complete events
 - `POST /api/quote-preview` - deterministic quote ranking and comparison output
 - `GET /api/compliance-status` - compliance policy status flags
@@ -334,6 +334,8 @@ Key suites:
 - `tests/sse-assist.test.mjs` - SSE event ordering and fallback behavior
 - `tests/automation-webhook.test.mjs` - post-intake webhook success/no-op/failure behavior
 - `tests/finder-fallback.test.mjs` - Google primary and Overpass fallback behavior
+- `tests/finder-address-search.test.mjs` - address geocode + radius normalization finder coverage
+- `tests/finder-ui-controls.test.mjs` - finder UI control wiring (address/current location + 0-50 km)
 - `tests/onboarding-walkthrough.test.mjs` - walkthrough persistence and replay wiring
 - `tests/agentic-evals.test.mjs` - safety harness and agent-tool routing checks
 
@@ -449,6 +451,10 @@ node server.mjs
 - Added ChatGPT health and assist endpoints with fallback mode
 - Added assist-only SSE streaming endpoint with client fallback behavior
 - Added nearby finder endpoint with Google Places primary and Overpass fallback
+- Updated nearby finder UX for Bell stores:
+  - entered-address-first lookup with current-location toggle
+  - 0-50 km radius slider
+  - richer source/center/distance result metadata
 - Added post-intake automation webhook endpoint (code-ready, optional)
 - Added first-time walkthrough module with replay support in chat menu
 - Added deterministic agent-router endpoint and trace IDs across intent/assist/finder/webhook flows

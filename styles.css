@@ -1596,6 +1596,54 @@ button:disabled {
   gap: 10px;
 }
 
+.finder-controls {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-alt);
+  margin-bottom: 10px;
+}
+
+.finder-mode-row {
+  display: grid;
+  gap: 6px;
+}
+
+.finder-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.finder-option input[type="radio"] {
+  accent-color: var(--bell-blue);
+}
+
+.finder-radius-row {
+  display: grid;
+  gap: 6px;
+}
+
+.finder-radius-row label {
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.finder-radius-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--bell-blue);
+}
+
+.finder-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .finder-list {
   display: grid;
   gap: 10px;
@@ -1614,6 +1662,12 @@ button:disabled {
 
 .finder-card p {
   margin: 0;
+}
+
+.finder-distance {
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
 }
 
 .finder-actions {

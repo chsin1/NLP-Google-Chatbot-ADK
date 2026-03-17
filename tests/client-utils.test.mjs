@@ -13,6 +13,7 @@ import {
   isValidCanadianAreaCode,
   isValidCanadianPhone,
   isValidCanadianPostalCode,
+  getCanadianAreaCodeSuggestions,
   isValidEmail,
   normalizeCanadianPhone,
   parseCombinedOnboardingInput,
@@ -82,6 +83,13 @@ test("isValidCanadianAreaCode validates known Canadian NPAs", () => {
   assert.equal(isValidCanadianAreaCode("416"), true);
   assert.equal(isValidCanadianAreaCode("647"), true);
   assert.equal(isValidCanadianAreaCode("999"), false);
+});
+
+test("getCanadianAreaCodeSuggestions returns prefix matches with priority ordering", () => {
+  assert.deepEqual(getCanadianAreaCodeSuggestions("4", 3), ["416", "403", "418"]);
+  assert.deepEqual(getCanadianAreaCodeSuggestions("64", 3), ["647"]);
+  assert.deepEqual(getCanadianAreaCodeSuggestions("98", 3), ["986"]);
+  assert.deepEqual(getCanadianAreaCodeSuggestions("999", 3), []);
 });
 
 test("isValidCanadianPhone validates 10-digit Canadian numbers", () => {

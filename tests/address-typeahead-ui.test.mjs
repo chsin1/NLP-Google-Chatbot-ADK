@@ -15,6 +15,10 @@ test("app centralizes full-address typeahead step eligibility", async () => {
   assert.match(appCode, /const POSTAL_CODE_TYPEAHEAD_STEPS = new Set\(\[/);
   assert.match(appCode, /FLOW_STEPS\.PAYMENT_CARD_POSTAL/);
   assert.match(appCode, /function isPostalCodeTypeaheadStep\(step = state\.flowStep\)/);
+  assert.match(appCode, /const AREA_CODE_TYPEAHEAD_STEPS = new Set\(\[/);
+  assert.match(appCode, /FLOW_STEPS\.EXISTING_AREA_CODE_CHECK/);
+  assert.match(appCode, /FLOW_STEPS\.NEW_AREA_CODE_ENTRY/);
+  assert.match(appCode, /function isAreaCodeTypeaheadStep\(step = state\.flowStep\)/);
 });
 
 test("app tracks selected suggestion metadata and derives source tags", async () => {

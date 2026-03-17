@@ -11,10 +11,11 @@ Bell is a large telecommunications company with complex product bundles, strict 
 This proof of concept demonstrates that approach. The Bell NLP chatbot combines a deterministic flow engine with optional LLM assistance. In one guided flow, a customer can select service type, compare offers, complete onboarding or authentication, finish payment and shipping, confirm the order, select an installation slot, and export transcript artifacts for handoff.
 
 Key observed results in the current codebase and logs:
-- Automated quality gate: `76/76` tests passing (`node --test tests/*.test.mjs`, March 17, 2026).
+- Automated quality gate: `126/126` tests passing (`node --test tests/*.mjs`, March 17, 2026).
 - Operational conversion in window: `27` successful orders out of `28` attempts (`96.43%` attempt-to-success).
 - End-to-end sample success: one observed session moved from chat open to order success in `65.206` seconds, then booking selection by `71.951` seconds.
 - LLM assist cost remained low in this window: `/api/chat-assist` total estimated cost `CAD 0.017758` across `395` calls (`CAD 0.000045` average per call).
+- Nearby Bell store discovery now supports entered-address-first lookup plus current-location fallback with configurable radius (`0-50 km`).
 
 The approach appears viable beyond POC if Bell funds three gaps: production systems integration (CRM/OMS/billing), production-grade data governance/approvals, and stricter KPI instrumentation discipline.
 
@@ -38,6 +39,7 @@ The current POC supports the following end-to-end path in one chat session:
 6. Create order confirmation and render receipt.
 7. Offer installation slot selection and reminder options.
 8. Export transcript and handoff artifacts.
+9. Find nearby Bell stores from entered address or current location with radius control.
 
 This flow is implemented across:
 - Front-end orchestrator: `app.js`
@@ -71,7 +73,7 @@ From repository limitations and architecture boundaries:
 ## 4. Evidence Ledger (Source-of-Truth Claims)
 | Claim | Status | Evidence |
 |---|---|---|
-| All automated tests are passing | Proven | `node --test tests/*.test.mjs` on March 17, 2026: `76` pass, `0` fail |
+| All automated tests are passing | Proven | `node --test tests/*.mjs` on March 17, 2026: `126` pass, `0` fail |
 | LLM guardrails prohibit authoritative pricing/payment truth from model | Proven | `server.mjs` guardrail prompt and deterministic boundaries |
 | POC achieved strong order completion on attempted checkouts | Observed | Metrics window Mar 11-16, 2026: `28` attempts, `27` successes (`96.43%`) |
 | Quote builder had a runtime regression (`preferenceTotal`) on Mar 16, 2026 | Observed | `app-errors.log`: `38` matching errors across `12` sessions |
@@ -139,7 +141,7 @@ Baseline in this report is internal, based on repository and telemetry states:
 
 ### 6.3 What changed
 - Regression episode: `preferenceTotal is not defined` generated front-end errors and unhandled rejections.
-- Current state: tests include quote-builder regression checks and full suite passes (`76/76`).
+- Current state: tests include quote-builder regression checks and full suite passes (`126/126`).
 - Operationally, successful order and booking sessions are observed after the failure window.
 
 ## 7. One Clear Success and One Honest Failure
@@ -234,6 +236,7 @@ Implemented endpoints (from server implementation):
 - `POST /api/chat-assist` - assistive language tasks.
 - `GET /api/llm-health` - LLM connectivity and model status.
 - `POST /api/address-lookup` - address suggestions.
+- `GET /api/finder/nearby` - nearby Bell stores using either `lat/lng` or `address` and optional radius.
 - `POST /api/quote-preview` - deterministic quote ranking.
 - `POST /api/handoff-summary` - structured handoff summary generation.
 - `POST /api/transcript-export` - exportable transcript payload.
@@ -243,12 +246,12 @@ Implemented endpoints (from server implementation):
 ## Appendix D - Test Artifacts and Detailed Results
 ### D.1 Command executed
 ```bash
-node --test tests/*.test.mjs
+node --test tests/*.mjs
 ```
 
 ### D.2 Result summary (March 17, 2026)
-- Tests run: `76`
-- Passed: `76`
+- Tests run: `126`
+- Passed: `126`
 - Failed: `0`
 
 ### D.3 Notable regression coverage areas
@@ -356,7 +359,7 @@ Production-readiness implications:
 - H5: Order confirmation and receipt state.
 - H6: Installation slot selection panel.
 - H7: `/api/metrics` response snippet in terminal.
-- H8: Test run output (`76/76`) in terminal.
+- H8: Test run output (`126/126`) in terminal.
 
 ### H.2 Capture checklist
 1. Use consistent browser zoom and desktop width.
