@@ -169,6 +169,44 @@ async function callOpenAIResponses({
   deterministicData = {},
   endpoint = "/api/chat-assist"
 } = {}) {
+  
+  // ADK Bridge — routes to Vertex AI agent when enabled
+  const ADK_ENABLED = String(process.env.ADK_BRIDGE_ENABLED || "false").toLowerCase() === "true";
+  const ADK_URL = process.env.ADK_BRIDGE_URL || "http://127.0.0.1:8000/chat";
+
+  if (ADK_ENABLED) {
+    try {
+      const sid = sessionId || "session-default";
+      const response = await fetch(ADK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMessage,
+          session_id: sid,
+          context
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`ADK bridge HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      llmHealth.configured = true;
+      llmHealth.connected = true;
+      llmHealth.lastCheckedAt = new Date().toISOString();
+      llmHealth.lastError = null;
+      return {
+        ok: true,
+        mode: "adk_agent",
+        data: { output_text: data.text },
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+      };
+    } catch (error) {
+      llmHealth.connected = false;
+      llmHealth.lastError = String(error?.message || "ADK bridge failed");
+      // Falls through to original OpenAI path below
+    }
+  }
+
   const hasKey = Boolean(process.env.OPENAI_API_KEY) && LLM_ENABLED;
   if (!hasKey) {
     llmHealth.configured = false;

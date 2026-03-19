@@ -4,3 +4,6 @@
 *.key
 logs/llm-usage.log
 logs/llm-usage-*.log
+venv/
+.env
+logs/adk-conversations.log

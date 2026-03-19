@@ -1249,6 +1249,7 @@ const chatLiveRegion = document.getElementById("chat-live-region");
 
 const state = {
   chatStarted: false,
+  adkGreeted: false,
   muted: false,
   transcript: [],
   deferredInstallPrompt: null,
@@ -2210,9 +2211,9 @@ async function requestChatAssist(task, payload = {}, { fallbackText = "", minLen
         endpoint: "requestChatAssist"
       });
     }
-    if (data?.mode === "llm") {
-      applyContextPatch({ llmStatus: { configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" } });
-      updateLlmStatusUi({ ...state.context.llmStatus, configured: true, connected: true, model: state.context.llmStatus.model || "gpt-4.1-mini" });
+    if (data?.mode === "llm" || data?.mode === "adk_agent") {
+      applyContextPatch({ llmStatus: { configured: true, connected: true, model: "gemini-2.0-flash-001" } });
+      updateLlmStatusUi({ ...state.context.llmStatus, configured: true, connected: true, model: "gemini-2.0-flash-001" });
     }
     const text = String(data?.text || "").trim();
     if (text.length >= minLength) return text;
@@ -4992,6 +4993,9 @@ function applyContextPatch(patch = {}) {
 }
 
 function transitionTo(nextStep, patchContext = {}, { pushHistory = true, enforceContract = true } = {}) {
+  // ADK agent is active — block all FSM transitions
+  if (state.adkGreeted) return;
+
   if (LEGACY_FLOW_STEPS.includes(nextStep)) {
     logClient("error", "invalid_flow_transition", { from: state.flowStep, to: nextStep, reason: "legacy_step_deprecated" });
     postMessage("bot", "That step is no longer available. I will keep you in the current flow.");
@@ -7578,15 +7582,10 @@ function renderStep(step) {
       ensureAiDisclosure();
       stepPrompt(
         FLOW_STEPS.HELPDESK_ENTRY,
-        "Welcome to Bell. I’m Belinda, your automated AI assistant. What service are you shopping for today?"
+        "Welcome to Bell. I'm Belinda, your automated AI assistant. What service are you shopping for today?"
       );
       showChoiceButtons(
-        [
-          "Mobility",
-          "Internet",
-          "Landline",
-          "Bundle"
-        ],
+        ["Mobility", "Internet", "Landline", "Bundle"],
         (choice) => {
           postMessage("user", choice);
           routeHelpdeskSelection(choice, { pushHistory: true });
@@ -10109,6 +10108,38 @@ function openChatWidget() {
   chatWidget.classList.remove("hidden");
   void refreshLlmStatus({ silent: true });
   maybeStartWalkthrough();
+
+  // ADK agent greeting — skip FSM entirely on first open
+  if (!state.adkGreeted) {
+    state.adkGreeted = true;
+    setTimeout(async () => {
+      try {
+        // Generate unique session ID if not already set
+        if (!state.context.sessionId) {
+          applyContextPatch({ sessionId: `bell-${Date.now()}-${Math.random().toString(36).slice(2,7)}` });
+        }
+        const sessionId = state.context.sessionId;
+        const response = await fetch("/api/chat-assist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            task: "fluency",
+            step: "ADK_AGENT",
+            userMessage: "hello",
+            context: { sessionId },
+            deterministicData: {},
+            sessionId
+          })
+        });
+        const data = await response.json();
+        const reply = String(data?.text || "").trim();
+        postMessage("bot", reply || "Hi! Are you a new or existing Bell customer?");
+      } catch {
+        postMessage("bot", "Hi! Are you a new or existing Bell customer?");
+      }
+    }, 300);
+    return;
+  }
 }
 
 function closeChatWidget() {
@@ -10333,8 +10364,11 @@ function runTopLoginFlow(mode) {
       }
     });
   }
+
   state.pendingAuthMode = mode === "auto" ? "auto" : "manual";
-  transitionTo(FLOW_STEPS.GREETING_CONVERSATIONAL, {}, { pushHistory: true, enforceContract: false });
+  if (!state.adkGreeted) {
+    transitionTo(FLOW_STEPS.GREETING_CONVERSATIONAL, {}, { pushHistory: true, enforceContract: false });
+  }
 }
 
 chatLauncher.addEventListener("click", () => {
@@ -10707,17 +10741,55 @@ chatForm.addEventListener("submit", async (event) => {
   chatInput.value = "";
   applyContextPatch({ offlineDraft: { input: "" } });
   clearOfflineDraft();
-  let userMessage = message;
-  if (state.flowStep === FLOW_STEPS.PAYMENT_CVV || state.flowStep === FLOW_STEPS.PAYMENT_CARD_CVC) {
-    userMessage = "***";
-  } else if (state.flowStep === FLOW_STEPS.PAYMENT_CARD_NUMBER) {
-    const digits = normalizeCardDigits(message);
-    userMessage = digits.length >= 4 ? `**** **** **** ${digits.slice(-4)}` : "**** **** **** ****";
-  }
-  postMessage("user", userMessage);
+  postMessage("user", message);
   clearAddressTypeahead();
-  await handleChatInput(message);
+  console.log("ADK greeted:", state.adkGreeted, "sessionId:", state.context.sessionId); // debug
+
+  // ADK Agent — bypass FSM entirely
+  try {
+    const sessionId = state.context.sessionId || "bell-session-001";
+    const response = await fetch("/api/chat-assist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task: "fluency",
+        step: "ADK_AGENT",
+        userMessage: message,
+        context: { sessionId },
+        deterministicData: {},
+        sessionId
+      })
+    });
+    const data = await response.json();
+    const reply = String(data?.text || "").trim();
+    if (reply) {
+      postMessage("bot", reply);
+    } else {
+      postMessage("bot", "I'm here to help with your Bell services.");
+    }
+  } catch (err) {
+    postMessage("bot", "Sorry, I'm having trouble connecting. Please try again.");
+  }
 });
+
+// chatForm.addEventListener("submit", async (event) => {
+//   event.preventDefault();
+//   const message = chatInput.value.trim();
+//   if (!message) return;
+//   chatInput.value = "";
+//   applyContextPatch({ offlineDraft: { input: "" } });
+//   clearOfflineDraft();
+//   let userMessage = message;
+//   if (state.flowStep === FLOW_STEPS.PAYMENT_CVV || state.flowStep === FLOW_STEPS.PAYMENT_CARD_CVC) {
+//     userMessage = "***";
+//   } else if (state.flowStep === FLOW_STEPS.PAYMENT_CARD_NUMBER) {
+//     const digits = normalizeCardDigits(message);
+//     userMessage = digits.length >= 4 ? `**** **** **** ${digits.slice(-4)}` : "**** **** **** ****";
+//   }
+//   postMessage("user", userMessage);
+//   clearAddressTypeahead();
+//   await handleChatInput(message);
+// });
 
 chatInput.addEventListener("input", () => {
   let nextInput = chatInput.value;
