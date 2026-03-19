@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(".env.local")
 
 from google.adk.agents import LlmAgent
 from google.adk.tools import agent_tool

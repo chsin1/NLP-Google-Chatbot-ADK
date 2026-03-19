@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(".env.local")
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
