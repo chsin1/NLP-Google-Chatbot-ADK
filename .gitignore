@@ -7,3 +7,5 @@ logs/llm-usage-*.log
 venv/
 .env
 logs/adk-conversations.log
+logs/app-errors.log
+logs/app-events.log
