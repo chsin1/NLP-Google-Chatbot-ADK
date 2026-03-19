@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#00549a" />
+    <title>Bell-Style Agentic Sales Assistant</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="bell-header">
+      <div class="brand-row">
+        <div class="logo">Bell</div>
+        <nav>
+          <a href="#">Mobility</a>
+          <a href="#">Internet</a>
+          <a href="#">TV & streaming</a>
+          <a href="#">Bundles</a>
+          <a href="#">Home phone</a>
+          <a href="#">Promotions</a>
+          <a href="#">Support</a>
+        </nav>
+        <div class="brand-tools">
+          <div id="llm-status-site" class="llm-status llm-offline llm-status-site">
+            <span id="llm-status-dot-site" class="dot"></span>
+            <span id="llm-status-text-site">AI Assistant: Offline</span>
+          </div>
+          <div id="address-status-site" class="llm-status llm-offline llm-status-site">
+            <span class="dot"></span>
+            <span id="address-status-text-site">Address: Checking</span>
+          </div>
+          <div class="theme-switcher theme-switcher-site" id="theme-switcher-site" role="group" aria-label="Site theme mode">
+            <label><input type="radio" data-theme-input="1" name="site-theme" value="system" checked />System</label>
+            <label><input type="radio" data-theme-input="1" name="site-theme" value="light" />Light</label>
+            <label><input type="radio" data-theme-input="1" name="site-theme" value="dark" />Dark</label>
+          </div>
+          <button class="header-login" id="open-chat-header">Log in</button>
+        </div>
+      </div>
+      <div class="promo-row">Order online and discover area-specific offers in chat.</div>
+    </header>
+
+    <main class="landing">
+      <section class="hero">
+        <div class="hero-copy">
+          <h1>Type in your area code.<br />Arrive at great offers.</h1>
+          <p>Get Bell-like mobility, internet and home phone bundles through a guided assistant.</p>
+          <div class="hero-actions">
+            <button id="open-chat-offers" class="primary">Find my offers</button>
+            <button class="secondary">1 800 799-5859</button>
+          </div>
+        </div>
+        <div class="hero-visual" aria-hidden="true">
+          <img
+            class="hero-photo"
+            src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1600&q=80"
+            alt="Happy couple browsing offers online"
+          />
+          <div class="shape"></div>
+        </div>
+      </section>
+
+      <section class="login-sections" id="login-sections">
+        <article class="login-card">
+          <h2>Automatic sign-in</h2>
+          <p>Use stored profile and continue as a pre-authenticated Bell customer.</p>
+          <button id="auto-login-btn" class="primary">Continue automatically</button>
+        </article>
+
+        <article class="login-card">
+          <h2>Manual sign-in</h2>
+          <p>Authenticate by phone or email.</p>
+          <input id="auth-identifier-input" type="text" placeholder="416-555-1111 or robert@test.gmail.com" />
+          <div class="small">Phone mapping: 416 Robert, 647 George, 986 Samantha</div>
+          <button id="manual-login-btn" class="primary">Sign in manually</button>
+        </article>
+      </section>
+
+      <section class="workflow-strip">
+        <div class="wf-pill">Mobility plans</div>
+        <div class="wf-pill">Internet</div>
+        <div class="wf-pill">Phones</div>
+        <div class="wf-pill">TV</div>
+        <div class="wf-pill">Streaming</div>
+      </section>
+
+      <section class="metrics-dashboard" id="metrics-dashboard">
+        <div class="metrics-head">
+          <h2>Sales Performance Dashboard</h2>
+          <div class="metrics-controls">
+            <select id="metrics-route-filter" aria-label="Route filter">
+              <option value="all">All routes</option>
+              <option value="sales">Sales</option>
+              <option value="support">Support</option>
+              <option value="corporate">Corporate</option>
+            </select>
+            <button id="refresh-metrics-btn" type="button" class="secondary">Refresh KPI Data</button>
+          </div>
+        </div>
+        <p class="metrics-subtitle">
+          Live KPI monitoring for chatbot-led sales sessions, conversion, and revenue pipeline.
+        </p>
+        <div id="sla-summary" class="sla-summary"></div>
+        <div class="metrics-grid" id="metrics-grid"></div>
+        <div class="metrics-panels">
+          <article class="metrics-panel">
+            <h3>SLA Breach Trend</h3>
+            <table class="metrics-table" id="sla-breach-table">
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Breaches</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </article>
+          <article class="metrics-panel">
+            <h3>Monthly KPI Snapshot</h3>
+            <table class="metrics-table" id="metrics-monthly-table">
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>MRR</th>
+                  <th>Pipeline</th>
+                  <th>Conversions</th>
+                  <th>MTTC</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </article>
+          <article class="metrics-panel">
+            <h3>Route Conversion Summary</h3>
+            <table class="metrics-table" id="metrics-route-table">
+              <thead>
+                <tr>
+                  <th>Route</th>
+                  <th>Journeys</th>
+                  <th>Orders</th>
+                  <th>Conversion</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </article>
+          <article class="metrics-panel">
+            <h3>Recent Sessions & Interactions</h3>
+            <table class="metrics-table" id="metrics-sessions-table">
+              <thead>
+                <tr>
+                  <th>Session</th>
+                  <th>Route</th>
+                  <th>Events</th>
+                  <th>Last Event</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <button id="chat-launcher" class="chat-launcher" aria-label="Open chat">Chat</button>
+
+    <section id="chat-widget" class="chat-widget hidden" aria-live="polite">
+      <header class="chat-topbar">
+        <div class="chat-brand">Chatting with Bell</div>
+        <div id="language-switcher" class="language-switcher" role="group" aria-label="Conversation language">
+          <label><input type="radio" name="chat-language" value="en" checked />EN</label>
+          <label><input type="radio" name="chat-language" value="fr" />FR</label>
+          <label><input type="radio" name="chat-language" value="es" />ES</label>
+          <label><input type="radio" name="chat-language" value="zh" />中文</label>
+        </div>
+        <div class="chat-topbar-actions">
+          <button id="bill-download-btn" class="bill-download-btn hidden" type="button">Bill available</button>
+          <button id="chat-menu-btn" class="chat-menu-btn" aria-label="Chat options" aria-haspopup="menu" aria-expanded="false" aria-controls="chat-menu">...</button>
+          <div id="chat-menu" class="chat-menu hidden" role="menu" aria-label="Chat menu">
+            <button id="mute-chat-btn" type="button" role="menuitem">Mute Chat</button>
+            <button id="export-transcript-btn" type="button" role="menuitem">Export Transcript</button>
+            <button id="store-finder-btn" type="button" role="menuitem">Find Nearby Stores</button>
+            <button id="replay-walkthrough-btn" type="button" role="menuitem">Replay Walkthrough</button>
+            <button id="privacy-controls-btn" type="button" role="menuitem">Privacy</button>
+            <button id="about-ai-btn" type="button" role="menuitem">About AI</button>
+            <button id="refresh-chat-btn" type="button" role="menuitem">Refresh</button>
+            <button id="end-chat-btn" type="button" role="menuitem">End Chat</button>
+          </div>
+          <button id="close-chat" class="close-chat" aria-label="Minimize chat">-</button>
+        </div>
+      </header>
+
+      <div class="chat-body conversation-only">
+        <section class="conversation-pane">
+          <div id="chat-window" class="chat-window"></div>
+          <div id="journey-progress" class="journey-progress"></div>
+          <div id="quick-actions" class="quick-actions"></div>
+          <section id="availability-card" class="availability-card hidden">
+            <div class="availability-head">
+              <div class="availability-title">Check availability</div>
+            </div>
+            <div class="availability-content">
+              <p class="availability-hero">
+                Great news. Bell offers are available in your area.
+              </p>
+              <p class="availability-sub">
+                Plus, get connected faster with easy and convenient self-install options.
+              </p>
+              <div class="availability-grid">
+                <article>
+                  <h4>I'm new to Bell</h4>
+                  <p>Order internet on its own.</p>
+                  <button id="new-customer-btn" type="button" class="primary">Get started</button>
+                </article>
+                <article>
+                  <h4>I'm an existing Bell customer</h4>
+                  <p>Add Internet to your account or manage your current service.</p>
+                  <button id="existing-customer-btn" type="button" class="primary">Add Internet</button>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <form id="chat-form" class="chat-form" autocomplete="off">
+            <input
+              id="chat-input"
+              type="text"
+              placeholder="Type your message here..."
+              required
+            />
+            <button type="submit">Send</button>
+          </form>
+          <div id="address-typeahead" class="address-typeahead hidden"></div>
+          <div class="session-status" id="session-status">Session: not authenticated</div>
+          <div id="chat-live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+        </section>
+
+        <section class="assistant-panels">
+          <div id="panel-quote" class="panel-card hidden">
+            <h3>Guided Quote Builder</h3>
+            <div id="quote-builder-content" class="quote-builder-content"></div>
+          </div>
+
+          <div id="panel-offers" class="panel-card hidden">
+            <h3>Product Carousel</h3>
+            <div class="carousel-controls">
+              <button id="carousel-prev-btn" type="button">Prev</button>
+              <span id="carousel-page-label">Page 1 of 3</span>
+              <button id="carousel-next-btn" type="button">Next</button>
+            </div>
+            <div id="carousel" class="carousel"></div>
+          </div>
+
+          <div id="panel-basket" class="panel-card hidden">
+            <h3>Basket</h3>
+            <ul id="basket-list" class="basket-list"></ul>
+            <div class="basket-total" id="basket-total">Total: CAD $0.00/month</div>
+            <button id="validate-btn" disabled>Run Eligibility & Credit Checks</button>
+          </div>
+
+          <div id="panel-checkout" class="panel-card hidden">
+            <h3>Checkout & Order</h3>
+            <div class="small" id="checkout-status">Status: waiting for eligibility approval.</div>
+            <div id="order-summary" class="order-summary">No order created yet.</div>
+            <button id="tokenize-btn" disabled>Choose Payment Method</button>
+            <button id="place-order-btn" disabled>Place Order & Confirm</button>
+          </div>
+
+          <div id="panel-booking" class="panel-card hidden">
+            <h3>Installation Calendar</h3>
+            <div id="booking-calendar-content" class="booking-calendar-content"></div>
+          </div>
+
+          <div id="panel-finder" class="panel-card hidden">
+            <h3>Nearby Bell Stores</h3>
+            <div class="finder-controls">
+              <div class="finder-mode-row">
+                <label class="finder-option" for="finder-mode-address">
+                  <input id="finder-mode-address" type="radio" name="finder-location-mode" value="service_address" checked />
+                  <span id="finder-mode-address-label">Use entered address</span>
+                </label>
+                <label class="finder-option" for="finder-mode-current">
+                  <input id="finder-mode-current" type="radio" name="finder-location-mode" value="current_location" />
+                  <span>Use current location</span>
+                </label>
+              </div>
+              <div class="finder-radius-row">
+                <label for="finder-radius-range">Search radius: <strong id="finder-radius-value">8 km</strong></label>
+                <input id="finder-radius-range" type="range" min="0" max="50" step="1" value="8" />
+              </div>
+              <button id="finder-refresh-btn" type="button" class="secondary">Search Bell Stores</button>
+              <p id="finder-center-status" class="small">Set your location mode and search radius, then load nearby Bell stores.</p>
+            </div>
+            <div id="finder-results-content" class="finder-results-content">
+              <p class="small">Use "Find Nearby Stores" from the chat menu to load results.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section id="privacy-panel" class="chat-modal hidden" role="dialog" aria-modal="true" aria-labelledby="privacy-panel-title">
+        <header>
+          <h3 id="privacy-panel-title">Privacy Controls</h3>
+          <button id="privacy-panel-close" type="button" class="secondary">Close</button>
+        </header>
+        <p>This panel shows what consent is active and lets you withdraw profile/payment/export consent.</p>
+        <ul id="privacy-consent-list" class="privacy-consent-list"></ul>
+        <button id="withdraw-consent-btn" type="button" class="secondary danger">Withdraw Consent and Reset PII</button>
+      </section>
+
+      <section id="ai-about-panel" class="chat-modal hidden" role="dialog" aria-modal="true" aria-labelledby="ai-about-title">
+        <header>
+          <h3 id="ai-about-title">About AI Assistant</h3>
+          <button id="ai-about-close" type="button" class="secondary">Close</button>
+        </header>
+        <p>AI helps with conversational fluency, intent understanding, recommendation explanation, and multilingual phrasing.</p>
+        <p>AI does not decide exact pricing, promo eligibility, credit outcomes, inventory truth, billing balances, order confirmation, or payment execution.</p>
+      </section>
+    </section>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
