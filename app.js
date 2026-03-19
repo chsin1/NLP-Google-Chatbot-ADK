@@ -10125,7 +10125,7 @@ function openChatWidget() {
           body: JSON.stringify({
             task: "fluency",
             step: "ADK_AGENT",
-            userMessage: "hello",
+            userMessage: "A new customer just opened the Bell chat. Greet them with one friendly sentence and ask if they are a new or existing Bell customer. Do not ask anything else.",
             context: { sessionId },
             deterministicData: {},
             sessionId
