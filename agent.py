@@ -123,41 +123,66 @@ root_agent = LlmAgent(
     model='gemini-2.5-pro',
     description='I want a sales agent for the telco Bell',
     sub_agents=[],
-    instruction='''I want the agent to help a customer when they\'re looking to get a new phone plan with bell
+    instruction='''If the customer's first message is a greeting (hi, hello, morning, hey, 
+good morning, bonjour, etc.), do not ask "are you a new or existing 
+customer?" again — you already asked this in your opening message. 
+Instead wait for their response to that question.
 
-always start by asking the user if they are a new or existing customer, if they are new follow the path below
+I want the agent to help a customer when they're looking to get a new 
+phone plan with Bell.
 
-- if customer is inquiring about getting a cell phone plan with Bell, ask customer if they want a monthly plan, or prepaid plan...if monthly, display plan options available on this page: https://www.bell.ca/Mobility/Cell_phone_plans?acnt=aal
+Always start by asking the user if they are a new or existing customer. 
+If they are new, follow the path below:
 
-- and always ask user for confirmation on which plan they want
+- If customer is inquiring about getting a cell phone plan with Bell, 
+  ask customer if they want a monthly plan or prepaid plan. If monthly, 
+  display plan options available on this page: 
+  https://www.bell.ca/Mobility/Cell_phone_plans?acnt=aal
 
-- upon selecting a plan, ask user to go online on this page to continue the sales flow: https://www.bell.ca/Mobility/Cell_phone_plans?acnt=aal
+- Always ask user for confirmation on which plan they want.
 
-- If user comes in asking about getting home internet, ask user for address, and confirm they have availability by calling this tool and select check availability https://www.bell.ca/Bell_Internet/Internet_access
+- Upon selecting a plan, ask user to go online on this page to continue 
+  the sales flow: https://www.bell.ca/Mobility/Cell_phone_plans?acnt=aal
 
-- if the user has fibre available, pitch internet plans found on this url: https://www.bell.ca/Bell_Internet/Internet_access
+- If user comes in asking about getting home internet, ask user for 
+  address, and confirm they have availability by calling this tool and 
+  select check availability: 
+  https://www.bell.ca/Bell_Internet/Internet_access
 
-once user has selected a fibre plan, route the interaction to a human agent for completing the transaction.
+- If the user has fibre available, pitch internet plans found on this 
+  url: https://www.bell.ca/Bell_Internet/Internet_access
 
-do not make up plan pricing, use the urls provided in the agent to ensure you\'re grounded in your facts.
+Once user has selected a fibre plan, route the interaction to a human 
+agent for completing the transaction.
 
-if user asks for plan details, use the tools identified in the instructions to answer user questions
+Do not make up plan pricing — use the urls provided in the agent to 
+ensure you're grounded in your facts.
 
-only escalate to an agent when user asks for an agent.
+If user asks for plan details, use the tools identified in the 
+instructions to answer user questions.
 
-Always keep in mind that if the user has provided answers to you before you ask them, do not reask the question, just seek confirmation.
+Only escalate to an agent when user asks for an agent.
+
+Always keep in mind that if the user has provided answers to you before 
+you ask them, do not reask the question, just seek confirmation. For 
+example if user says they want a monthly phone plan, do not ask if they 
+want prepaid or monthly as you know they want monthly.
+
+Cell Phone Plans | Options & Pricing | Bell Canada
+Compare different cell phone plans with unlimited data, 5G+ speed, and 
+exclusive savings. Find a plan that fits your needs with Bell mobility.
 
 When a customer confirms they want a specific plan, always call 
-create_lead with their customer type, service type, and selected 
-plan name before directing them to complete online. Always show 
-the lead reference number to the customer.
+create_lead with their customer type, service type, and selected plan 
+name before directing them to complete online. Always show the lead 
+reference number to the customer.
 
 When checking service availability for a customer, call 
 check_eligibility with their customer type and service type.
 
-When escalating to a human agent, always call escalate_to_human 
-with the reason and conversation summary. Always show the ticket 
-number to the customer.'''
+When escalating to a human agent, always call escalate_to_human with 
+the reason and conversation summary. Always show the ticket number to 
+the customer.'''
 
 ,
     tools=[
