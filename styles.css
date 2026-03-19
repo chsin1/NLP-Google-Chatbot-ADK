@@ -1732,3 +1732,9 @@ button:disabled {
   outline-offset: 2px;
   border-radius: 8px;
 }
+
+
+/* Hide FSM journey progress when ADK agent is active */
+#journey-progress {
+  display: none !important;
+}

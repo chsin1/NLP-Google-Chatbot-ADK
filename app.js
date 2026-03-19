@@ -6886,6 +6886,7 @@ function renderStep(step) {
   clearQuickActions();
   renderBasket();
   renderCarouselPage();
+  if (!state.adkGreeted) updateJourneyProgress(step);
   updateJourneyProgress(step);
   setStatus();
   resetChatInputHint();
@@ -10933,7 +10934,7 @@ function boot() {
   closeChatWidget();
   renderPrivacyPanel();
   validateOfferCoverage();
-  updateJourneyProgress(FLOW_STEPS.INIT_CONNECTING);
+  if (!state.adkGreeted) updateJourneyProgress(FLOW_STEPS.INIT_CONNECTING);
   applyTheme(savedTheme?.mode || "system", { persist: false });
   watchSystemThemeChanges();
   updateLlmStatusUi({ configured: false, connected: false, model: null });
