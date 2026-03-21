@@ -106,12 +106,14 @@ NLP-Google-Chatbot/
 ## Quick Start
 
 ### Prerequisites
-
+### Prerequisites
 - Node.js 18+
-- Python 3.10+ (3.9 works with minor limitations — MCP tools unavailable)
-- Google Cloud account with Vertex AI enabled
+- Python 3.9+ (3.10+ recommended)
 - Gemini API key from [aistudio.google.com](https://aistudio.google.com)
-- gcloud CLI authenticated
+
+> **For production deployment only:** Google Cloud account with Vertex AI 
+> enabled and gcloud CLI authenticated. Not required for local POC demo.
+
 
 ### 1 — Clone and install
 
@@ -148,15 +150,21 @@ LLM_USAGE_LOG_PATH=./logs/llm-usage.log
 SSE_ASSIST_ENABLED=true
 ```
 
-Get your Gemini API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) — create it under the same GCP project.
+Get your Gemini API key from aistudio.google.com/apikey
 
-### 3 — Authenticate gcloud
+IMPORTANT: Create .env.local manually — do NOT copy .env.example directly.
+.env.example is a template with empty values. Your .env.local must have the
+actual API key filled in. The file is gitignored and will not be in the repo.
 
-```bash
-gcloud auth login
-gcloud auth application-default login
-gcloud config set project YOUR_PROJECT_ID
-gcloud auth application-default set-quota-project YOUR_PROJECT_ID
+### 3 — Verify your .env.local is correct
+Run this to confirm your API key is loading properly:
+
+source venv/bin/activate
+python3 -c "from dotenv import load_dotenv; import os; load_dotenv('.env.local'); print(os.getenv('GOOGLE_API_KEY', 'NOT FOUND'))"
+
+If it prints your API key — you are ready.
+If it prints NOT FOUND — check that .env.local exists in the repo root
+and contains GOOGLE_API_KEY=your_actual_key_here
 ```
 
 ### 4 — Start both servers
