@@ -1,3 +1,15 @@
+# Bell Canada Sales Assistant — AI Agent POC
+# MMAI 891 | March 2026
+# 
+# Google ADK agent with 5 tools:
+#   - GoogleSearchTool (sub-agent)
+#   - UrlContextTool (sub-agent)  
+#   - check_eligibility (FunctionTool)
+#   - create_lead (FunctionTool)
+#   - escalate_to_human (FunctionTool)
+#
+# Run: uvicorn agent_api:app --port 8000 --reload
+# 
 from dotenv import load_dotenv
 load_dotenv(".env.local")
 

@@ -1,3 +1,7 @@
+# FastAPI bridge — connects Node.js server to Google ADK agent
+# Receives messages from /api/chat-assist, runs ADK runner, returns response
+# Run alongside server.mjs for full stack demo
+
 from dotenv import load_dotenv
 load_dotenv(".env.local")
 
