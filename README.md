@@ -1,8 +1,24 @@
-# Bell Canada Sales Assistant — AI Agent POC
+# A conversational AI sales agent for Bell Canada (POC)
 
 **MMAI 891 | Academic Proof of Concept | March 2026**
-
 A conversational AI sales agent for Bell Canada built on Google ADK (Agent Development Kit) and powered by Gemini 2.5 Pro. The agent autonomously guides new and existing customers through plan discovery, personalized recommendations, lead capture, and human handoff — without hardcoded scripts or decision trees.
+
+## About This Repository
+
+This repository contains two distinct layers:
+
+**New — AI Agent Integration (this project's contribution):**
+- `agent.py` — Google ADK agent with 5 autonomous tools
+- `agent_api.py` — FastAPI bridge connecting UI to ADK
+- ADK integration changes in `server.mjs` and `app.js`
+
+**Original — Bell Chat UI (prior team codebase):**
+- `app.js` — existing deterministic chatbot UI (10,000 lines)
+- `shared/` — FSM business logic modules
+- `tests/` — unit tests for deterministic logic
+
+The AI agent bypasses the original FSM entirely via a single guard in `transitionTo()`. The original codebase is preserved 
+to demonstrate the before/after contrast documented in the report.
 
 ---
 
